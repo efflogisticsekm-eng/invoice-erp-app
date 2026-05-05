@@ -9,6 +9,7 @@ from openai import OpenAI
 import pymupdf  # PyMuPDF (fitz)
 from dotenv import load_dotenv
 import gspread
+import requests
 
 # Load environment variables (useful for local development)
 load_dotenv()
@@ -165,7 +166,44 @@ def extract_data_from_image(base64_image):
     )
     
     result_text = response.choices[0].message.content
-    return json.loads(result_text)
+    result = json.loads(result_text)
+    
+    # --- POST-PROCESSING ---
+    # 1. Enforce 15-character GSTIN
+    for gstin_key in ["Consignor GSTIN", "Ship to Party / Consignee GSTIN"]:
+        val = result.get(gstin_key, "")
+        if val:
+            cleaned_val = str(val).strip()
+            if len(cleaned_val) != 15:
+                result[gstin_key] = ""
+            else:
+                result[gstin_key] = cleaned_val
+                
+    # 2. Fetch District/State from Pincode if missing
+    pincode = result.get("PIN CODE", "")
+    dist_empty = not result.get("DISTRICT", "").strip()
+    state_empty = not result.get("STATE", "").strip()
+    
+    if (dist_empty or state_empty) and pincode and str(pincode).strip().isdigit() and len(str(pincode).strip()) == 6:
+        try:
+            res = requests.get(f"https://api.postalpincode.in/pincode/{str(pincode).strip()}", timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                if data and isinstance(data, list) and data[0].get("Status") == "Success":
+                    post_offices = data[0].get("PostOffice", [])
+                    if post_offices:
+                        fetched_district = post_offices[0].get("District", "")
+                        fetched_state = post_offices[0].get("State", "")
+                        
+                        # Apply to result if empty
+                        if dist_empty and fetched_district:
+                            result["DISTRICT"] = f"{fetched_district} 🟡"
+                        if state_empty and fetched_state:
+                            result["STATE"] = f"{fetched_state} 🟡"
+        except Exception as e:
+            pass # Silently fail and rely on extracted data if API fails
+
+    return result
 
 def is_duplicate(sheet_data, new_data):
     if not sheet_data:
