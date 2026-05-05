@@ -123,7 +123,7 @@ def extract_data_from_image(base64_image):
         messages=[
             {
                 "role": "system",
-                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice image. Return empty strings if a field is not found. CRITICAL RULES:\n1. GSTIN numbers MUST be exactly 15 alphanumeric characters. Verify the GSTIN format (e.g., 2 digits state code, 10 char PAN, 1 entity code, Z, 1 checksum). If a GSTIN does not have exactly 15 characters, leave it blank.\n2. The 'PLACE' field MUST NOT contain the name of the state (e.g., do not put 'Kerala' in the PLACE field, put it in STATE)."
+                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice image. Return empty strings if a field is not found. CRITICAL RULES:\n1. GSTIN numbers MUST be exactly 15 alphanumeric characters. Verify the GSTIN format. If a GSTIN does not have exactly 15 characters, leave it blank.\n2. The 'PLACE' field MUST NOT contain the name of the state.\n3. For 'AREA', intelligently extract the local area name or locality from the address if present."
             },
             {
                 "role": "user",
@@ -204,10 +204,14 @@ def is_duplicate(sheet_data, new_data):
     return False
 
 # --- 4. MAIN UI ---
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+
 uploaded_files = st.file_uploader(
     "Drag and drop your invoices here", 
     type=["pdf", "png", "jpg", "jpeg"], 
-    accept_multiple_files=True
+    accept_multiple_files=True,
+    key=f"uploader_{st.session_state.uploader_key}"
 )
 
 if uploaded_files:
@@ -295,3 +299,8 @@ if uploaded_files:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
+            
+            if st.button("🧹 Clear Files & Start Over", use_container_width=True):
+                st.session_state.uploader_key += 1
+                st.rerun()
+
