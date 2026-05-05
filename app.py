@@ -9,7 +9,6 @@ from openai import OpenAI
 import pymupdf  # PyMuPDF (fitz)
 from dotenv import load_dotenv
 import gspread
-import requests
 
 # Load environment variables (useful for local development)
 load_dotenv()
@@ -179,30 +178,6 @@ def extract_data_from_image(base64_image):
             else:
                 result[gstin_key] = cleaned_val
                 
-    # 2. Fetch District/State from Pincode if missing
-    pincode = result.get("PIN CODE", "")
-    dist_empty = not result.get("DISTRICT", "").strip()
-    state_empty = not result.get("STATE", "").strip()
-    
-    if (dist_empty or state_empty) and pincode and str(pincode).strip().isdigit() and len(str(pincode).strip()) == 6:
-        try:
-            res = requests.get(f"https://api.postalpincode.in/pincode/{str(pincode).strip()}", timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-                if data and isinstance(data, list) and data[0].get("Status") == "Success":
-                    post_offices = data[0].get("PostOffice", [])
-                    if post_offices:
-                        fetched_district = post_offices[0].get("District", "")
-                        fetched_state = post_offices[0].get("State", "")
-                        
-                        # Apply to result if empty
-                        if dist_empty and fetched_district:
-                            result["DISTRICT"] = f"{fetched_district} 🟡"
-                        if state_empty and fetched_state:
-                            result["STATE"] = f"{fetched_state} 🟡"
-        except Exception as e:
-            pass # Silently fail and rely on extracted data if API fails
-
     return result
 
 def is_duplicate(sheet_data, new_data):
@@ -211,18 +186,18 @@ def is_duplicate(sheet_data, new_data):
         
     new_gstin = str(new_data.get("Ship to Party / Consignee GSTIN", "")).strip().lower()
     new_consignee = str(new_data.get("Ship to Party / Consignee", "")).strip().lower()
-    new_address = str(new_data.get("ADDRESS", "")).strip().lower()
     
     for row in sheet_data:
         existing_gstin = str(row.get("Ship to Party / Consignee GSTIN", "")).strip().lower()
         existing_consignee = str(row.get("Ship to Party / Consignee", "")).strip().lower()
-        existing_address = str(row.get("ADDRESS", "")).strip().lower()
         
+        # Exact match on GSTIN
         if new_gstin and new_gstin not in ["", "none", "nan", "null"]:
             if new_gstin == existing_gstin:
                 return True
-        elif new_consignee and new_address and new_consignee not in ["", "none", "nan", "null"]:
-            if new_consignee == existing_consignee and new_address == existing_address:
+        # Or exact match on Consignee Name
+        elif new_consignee and new_consignee not in ["", "none", "nan", "null"]:
+            if new_consignee == existing_consignee:
                 return True
                 
     return False
@@ -270,6 +245,13 @@ if uploaded_files:
                 # Extract Data
                 base64_img = encode_image_base64(image_bytes)
                 extracted_data = extract_data_from_image(base64_img)
+                
+                # --- STRICT GSTIN RULE: Skip entirely if Consignee GSTIN is invalid/empty ---
+                if not extracted_data.get("Ship to Party / Consignee GSTIN", "").strip():
+                    st.warning(f"⚠️ Skipped {file_name}: No valid 15-digit Consignee GSTIN found.")
+                    error_files.append(file_name)
+                    progress_bar.progress((index + 1) / total_files)
+                    continue
                 
                 # Duplicate Check
                 if worksheet and is_duplicate(sheet_records, extracted_data):
