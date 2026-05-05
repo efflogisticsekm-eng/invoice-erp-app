@@ -18,7 +18,11 @@ st.set_page_config(page_title="Invoice Extraction ERP", page_icon="🧾", layout
 
 # Custom CSS for aesthetics
 st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
+    html, body, [class*="css"], [class*="st-"] {
+        font-family: 'Inter', sans-serif !important;
+    }
     .main-header {
         font-size: 2.5rem;
         color: #1E3A8A;
@@ -119,7 +123,7 @@ def extract_data_from_image(base64_image):
         messages=[
             {
                 "role": "system",
-                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice image. Return empty strings if a field is not found."
+                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice image. Return empty strings if a field is not found. CRITICAL RULES:\n1. GSTIN numbers MUST be exactly 15 alphanumeric characters. Verify the GSTIN format (e.g., 2 digits state code, 10 char PAN, 1 entity code, Z, 1 checksum). If a GSTIN does not have exactly 15 characters, leave it blank.\n2. The 'PLACE' field MUST NOT contain the name of the state (e.g., do not put 'Kerala' in the PLACE field, put it in STATE)."
             },
             {
                 "role": "user",
@@ -146,10 +150,16 @@ def extract_data_from_image(base64_image):
                     "type": "object",
                     "properties": {
                         "Consignor": {"type": "string"},
-                        "Consignor GSTIN": {"type": "string"},
+                        "Consignor GSTIN": {
+                            "type": "string",
+                            "description": "GSTIN must be exactly 15 alphanumeric characters. Leave blank if invalid."
+                        },
                         "Ship to Party / Consignee": {"type": "string"},
                         "Consignee Code": {"type": "string"},
-                        "Ship to Party / Consignee GSTIN": {"type": "string"},
+                        "Ship to Party / Consignee GSTIN": {
+                            "type": "string",
+                            "description": "GSTIN must be exactly 15 alphanumeric characters. Leave blank if invalid."
+                        },
                         "PLACE": {"type": "string"},
                         "AREA": {"type": "string"},
                         "DISTRICT": {"type": "string"},
