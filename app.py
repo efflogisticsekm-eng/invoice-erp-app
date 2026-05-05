@@ -18,11 +18,7 @@ st.set_page_config(page_title="Invoice Extraction ERP", page_icon="🧾", layout
 
 # Custom CSS for aesthetics
 st.markdown("""
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
-    html, body, [class*="css"], [class*="st-"] {
-        font-family: 'Inter', sans-serif !important;
-    }
     .main-header {
         font-size: 2.5rem;
         color: #1E3A8A;
@@ -33,16 +29,6 @@ st.markdown("""
         font-size: 1.2rem;
         color: #6B7280;
         margin-bottom: 2rem;
-    }
-    .stButton>button {
-        background-color: #2563EB;
-        color: white;
-        border-radius: 8px;
-        padding: 0.5rem 1rem;
-        font-weight: 600;
-    }
-    .stButton>button:hover {
-        background-color: #1D4ED8;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -123,7 +109,7 @@ def extract_data_from_image(base64_image):
         messages=[
             {
                 "role": "system",
-                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice image. Return empty strings if a field is not found. CRITICAL RULES:\n1. GSTIN numbers MUST be exactly 15 alphanumeric characters. Verify the GSTIN format. If a GSTIN does not have exactly 15 characters, leave it blank.\n2. The 'PLACE' field MUST NOT contain the name of the state.\n3. For 'AREA', intelligently extract the local area name or locality from the address if present."
+                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice image. Return empty strings if a field is not found. CRITICAL RULES:\n1. Consignee GSTIN is the most important. GSTIN numbers MUST be exactly 15 alphanumeric characters. If it has 14 digits or any other length, YOU MUST LEAVE IT BLANK. Do not guess.\n2. The 'PLACE' field MUST NOT contain the name of the state or the district (e.g., do not put 'Kozhikode' in PLACE if it is a district). Extract the specific local place/town.\n3. For 'AREA', if no separate area is found in the address, you can repeat the 'PLACE' value."
             },
             {
                 "role": "user",
@@ -303,4 +289,3 @@ if uploaded_files:
             if st.button("🧹 Clear Files & Start Over", use_container_width=True):
                 st.session_state.uploader_key += 1
                 st.rerun()
-
