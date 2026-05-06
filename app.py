@@ -44,11 +44,12 @@ MASTER_COLUMNS = [
 ]
 
 ALL_INVOICES_COLUMNS = [
-    "Date", "Invoice No", "Lr Number", "Uploaded Date", "Uploaded Time", "Uploaded Doc",
+    "Date", "Invoice No", "Lr Number", 
+    "Seal Ok", "Sign ok", "Date Ok", "Consignee seal matched", "Remarks from Consignee",
+    "Uploaded Date", "Uploaded Time", "Uploaded Doc",
     "Consignor", "Consignor GSTIN", "Ship to Party / Consignee", "Consignee Code",
     "Ship to Party / Consignee GSTIN", "PLACE", "AREA", "DISTRICT", "STATE", 
-    "PIN CODE", "PHONE NUMBER", "ADDRESS", "Remarks", "Remarks from Consignee",
-    "Seal Ok", "Sign ok", "Date Ok", "Consignee seal matched"
+    "PIN CODE", "PHONE NUMBER", "ADDRESS", "Remarks"
 ]
 
 def map_to_db_row(extracted_data, is_master=False):
@@ -341,12 +342,27 @@ if uploaded_files:
         if added_results:
             df = pd.DataFrame(added_results, columns=ALL_INVOICES_COLUMNS)
             st.success("✅ Extraction & Validation Complete!")
-            st.dataframe(df, use_container_width=True)
+            
+            # Highlight 'No' in specific columns and any text in Remarks
+            def highlight_no(val):
+                return 'background-color: #ffcccc; color: red' if val == 'No' else ''
+                
+            def highlight_remarks(val):
+                return 'background-color: #ffffcc; color: #b38f00' if str(val).strip() else ''
+            
+            try:
+                styled_df = df.style.map(highlight_no, subset=['Seal Ok', 'Consignee seal matched']) \
+                                    .map(highlight_remarks, subset=['Remarks from Consignee'])
+            except AttributeError:
+                styled_df = df.style.applymap(highlight_no, subset=['Seal Ok', 'Consignee seal matched']) \
+                                    .applymap(highlight_remarks, subset=['Remarks from Consignee'])
+                
+            st.dataframe(styled_df, use_container_width=True)
             
             # Excel Download
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Invoices')
+                styled_df.to_excel(writer, index=False, sheet_name='Invoices')
                 # Also create a Master sheet
                 df_master = pd.DataFrame(added_results, columns=MASTER_COLUMNS)
                 df_master.to_excel(writer, index=False, sheet_name='Master')
