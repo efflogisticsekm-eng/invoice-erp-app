@@ -378,3 +378,59 @@ if uploaded_files:
             if st.button("🧹 Clear Files & Start Over", use_container_width=True):
                 st.session_state.uploader_key += 1
                 st.rerun()
+
+# --- DATABASE HISTORY DOWNLOAD ---
+st.markdown("---")
+st.subheader("🗄️ Full Database History")
+st.write("Download all previously processed invoices with formatting.")
+
+if st.button("Download Full History as Excel", use_container_width=True):
+    if supabase:
+        try:
+            with st.spinner("Fetching data from Supabase..."):
+                response = supabase.table("all_invoices").select("*").execute()
+                all_records = response.data
+                
+                if all_records:
+                    # Reverse map db_keys back to display columns
+                    reverse_map = {col.lower().replace(" / ", "_").replace(" ", "_"): col for col in ALL_INVOICES_COLUMNS}
+                    
+                    formatted_records = []
+                    for row in all_records:
+                        new_row = {}
+                        for col in ALL_INVOICES_COLUMNS:
+                            db_key = col.lower().replace(" / ", "_").replace(" ", "_")
+                            new_row[col] = row.get(db_key, "")
+                        formatted_records.append(new_row)
+                        
+                    history_df = pd.DataFrame(formatted_records, columns=ALL_INVOICES_COLUMNS)
+                    
+                    def highlight_no(val):
+                        return 'background-color: #ffcccc; color: red' if val == 'No' else ''
+                    def highlight_remarks(val):
+                        return 'background-color: #ffffcc; color: #b38f00' if str(val).strip() else ''
+                        
+                    try:
+                        styled_hist = history_df.style.map(highlight_no, subset=['Seal Ok', 'Consignee seal matched']) \
+                                            .map(highlight_remarks, subset=['Remarks from Consignee'])
+                    except AttributeError:
+                        styled_hist = history_df.style.applymap(highlight_no, subset=['Seal Ok', 'Consignee seal matched']) \
+                                            .applymap(highlight_remarks, subset=['Remarks from Consignee'])
+                    
+                    out_hist = io.BytesIO()
+                    with pd.ExcelWriter(out_hist, engine='openpyxl') as writer:
+                        styled_hist.to_excel(writer, index=False, sheet_name='All_Invoices')
+                        
+                    st.download_button(
+                        label="📥 Click Here to Download Full History",
+                        data=out_hist.getvalue(),
+                        file_name="All_Invoices_History.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                else:
+                    st.info("No records found in database.")
+        except Exception as e:
+            st.error(f"Error fetching history: {e}")
+    else:
+        st.error("Supabase not connected.")
