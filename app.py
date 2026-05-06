@@ -40,12 +40,12 @@ st.markdown('<p class="sub-header">Upload multiple invoices. Validates against G
 MASTER_COLUMNS = [
     "Consignor", "Consignor GSTIN", "Ship to Party / Consignee", "Consignee Code",
     "Ship to Party / Consignee GSTIN", "PLACE", "AREA", "DISTRICT", "STATE", 
-    "PIN CODE", "PHONE NUMBER", "ADDRESS", "Remarks"
+    "PIN CODE", "PHONE NUMBER", "ADDRESS"
 ]
 
 ALL_INVOICES_COLUMNS = [
-    "Date", "Invoice No", "Lr Number", "Consignor", "Consignor GSTIN", 
-    "Ship to Party / Consignee", "Consignee Code",
+    "Date", "Invoice No", "Lr Number", "Uploaded Date", "Uploaded Time", "Uploaded Doc",
+    "Consignor", "Consignor GSTIN", "Ship to Party / Consignee", "Consignee Code",
     "Ship to Party / Consignee GSTIN", "PLACE", "AREA", "DISTRICT", "STATE", 
     "PIN CODE", "PHONE NUMBER", "ADDRESS", "Remarks", "Remarks from Consignee",
     "Seal Ok", "Sign ok", "Date Ok", "Consignee seal matched"
@@ -101,7 +101,14 @@ sheet_records = []
 if gc and sheet_url:
     try:
         sh = gc.open_by_url(sheet_url)
-        worksheet = sh.sheet1
+        try:
+            worksheet = sh.worksheet("Consignee Master")
+        except gspread.WorksheetNotFound:
+            worksheet = sh.sheet1
+            try:
+                worksheet.update_title("Consignee Master")
+            except Exception:
+                pass
         
         # Ensure headers exist for Master
         existing_data = worksheet.get_all_records()
@@ -139,14 +146,14 @@ def extract_data_from_image(base64_image):
         messages=[
             {
                 "role": "system",
-                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice or Lorry Receipt (LR) image. Return empty strings if a field is not found. CRITICAL RULES:\n1. Consignee GSTIN is important. GSTIN numbers MUST be exactly 15 alphanumeric characters. If it has 14 digits or any other length, YOU MUST LEAVE IT BLANK. Do not guess.\n2. The 'PLACE' field MUST NOT contain the name of the state or the district.\n3. For 'AREA', if no separate area is found, repeat the 'PLACE' value.\n4. For 'Seal Ok', 'Sign ok', 'Date Ok', 'Consignee seal matched', look at the POD (Proof of Delivery) or receiver's section, usually at the bottom, and answer with 'Yes' or 'No'.\n5. For 'Remarks from Consignee', look for handwritten notes (e.g., 'short 1 box')."
+                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice or Lorry Receipt (LR) image. Return empty strings if a field is not found. CRITICAL RULES:\n1. Consignee GSTIN MUST be exactly 15 alphanumeric characters. Leave blank if not.\n2. 'PLACE' MUST NOT contain the state or district.\n3. 'AREA' can repeat 'PLACE' if not found.\n4. For 'Seal Ok', 'Sign ok', 'Date Ok', 'Consignee seal matched', you MUST look at the POD (Proof of Delivery) or receiver's signature section on BOTH Invoices AND LR Copies, and answer 'Yes' or 'No'.\n5. 'Remarks from Consignee' MUST ONLY capture handwritten notes made by a pen (e.g., 'short 1 box'). Leave completely blank if there are no handwritten remarks.\n6. For 'Uploaded Doc', analyze the image: answer 'Inv POD' if it is an Invoice, or 'LR POD' if it is a Lorry Receipt (LR)."
             },
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "text",
-                        "text": "Extract the following details: Date, Invoice No, Lr Number, Consignor, Consignor GSTIN, Ship to Party / Consignee, Consignee Code, Ship to Party / Consignee GSTIN, PLACE, AREA, DISTRICT, STATE, PIN CODE, PHONE NUMBER, ADDRESS, Remarks, Remarks from Consignee, Seal Ok, Sign ok, Date Ok, Consignee seal matched."
+                        "text": "Extract the following details: Date, Invoice No, Lr Number, Uploaded Doc, Consignor, Consignor GSTIN, Ship to Party / Consignee, Consignee Code, Ship to Party / Consignee GSTIN, PLACE, AREA, DISTRICT, STATE, PIN CODE, PHONE NUMBER, ADDRESS, Remarks, Remarks from Consignee, Seal Ok, Sign ok, Date Ok, Consignee seal matched."
                     },
                     {
                         "type": "image_url",
@@ -168,6 +175,10 @@ def extract_data_from_image(base64_image):
                         "Date": {"type": "string"},
                         "Invoice No": {"type": "string"},
                         "Lr Number": {"type": "string"},
+                        "Uploaded Doc": {
+                            "type": "string",
+                            "description": "'Inv POD' if invoice, 'LR POD' if lorry receipt."
+                        },
                         "Consignor": {"type": "string"},
                         "Consignor GSTIN": {
                             "type": "string",
@@ -298,6 +309,14 @@ if uploaded_files:
                 # Extract Data
                 base64_img = encode_image_base64(image_bytes)
                 extracted_data = extract_data_from_image(base64_img)
+                
+                # Inject Upload Date and Time
+                import datetime
+                import pytz
+                tz = pytz.timezone('Asia/Kolkata')
+                now = datetime.datetime.now(tz)
+                extracted_data["Uploaded Date"] = now.strftime('%d/%m/%Y')
+                extracted_data["Uploaded Time"] = now.strftime('%I:%M %p')
                 
                 # --- ADD TO ALL INVOICES FIRST (No GSTIN validation required here) ---
                 if all_invoices_sheet:
