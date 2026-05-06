@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 import gspread
 
 # Load environment variables (useful for local development)
-load_dotenv()
+load_dotenv(override=True)
 
 # Streamlit Page Config
 st.set_page_config(page_title="Invoice Extraction ERP", page_icon="🧾", layout="wide")
@@ -40,19 +40,24 @@ st.markdown('<p class="sub-header">Upload multiple invoices. Validates against G
 COLUMNS = [
     "Consignor", "Consignor GSTIN", "Ship to Party / Consignee", "Consignee Code",
     "Ship to Party / Consignee GSTIN", "PLACE", "AREA", "DISTRICT", "STATE", 
-    "PIN CODE", "PHONE NUMBER", "ADDRESS", "Remarks"
+    "PIN CODE", "PHONE NUMBER", "ADDRESS", "Remarks",
+    "Seal Ok", "Sign ok", "Date Ok", "Consignee seal matched"
 ]
 
 # --- 1. SETUP OPENAI ---
 API_KEY = os.getenv("OPENAI_API_KEY")
-if not API_KEY:
-    try:
-        API_KEY = st.secrets["OPENAI_API_KEY"]
-    except:
-        pass
 
 if not API_KEY:
-    st.error("OpenAI API Key not found. Please set it in your environment or Streamlit secrets.")
+    st.sidebar.warning("OpenAI API Key not found in environment.")
+    API_KEY = st.sidebar.text_input("Enter OpenAI API Key (sk-...):", type="password")
+    if API_KEY:
+        with open(".env", "a") as f:
+            f.write(f"\nOPENAI_API_KEY={API_KEY}\n")
+        os.environ["OPENAI_API_KEY"] = API_KEY
+        st.sidebar.success("API Key saved! It will load automatically next time.")
+
+if not API_KEY:
+    st.error("OpenAI API Key not found. Please enter it in the sidebar to continue.")
     st.stop()
 
 client = OpenAI(api_key=API_KEY)
@@ -73,9 +78,17 @@ gc = init_gspread()
 
 # Google Sheet Config
 st.sidebar.header("Google Sheets Configuration")
-sheet_url = st.sidebar.text_input("Enter Google Sheet URL:", value=os.getenv("GOOGLE_SHEET_URL", ""))
+default_sheet_url = os.getenv("GOOGLE_SHEET_URL", "")
+sheet_url = st.sidebar.text_input("Enter Google Sheet URL:", value=default_sheet_url)
+
+if sheet_url and sheet_url != default_sheet_url:
+    with open(".env", "a") as f:
+        f.write(f"\nGOOGLE_SHEET_URL={sheet_url}\n")
+    os.environ["GOOGLE_SHEET_URL"] = sheet_url
+    st.sidebar.success("Sheet URL saved automatically!")
 
 worksheet = None
+all_invoices_sheet = None
 sheet_records = []
 
 if gc and sheet_url:
@@ -90,7 +103,15 @@ if gc and sheet_url:
             existing_data = []
             
         sheet_records = existing_data
-        st.sidebar.success(f"Connected! Found {len(sheet_records)} existing records.")
+        
+        # Initialize "All Invoices" sheet
+        try:
+            all_invoices_sheet = sh.worksheet("All Invoices")
+        except gspread.WorksheetNotFound:
+            all_invoices_sheet = sh.add_worksheet(title="All Invoices", rows="1000", cols="20")
+            all_invoices_sheet.append_row(COLUMNS)
+            
+        st.sidebar.success(f"Connected! Found {len(sheet_records)} existing records in Master.")
     except Exception as e:
         st.sidebar.error(f"Could not open Google Sheet: {e}")
         st.sidebar.info("Ensure the Service Account Email is shared as 'Editor' on the Google Sheet.")
@@ -109,14 +130,14 @@ def extract_data_from_image(base64_image):
         messages=[
             {
                 "role": "system",
-                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice image. Return empty strings if a field is not found. CRITICAL RULES:\n1. Consignee GSTIN is the most important. GSTIN numbers MUST be exactly 15 alphanumeric characters. If it has 14 digits or any other length, YOU MUST LEAVE IT BLANK. Do not guess.\n2. The 'PLACE' field MUST NOT contain the name of the state or the district (e.g., do not put 'Kozhikode' in PLACE if it is a district). Extract the specific local place/town.\n3. For 'AREA', if no separate area is found in the address, you can repeat the 'PLACE' value."
+                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice image. Return empty strings if a field is not found. CRITICAL RULES:\n1. Consignee GSTIN is the most important. GSTIN numbers MUST be exactly 15 alphanumeric characters. If it has 14 digits or any other length, YOU MUST LEAVE IT BLANK. Do not guess.\n2. The 'PLACE' field MUST NOT contain the name of the state or the district (e.g., do not put 'Kozhikode' in PLACE if it is a district). Extract the specific local place/town.\n3. For 'AREA', if no separate area is found in the address, you can repeat the 'PLACE' value.\n4. For 'Seal Ok', 'Sign ok', 'Date Ok', 'Consignee seal matched', look at the POD (Proof of Delivery) section on the invoice, usually at the bottom, and answer with 'Yes' or 'No'."
             },
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "text",
-                        "text": "Extract the following details: Consignor, Consignor GSTIN, Ship to Party / Consignee, Consignee Code, Ship to Party / Consignee GSTIN, PLACE, AREA, DISTRICT, STATE, PIN CODE, PHONE NUMBER, ADDRESS, Remarks."
+                        "text": "Extract the following details: Consignor, Consignor GSTIN, Ship to Party / Consignee, Consignee Code, Ship to Party / Consignee GSTIN, PLACE, AREA, DISTRICT, STATE, PIN CODE, PHONE NUMBER, ADDRESS, Remarks, Seal Ok, Sign ok, Date Ok, Consignee seal matched."
                     },
                     {
                         "type": "image_url",
@@ -153,7 +174,23 @@ def extract_data_from_image(base64_image):
                         "PIN CODE": {"type": "string"},
                         "PHONE NUMBER": {"type": "string"},
                         "ADDRESS": {"type": "string"},
-                        "Remarks": {"type": "string"}
+                        "Remarks": {"type": "string"},
+                        "Seal Ok": {
+                            "type": "string",
+                            "description": "'Yes' if consignee seal/stamp is present, else 'No'"
+                        },
+                        "Sign ok": {
+                            "type": "string",
+                            "description": "'Yes' if consignee signature is present, else 'No'"
+                        },
+                        "Date Ok": {
+                            "type": "string",
+                            "description": "'Yes' if date is written near the consignee signature/seal, else 'No'"
+                        },
+                        "Consignee seal matched": {
+                            "type": "string",
+                            "description": "'Yes' if the name on the consignee seal matches the Consignee Name, else 'No'"
+                        }
                     },
                     "required": COLUMNS,
                     "additionalProperties": False
@@ -265,6 +302,11 @@ if uploaded_files:
                         sheet_records.append(extracted_data) # Update local cache
                         
                     added_results.append(extracted_data)
+                
+                # Append to All Invoices sheet regardless of duplicate
+                if all_invoices_sheet:
+                    row_data_all = [extracted_data.get(col, "") for col in COLUMNS]
+                    all_invoices_sheet.append_row(row_data_all)
                     
             except Exception as e:
                 st.error(f"Error processing {file_name}: {e}")
