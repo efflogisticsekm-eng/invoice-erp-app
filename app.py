@@ -111,7 +111,7 @@ def extract_data_from_image(base64_image):
         messages=[
             {
                 "role": "system",
-                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice or Lorry Receipt (LR) image. Return empty strings if a field is not found. CRITICAL RULES:\n1. Consignee GSTIN MUST be exactly 15 alphanumeric characters. Leave blank if not.\n2. 'PLACE' MUST NOT contain the state or district.\n3. 'AREA' can repeat 'PLACE' if not found.\n4. For 'Seal Ok', 'Sign ok', 'Date Ok', 'Consignee seal matched', you MUST look at the POD (Proof of Delivery) or receiver's signature section on BOTH Invoices AND LR Copies, and answer 'Yes' or 'No'.\n5. 'Remarks from Consignee' MUST ONLY capture handwritten notes made by a pen (e.g., 'short 1 box'). Leave completely blank if there are no handwritten remarks.\n6. For 'Uploaded Doc', analyze the image: answer 'Inv POD' if it is an Invoice, or 'LR POD' if it is a Lorry Receipt (LR)."
+                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice or Lorry Receipt (LR) image. Return empty strings if a field is not found. CRITICAL RULES:\n1. Consignee GSTIN MUST be exactly 15 alphanumeric characters. Leave blank if not.\n2. 'Date' MUST be the Invoice Date (or LR Date) in DD/MM/YYYY format. Do NOT use the system created at date.\n3. For 'Uploaded Doc', analyze the image: answer 'LR POD' if it has the 'EFF' logo. Answer 'Inv POD' if it does NOT have the 'EFF' logo.\n4. For 'PLACE, AREA, DISTRICT': Only valid official District names can be placed in the 'DISTRICT' column. NEVER put a local place name (like a street or village) in the 'DISTRICT' column. If only a District name is provided in the address (and no other place names), you may use the District name for 'PLACE' and 'AREA' as well. If a local place is given (e.g. KALAYAPURAM P.O), put it in 'PLACE', and infer its actual official District (e.g. Kollam) to put in the 'DISTRICT' column.\n5. For 'Seal Ok', 'Sign ok', 'Date Ok', 'Consignee seal matched', you MUST look at the POD (Proof of Delivery) or receiver's signature section on BOTH Invoices AND LR Copies, and answer 'Yes' or 'No'.\n6. 'Remarks from Consignee' MUST ONLY capture handwritten notes made by a pen (e.g., 'short 1 box'). Leave completely blank if there are no handwritten remarks."
             },
             {
                 "role": "user",
@@ -137,12 +137,15 @@ def extract_data_from_image(base64_image):
                 "schema": {
                     "type": "object",
                     "properties": {
-                        "Date": {"type": "string"},
+                        "Date": {
+                            "type": "string",
+                            "description": "Date of the Invoice or LR in DD/MM/YYYY format. Do not use the system created date."
+                        },
                         "Invoice No": {"type": "string"},
                         "Lr Number": {"type": "string"},
                         "Uploaded Doc": {
                             "type": "string",
-                            "description": "'Inv POD' if invoice, 'LR POD' if lorry receipt."
+                            "description": "'LR POD' if the image has the 'EFF' logo. 'Inv POD' if it does not have the 'EFF' logo."
                         },
                         "Consignor": {"type": "string"},
                         "Consignor GSTIN": {
@@ -157,11 +160,17 @@ def extract_data_from_image(base64_image):
                         },
                         "PLACE": {"type": "string"},
                         "AREA": {"type": "string"},
-                        "DISTRICT": {"type": "string"},
+                        "DISTRICT": {
+                            "type": "string",
+                            "description": "Extract ONLY the exact official District name. Never put a local place name here. Infer the official district if missing."
+                        },
                         "STATE": {"type": "string"},
                         "PIN CODE": {"type": "string"},
                         "PHONE NUMBER": {"type": "string"},
-                        "ADDRESS": {"type": "string"},
+                        "ADDRESS": {
+                            "type": "string",
+                            "description": "Extract the full address precisely as written."
+                        },
                         "Remarks": {"type": "string"},
                         "Remarks from Consignee": {
                             "type": "string",
