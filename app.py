@@ -37,7 +37,13 @@ st.markdown('<p class="main-header">🧾 Automated Invoice ERP</p>', unsafe_allo
 st.markdown('<p class="sub-header">Upload multiple invoices. Validates against Google Sheets to prevent duplicates.</p>', unsafe_allow_html=True)
 
 # Define Excel Columns
-COLUMNS = [
+MASTER_COLUMNS = [
+    "Consignor", "Consignor GSTIN", "Ship to Party / Consignee", "Consignee Code",
+    "Ship to Party / Consignee GSTIN", "PLACE", "AREA", "DISTRICT", "STATE", 
+    "PIN CODE", "PHONE NUMBER", "ADDRESS", "Remarks"
+]
+
+ALL_INVOICES_COLUMNS = [
     "Date", "Invoice No", "Lr Number", "Consignor", "Consignor GSTIN", 
     "Ship to Party / Consignee", "Consignee Code",
     "Ship to Party / Consignee GSTIN", "PLACE", "AREA", "DISTRICT", "STATE", 
@@ -97,10 +103,10 @@ if gc and sheet_url:
         sh = gc.open_by_url(sheet_url)
         worksheet = sh.sheet1
         
-        # Ensure headers exist
+        # Ensure headers exist for Master
         existing_data = worksheet.get_all_records()
         if not existing_data and len(worksheet.row_values(1)) == 0:
-            worksheet.append_row(COLUMNS)
+            worksheet.append_row(MASTER_COLUMNS)
             existing_data = []
             
         sheet_records = existing_data
@@ -108,9 +114,11 @@ if gc and sheet_url:
         # Initialize "All Invoices" sheet
         try:
             all_invoices_sheet = sh.worksheet("All Invoices")
+            if len(all_invoices_sheet.row_values(1)) == 0:
+                all_invoices_sheet.append_row(ALL_INVOICES_COLUMNS)
         except gspread.WorksheetNotFound:
-            all_invoices_sheet = sh.add_worksheet(title="All Invoices", rows="1000", cols="20")
-            all_invoices_sheet.append_row(COLUMNS)
+            all_invoices_sheet = sh.add_worksheet(title="All Invoices", rows="1000", cols="25")
+            all_invoices_sheet.append_row(ALL_INVOICES_COLUMNS)
             
         st.sidebar.success(f"Connected! Found {len(sheet_records)} existing records in Master.")
     except Exception as e:
@@ -200,7 +208,7 @@ def extract_data_from_image(base64_image):
                             "description": "'Yes' if the name on the consignee seal matches the Consignee Name, else 'No'"
                         }
                     },
-                    "required": COLUMNS,
+                    "required": ALL_INVOICES_COLUMNS,
                     "additionalProperties": False
                 }
             }
@@ -293,7 +301,7 @@ if uploaded_files:
                 
                 # --- ADD TO ALL INVOICES FIRST (No GSTIN validation required here) ---
                 if all_invoices_sheet:
-                    row_data_all = [extracted_data.get(col, "") for col in COLUMNS]
+                    row_data_all = [extracted_data.get(col, "") for col in ALL_INVOICES_COLUMNS]
                     all_invoices_sheet.append_row(row_data_all)
                 
                 # --- STRICT GSTIN RULE: Skip Master sheet if Consignee GSTIN is invalid/empty ---
@@ -310,7 +318,7 @@ if uploaded_files:
                     # Append to Google Sheet if configured
                     if worksheet:
                         # Prepare row data in correct column order
-                        row_data = [extracted_data.get(col, "") for col in COLUMNS]
+                        row_data = [extracted_data.get(col, "") for col in MASTER_COLUMNS]
                         worksheet.append_row(row_data)
                         sheet_records.append(extracted_data) # Update local cache
                         
@@ -339,7 +347,7 @@ if uploaded_files:
             
         # Display Results
         if added_results:
-            df = pd.DataFrame(added_results, columns=COLUMNS)
+            df = pd.DataFrame(added_results, columns=ALL_INVOICES_COLUMNS)
             st.success("✅ Extraction & Validation Complete!")
             st.dataframe(df, use_container_width=True)
             
