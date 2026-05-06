@@ -8,7 +8,7 @@ import streamlit as st
 from openai import OpenAI
 import pymupdf  # PyMuPDF (fitz)
 from dotenv import load_dotenv
-import gspread
+from supabase import create_client, Client
 
 # Load environment variables (useful for local development)
 load_dotenv(override=True)
@@ -34,7 +34,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="main-header">🧾 Automated Invoice ERP</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Upload multiple invoices. Validates against Google Sheets to prevent duplicates.</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Upload multiple invoices. Validates against Supabase Database to prevent duplicates.</p>', unsafe_allow_html=True)
 
 # Define Excel Columns
 MASTER_COLUMNS = [
@@ -50,6 +50,16 @@ ALL_INVOICES_COLUMNS = [
     "PIN CODE", "PHONE NUMBER", "ADDRESS", "Remarks", "Remarks from Consignee",
     "Seal Ok", "Sign ok", "Date Ok", "Consignee seal matched"
 ]
+
+def map_to_db_row(extracted_data, is_master=False):
+    # Convert extracted dictionary to Supabase compatible dictionary with snake_case keys
+    row = {}
+    cols = MASTER_COLUMNS if is_master else ALL_INVOICES_COLUMNS
+    for col in cols:
+        # e.g., "Ship to Party / Consignee GSTIN" -> "ship_to_party_consignee_gstin"
+        db_key = col.lower().replace(" / ", "_").replace(" ", "_")
+        row[db_key] = extracted_data.get(col, "")
+    return row
 
 # --- 1. SETUP OPENAI ---
 API_KEY = os.getenv("OPENAI_API_KEY")
@@ -70,71 +80,26 @@ if not API_KEY:
 client = OpenAI(api_key=API_KEY)
 
 
-# --- 2. SETUP GOOGLE SHEETS ---
-def init_gspread():
-    try:
-        if os.path.exists("credentials.json"):
-            return gspread.service_account(filename="credentials.json")
-        elif "gcp_service_account" in st.secrets:
-            return gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-    except Exception as e:
-        st.sidebar.error(f"Error loading Google Credentials: {e}")
-    return None
+# --- 2. SETUP SUPABASE ---
+st.sidebar.header("Supabase Configuration")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
-gc = init_gspread()
-
-# Google Sheet Config
-st.sidebar.header("Google Sheets Configuration")
-default_sheet_url = os.getenv("GOOGLE_SHEET_URL", "")
-sheet_url = st.sidebar.text_input("Enter Google Sheet URL:", value=default_sheet_url)
-
-if sheet_url and sheet_url != default_sheet_url:
-    with open(".env", "a") as f:
-        f.write(f"\nGOOGLE_SHEET_URL={sheet_url}\n")
-    os.environ["GOOGLE_SHEET_URL"] = sheet_url
-    st.sidebar.success("Sheet URL saved automatically!")
-
-worksheet = None
-all_invoices_sheet = None
+supabase: Client = None
 sheet_records = []
 
-if gc and sheet_url:
+if SUPABASE_URL and SUPABASE_KEY:
     try:
-        sh = gc.open_by_url(sheet_url)
-        try:
-            worksheet = sh.worksheet("Consignee Master")
-        except gspread.WorksheetNotFound:
-            worksheet = sh.sheet1
-            try:
-                worksheet.update_title("Consignee Master")
-            except Exception:
-                pass
-        
-        # Ensure headers exist for Master
-        existing_data = worksheet.get_all_records()
-        if not existing_data and len(worksheet.row_values(1)) == 0:
-            worksheet.append_row(MASTER_COLUMNS)
-            existing_data = []
-            
-        sheet_records = existing_data
-        
-        # Initialize "All Invoices" sheet
-        try:
-            all_invoices_sheet = sh.worksheet("All Invoices")
-            if len(all_invoices_sheet.row_values(1)) == 0:
-                all_invoices_sheet.append_row(ALL_INVOICES_COLUMNS)
-        except gspread.WorksheetNotFound:
-            all_invoices_sheet = sh.add_worksheet(title="All Invoices", rows="1000", cols="25")
-            all_invoices_sheet.append_row(ALL_INVOICES_COLUMNS)
-            
-        st.sidebar.success(f"Connected! Found {len(sheet_records)} existing records in Master.")
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        # Fetch existing master records for duplicate validation
+        response = supabase.table("consignee_master").select("*").execute()
+        sheet_records = response.data
+        st.sidebar.success(f"Connected to Supabase! Found {len(sheet_records)} existing records in Master.")
     except Exception as e:
-        st.sidebar.error(f"Could not open Google Sheet: {e}")
-        st.sidebar.info("Ensure the Service Account Email is shared as 'Editor' on the Google Sheet.")
-elif not gc:
-    st.sidebar.warning("⚠️ `credentials.json` not found. Duplicate validation will be skipped.")
-elif not sheet_url:
-    st.sidebar.warning("⚠️ Please enter a Google Sheet URL to enable duplicate validation.")
+        st.sidebar.error(f"Error connecting to Supabase: {e}")
+else:
+    st.sidebar.error("Supabase credentials are not set. Please provide SUPABASE_URL and SUPABASE_KEY in Secrets.")
+
 
 # --- 3. EXTRACTION FUNCTIONS ---
 def encode_image_base64(image_bytes):
@@ -219,7 +184,7 @@ def extract_data_from_image(base64_image):
                             "description": "'Yes' if the name on the consignee seal matches the Consignee Name, else 'No'"
                         }
                     },
-                    "required": ALL_INVOICES_COLUMNS,
+                    "required": [col for col in ALL_INVOICES_COLUMNS if col not in ("Uploaded Date", "Uploaded Time")],
                     "additionalProperties": False
                 }
             }
@@ -252,8 +217,8 @@ def is_duplicate(sheet_data, new_data):
     new_consignee = str(new_data.get("Ship to Party / Consignee", "")).strip().lower()
     
     for row in sheet_data:
-        existing_gstin = str(row.get("Ship to Party / Consignee GSTIN", "")).strip().lower()
-        existing_consignee = str(row.get("Ship to Party / Consignee", "")).strip().lower()
+        existing_gstin = str(row.get("ship_to_party_consignee_gstin", "")).strip().lower()
+        existing_consignee = str(row.get("ship_to_party_consignee", "")).strip().lower()
         
         # Exact match on GSTIN
         if new_gstin and new_gstin not in ["", "none", "nan", "null"]:
@@ -319,9 +284,9 @@ if uploaded_files:
                 extracted_data["Uploaded Time"] = now.strftime('%I:%M %p')
                 
                 # --- ADD TO ALL INVOICES FIRST (No GSTIN validation required here) ---
-                if all_invoices_sheet:
-                    row_data_all = [extracted_data.get(col, "") for col in ALL_INVOICES_COLUMNS]
-                    all_invoices_sheet.append_row(row_data_all)
+                if supabase:
+                    db_row_all = map_to_db_row(extracted_data, is_master=False)
+                    supabase.table("all_invoices").insert(db_row_all).execute()
                 
                 # --- STRICT GSTIN RULE: Skip Master sheet if Consignee GSTIN is invalid/empty ---
                 if not extracted_data.get("Ship to Party / Consignee GSTIN", "").strip():
@@ -331,15 +296,14 @@ if uploaded_files:
                     continue
                 
                 # Duplicate Check
-                if worksheet and is_duplicate(sheet_records, extracted_data):
+                if is_duplicate(sheet_records, extracted_data):
                     duplicate_files.append(file_name)
                 else:
-                    # Append to Google Sheet if configured
-                    if worksheet:
-                        # Prepare row data in correct column order
-                        row_data = [extracted_data.get(col, "") for col in MASTER_COLUMNS]
-                        worksheet.append_row(row_data)
-                        sheet_records.append(extracted_data) # Update local cache
+                    # Append to Supabase Master if configured
+                    if supabase:
+                        db_row_master = map_to_db_row(extracted_data, is_master=True)
+                        supabase.table("consignee_master").insert(db_row_master).execute()
+                        sheet_records.append(db_row_master) # Update local cache
                         
                     added_results.append(extracted_data)
                     
@@ -374,6 +338,9 @@ if uploaded_files:
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False, sheet_name='Invoices')
+                # Also create a Master sheet
+                df_master = pd.DataFrame(added_results, columns=MASTER_COLUMNS)
+                df_master.to_excel(writer, index=False, sheet_name='Master')
             
             st.download_button(
                 label="📥 Download Newly Added Data as Excel",
