@@ -38,9 +38,10 @@ st.markdown('<p class="sub-header">Upload multiple invoices. Validates against G
 
 # Define Excel Columns
 COLUMNS = [
-    "Consignor", "Consignor GSTIN", "Ship to Party / Consignee", "Consignee Code",
+    "Date", "Invoice No", "Lr Number", "Consignor", "Consignor GSTIN", 
+    "Ship to Party / Consignee", "Consignee Code",
     "Ship to Party / Consignee GSTIN", "PLACE", "AREA", "DISTRICT", "STATE", 
-    "PIN CODE", "PHONE NUMBER", "ADDRESS", "Remarks",
+    "PIN CODE", "PHONE NUMBER", "ADDRESS", "Remarks", "Remarks from Consignee",
     "Seal Ok", "Sign ok", "Date Ok", "Consignee seal matched"
 ]
 
@@ -130,14 +131,14 @@ def extract_data_from_image(base64_image):
         messages=[
             {
                 "role": "system",
-                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice image. Return empty strings if a field is not found. CRITICAL RULES:\n1. Consignee GSTIN is the most important. GSTIN numbers MUST be exactly 15 alphanumeric characters. If it has 14 digits or any other length, YOU MUST LEAVE IT BLANK. Do not guess.\n2. The 'PLACE' field MUST NOT contain the name of the state or the district (e.g., do not put 'Kozhikode' in PLACE if it is a district). Extract the specific local place/town.\n3. For 'AREA', if no separate area is found in the address, you can repeat the 'PLACE' value.\n4. For 'Seal Ok', 'Sign ok', 'Date Ok', 'Consignee seal matched', look at the POD (Proof of Delivery) section on the invoice, usually at the bottom, and answer with 'Yes' or 'No'."
+                "content": "You are a professional data extraction assistant. Extract the requested fields from the provided invoice or Lorry Receipt (LR) image. Return empty strings if a field is not found. CRITICAL RULES:\n1. Consignee GSTIN is important. GSTIN numbers MUST be exactly 15 alphanumeric characters. If it has 14 digits or any other length, YOU MUST LEAVE IT BLANK. Do not guess.\n2. The 'PLACE' field MUST NOT contain the name of the state or the district.\n3. For 'AREA', if no separate area is found, repeat the 'PLACE' value.\n4. For 'Seal Ok', 'Sign ok', 'Date Ok', 'Consignee seal matched', look at the POD (Proof of Delivery) or receiver's section, usually at the bottom, and answer with 'Yes' or 'No'.\n5. For 'Remarks from Consignee', look for handwritten notes (e.g., 'short 1 box')."
             },
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "text",
-                        "text": "Extract the following details: Consignor, Consignor GSTIN, Ship to Party / Consignee, Consignee Code, Ship to Party / Consignee GSTIN, PLACE, AREA, DISTRICT, STATE, PIN CODE, PHONE NUMBER, ADDRESS, Remarks, Seal Ok, Sign ok, Date Ok, Consignee seal matched."
+                        "text": "Extract the following details: Date, Invoice No, Lr Number, Consignor, Consignor GSTIN, Ship to Party / Consignee, Consignee Code, Ship to Party / Consignee GSTIN, PLACE, AREA, DISTRICT, STATE, PIN CODE, PHONE NUMBER, ADDRESS, Remarks, Remarks from Consignee, Seal Ok, Sign ok, Date Ok, Consignee seal matched."
                     },
                     {
                         "type": "image_url",
@@ -156,6 +157,9 @@ def extract_data_from_image(base64_image):
                 "schema": {
                     "type": "object",
                     "properties": {
+                        "Date": {"type": "string"},
+                        "Invoice No": {"type": "string"},
+                        "Lr Number": {"type": "string"},
                         "Consignor": {"type": "string"},
                         "Consignor GSTIN": {
                             "type": "string",
@@ -175,6 +179,10 @@ def extract_data_from_image(base64_image):
                         "PHONE NUMBER": {"type": "string"},
                         "ADDRESS": {"type": "string"},
                         "Remarks": {"type": "string"},
+                        "Remarks from Consignee": {
+                            "type": "string",
+                            "description": "Any handwritten remarks made by the consignee using a pen (e.g., 'short 1 box'). Leave blank if none."
+                        },
                         "Seal Ok": {
                             "type": "string",
                             "description": "'Yes' if consignee seal/stamp is present, else 'No'"
@@ -283,9 +291,14 @@ if uploaded_files:
                 base64_img = encode_image_base64(image_bytes)
                 extracted_data = extract_data_from_image(base64_img)
                 
-                # --- STRICT GSTIN RULE: Skip entirely if Consignee GSTIN is invalid/empty ---
+                # --- ADD TO ALL INVOICES FIRST (No GSTIN validation required here) ---
+                if all_invoices_sheet:
+                    row_data_all = [extracted_data.get(col, "") for col in COLUMNS]
+                    all_invoices_sheet.append_row(row_data_all)
+                
+                # --- STRICT GSTIN RULE: Skip Master sheet if Consignee GSTIN is invalid/empty ---
                 if not extracted_data.get("Ship to Party / Consignee GSTIN", "").strip():
-                    st.warning(f"⚠️ Skipped {file_name}: No valid 15-digit Consignee GSTIN found.")
+                    st.warning(f"⚠️ Skipped Master addition for {file_name}: No valid 15-digit Consignee GSTIN found.")
                     error_files.append(file_name)
                     progress_bar.progress((index + 1) / total_files)
                     continue
@@ -302,11 +315,6 @@ if uploaded_files:
                         sheet_records.append(extracted_data) # Update local cache
                         
                     added_results.append(extracted_data)
-                
-                # Append to All Invoices sheet regardless of duplicate
-                if all_invoices_sheet:
-                    row_data_all = [extracted_data.get(col, "") for col in COLUMNS]
-                    all_invoices_sheet.append_row(row_data_all)
                     
             except Exception as e:
                 st.error(f"Error processing {file_name}: {e}")
