@@ -39,6 +39,15 @@ if not ERP_USERNAME or not ERP_PASSWORD:
     SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
     RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
 
+# Strip surrounding quotes from env variables (handles user paste errors in GitHub Secrets)
+if ERP_USERNAME: ERP_USERNAME = ERP_USERNAME.strip("'\"")
+if ERP_PASSWORD: ERP_PASSWORD = ERP_PASSWORD.strip("'\"")
+if SUPABASE_URL: SUPABASE_URL = SUPABASE_URL.strip("'\"")
+if SUPABASE_KEY: SUPABASE_KEY = SUPABASE_KEY.strip("'\"")
+if SENDER_EMAIL: SENDER_EMAIL = SENDER_EMAIL.strip("'\"")
+if SENDER_PASSWORD: SENDER_PASSWORD = SENDER_PASSWORD.strip("'\"")
+if RECEIVER_EMAIL: RECEIVER_EMAIL = RECEIVER_EMAIL.strip("'\"")
+
 DOWNLOAD_DIR = os.path.expanduser("~/Downloads/erp_temp_downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
@@ -110,6 +119,8 @@ def fetch_supervisor_mappings():
 # 5. Playwright ERP Download
 def download_erp_reports():
     print("Starting Playwright ERP download flow...")
+    print(f"Debug ERP_USERNAME: length={len(ERP_USERNAME) if ERP_USERNAME else 0}, starts_with_quote={ERP_USERNAME.startswith('\"') or ERP_USERNAME.startswith(\"'\") if ERP_USERNAME else False}, ends_with_quote={ERP_USERNAME.endswith('\"') or ERP_USERNAME.endswith(\"'\") if ERP_USERNAME else False}")
+    print(f"Debug ERP_PASSWORD: length={len(ERP_PASSWORD) if ERP_PASSWORD else 0}, starts_with_quote={ERP_PASSWORD.startswith('\"') or ERP_PASSWORD.startswith(\"'\") if ERP_PASSWORD else False}, ends_with_quote={ERP_PASSWORD.endswith('\"') or ERP_PASSWORD.endswith(\"'\") if ERP_PASSWORD else False}")
     despatch_url = "https://eff.aadhocc.in/eff_2021/main/effdespatch"
     lr_url = "https://eff.aadhocc.in/eff_2021/main/lr/"
     
