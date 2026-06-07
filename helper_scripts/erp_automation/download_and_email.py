@@ -130,6 +130,10 @@ def download_erp_reports():
         context = browser.new_context()
         page = context.new_page()
         
+        # Listen to browser console and page errors
+        page.on("console", lambda msg: print(f"Browser Console: {msg.text}"))
+        page.on("pageerror", lambda err: print(f"Browser Page Error: {err}"))
+        
         try:
             # Step 1: Navigating to Despatch page & Log in
             print(f"Navigating to {despatch_url}...")
@@ -150,6 +154,10 @@ def download_erp_reports():
                 else:
                     page.fill("input[type='password']", ERP_PASSWORD)
                     
+                # Take screenshot to verify fields are filled
+                page.screenshot(path=os.path.join(DOWNLOAD_DIR, "filled.png"))
+                print("Filled credentials screenshot saved.")
+                
                 # Submit login form
                 submit_button = page.locator("input[type='submit'], button[type='submit'], input[value='Sign in'], button")
                 if submit_button.count() > 0:
@@ -157,6 +165,11 @@ def download_erp_reports():
                 else:
                     page.keyboard.press("Enter")
                     
+                # Take screenshot immediately after click attempt
+                page.wait_for_timeout(2000) # wait 2s to allow page load/update
+                page.screenshot(path=os.path.join(DOWNLOAD_DIR, "clicked.png"))
+                print("Clicked submit screenshot saved.")
+                
                 # Wait for navigation to complete (expecting to leave the login page)
                 try:
                     page.wait_for_url("**/login", exclude=True, timeout=10000)
