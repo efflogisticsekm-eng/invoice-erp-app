@@ -630,11 +630,6 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
     df_summary = pd.DataFrame(summary_data)
     df_summary.to_excel(writer, sheet_name="1. Overall Summary", index=False, header=False)
     
-    # Sheet 2: Destination Breakdown
-    dest_breakdown = []
-    for dest, counts in dest_counts.items():
-        pass # To be implemented via dynamic pivot
-        
     # Standard pivot-like breakdowns for destinations, consignors, and branches
     def create_breakdown_df(lrs_list, key_field):
         breakdown_map = {}
