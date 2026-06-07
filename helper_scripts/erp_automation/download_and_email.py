@@ -155,7 +155,7 @@ def download_erp_reports():
                     page.fill("input[type='password']", ERP_PASSWORD)
                     
                 # Take screenshot to verify fields are filled
-                page.screenshot(path=os.path.join(DOWNLOAD_DIR, "filled.png"))
+                page.screenshot(path=os.path.join(DOWNLOAD_DIR, "filled.png"), timeout=5000)
                 print("Filled credentials screenshot saved.")
                 
                 # Submit login form
@@ -167,7 +167,7 @@ def download_erp_reports():
                     
                 # Take screenshot immediately after click attempt
                 page.wait_for_timeout(2000) # wait 2s to allow page load/update
-                page.screenshot(path=os.path.join(DOWNLOAD_DIR, "clicked.png"))
+                page.screenshot(path=os.path.join(DOWNLOAD_DIR, "clicked.png"), timeout=5000)
                 print("Clicked submit screenshot saved.")
                 
                 # Wait for navigation to complete (expecting to leave the login page)
@@ -193,7 +193,7 @@ def download_erp_reports():
             despatch_btn.wait_for(state="visible", timeout=15000)
             
             with page.expect_download(timeout=60000) as download_info:
-                despatch_btn.click()
+                despatch_btn.click(no_wait_after=True)
             download = download_info.value
             download.save_as(despatch_file_path)
             print("Despatch report saved to:", despatch_file_path)
@@ -209,7 +209,7 @@ def download_erp_reports():
             lr_btn.wait_for(state="visible", timeout=15000)
             
             with page.expect_download(timeout=60000) as download_info_lr:
-                lr_btn.click()
+                lr_btn.click(no_wait_after=True)
             download_lr = download_info_lr.value
             download_lr.save_as(lr_file_path)
             print("LR raw report saved to:", lr_file_path)
@@ -219,8 +219,11 @@ def download_erp_reports():
         except Exception as e:
             print("Error downloading from ERP:", e)
             screenshot_path = os.path.join(DOWNLOAD_DIR, "error_screenshot.png")
-            page.screenshot(path=screenshot_path)
-            print("Screenshot saved to:", screenshot_path)
+            try:
+                page.screenshot(path=screenshot_path, timeout=5000)
+                print("Screenshot saved to:", screenshot_path)
+            except Exception as ss_err:
+                print("Could not save error screenshot:", ss_err)
             browser.close()
             raise e
         finally:
