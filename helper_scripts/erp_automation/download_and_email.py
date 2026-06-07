@@ -187,9 +187,20 @@ def download_erp_reports():
             page.goto(despatch_url)
             page.wait_for_load_state("load")
             
+            # Read fromDate and toDate input values pre-filled on the page
+            page.locator("#fromDate").wait_for(state="visible", timeout=15000)
+            from_date = page.locator("#fromDate").get_attribute("value")
+            to_date = page.locator("#toDate").get_attribute("value")
+            print(f"Found pre-filled dates: fromDate={from_date}, toDate={to_date}")
+            
+            # Construct the correct download URL and set it as the href of the export link
+            correct_href = f"https://eff.aadhocc.in/eff_2021/main/effdespatch/exportDespatchExcel?despatch_number=&location_id=&lr_number=&from_date={from_date}&to_date={to_date}&delivery_staff_search="
+            print(f"Setting export link href to: {correct_href}")
+            page.evaluate(f"document.querySelector('a.exportDespatchExcel').href = '{correct_href}'")
+            
             # Download Despatch Report by clicking the export button
             print("Downloading Despatch raw report...")
-            despatch_btn = page.locator("a.exportDespatchExcel, button#exportDespatchExcel, #exportDespatchExcel").first
+            despatch_btn = page.locator("a.exportDespatchExcel").first
             despatch_btn.wait_for(state="visible", timeout=15000)
             
             with page.expect_download(timeout=60000) as download_info:
