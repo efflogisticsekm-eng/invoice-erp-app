@@ -51,12 +51,23 @@ if RECEIVER_EMAIL: RECEIVER_EMAIL = RECEIVER_EMAIL.strip("'\"")
 DOWNLOAD_DIR = os.path.expanduser("~/Downloads/erp_temp_downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# 2. Date Parsing Helper
+# 2. Date and String Helper Utilities
+def clean_val(val, default=""):
+    if pd.isna(val) or val is None or val is pd.NaT:
+        return default
+    s = str(val).strip()
+    if s.lower() in ('nan', 'nat', 'none', 'null', '-'):
+        return default
+    return s
+
+def normalize_name(val):
+    if not val or pd.isna(val):
+        return ""
+    return " ".join(str(val).strip().upper().split())
+
 def parse_date(val):
-    if pd.isna(val) or not val or val is pd.NaT:
-        return None
-    val_str = str(val).strip().split()[0]
-    if val_str.lower() in ('nat', 'nan', 'null', 'none', '-', ''):
+    val_str = clean_val(val)
+    if not val_str:
         return None
     for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%d.%m.%Y'):
         try:
@@ -73,9 +84,6 @@ def parse_date(val):
 
 # 3. Delay Calculator
 def calculate_delay(start_str, end_str, consignor, holidays, exclude_sundays):
-    if pd.isna(end_str) or not str(end_str).strip():
-        return None
-    
     start = parse_date(start_str)
     end = parse_date(end_str)
     
@@ -116,7 +124,17 @@ def fetch_supervisor_mappings():
         res.raise_for_status()
         data = res.json()
         print(f"Loaded {len(data)} supervisor mappings.")
-        return {item['supervisor_name'].strip().upper(): item['branch'].strip().upper() for item in data}
+        # Normalize supervisor names to single-spaced uppercase
+        mapping = {}
+        for item in data:
+            name = item.get('supervisor_name')
+            branch = item.get('branch')
+            if name and branch:
+                mapping[normalize_name(name)] = clean_val(branch).upper()
+        return mapping
+    except Exception as e:
+        print(f"Error fetching supervisor mappings: {e}. Defaulting to empty mapping.")
+        return {}
     except Exception as e:
         print(f"Error fetching supervisor mappings: {e}. Defaulting to empty mapping.")
         return {}
@@ -265,7 +283,7 @@ def download_erp_reports():
             browser.close()
 
 # 6. Apply openpyxl styles
-def apply_styles(ws, row_count, col_count, sheet_type="default"):
+def apply_styles(ws, row_count, col_count, sheet_type="default", enable_filter=False):
     # Styles Definition
     header_font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid") # slate-800
@@ -309,6 +327,11 @@ def apply_styles(ws, row_count, col_count, sheet_type="default"):
                 cell.alignment = Alignment(vertical="center", horizontal="left")
             else:
                 cell.alignment = Alignment(vertical="center", horizontal="center")
+
+    if enable_filter and row_count > 1 and col_count > 0:
+        import openpyxl.utils
+        col_letter = openpyxl.utils.get_column_letter(col_count)
+        ws.auto_filter.ref = f"A1:{col_letter}{row_count}"
 
 # 7. Generate Excel file
 def generate_excel_report(lr_file, despatch_file, supervisor_map):
@@ -362,21 +385,23 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
     df_despatch.columns = [str(c).strip().upper() for c in df_despatch.columns]
     
     # Map LRs to despatch info for faster lookup
-    # Key fields in despatch report: DESPATCH DATE, DISPATCH DATE, DESPATCH NO, DISPATCH NO, LR NO, LRNO
     lr_col_desp = next((c for c in df_despatch.columns if c in ['LR NO', 'LRNO', 'LR_NO']), None)
     desp_date_col = next((c for c in df_despatch.columns if c in ['DESPATCH DATE', 'DISPATCH DATE', 'DESPATCH_DATE']), None)
     desp_no_col = next((c for c in df_despatch.columns if c in ['DESPATCH NO', 'DISPATCH NO', 'DESPATCH_NO', 'DISPATCH_NO']), None)
     driver_col = next((c for c in df_despatch.columns if c in ['DELIVERY DRIVER', 'DRIVER', 'DRIVER_NAME']), None)
+    sup_col_desp = next((c for c in df_despatch.columns if c in ['LD SUPERVISOR', 'SUPERVISOR', 'LD_SUPERVISOR']), None)
     
     despatch_map = {}
     if lr_col_desp and desp_date_col:
         for _, r in df_despatch.iterrows():
-            lr = str(r[lr_col_desp]).strip()
-            despatch_map[lr] = {
-                "despatch_date": str(r[desp_date_col]).strip() if pd.notna(r[desp_date_col]) else "",
-                "despatch_no": str(r[desp_no_col]).strip() if desp_no_col and pd.notna(r[desp_no_col]) else "",
-                "driver": str(r[driver_col]).strip() if driver_col and pd.notna(r[driver_col]) else ""
-            }
+            lr = clean_val(r[lr_col_desp])
+            if lr:
+                despatch_map[lr] = {
+                    "despatch_date": clean_val(r[desp_date_col]),
+                    "despatch_no": clean_val(r[desp_no_col]) if desp_no_col else "",
+                    "driver": clean_val(r[driver_col]) if driver_col else "",
+                    "supervisor": clean_val(r[sup_col_desp]) if sup_col_desp else ""
+                }
             
     # Process LR rows
     lr_col = next((c for c in df_lr.columns if c in ['LR NO', 'LRNO', 'LR_NUMBER', 'LR_NO']), None)
@@ -386,15 +411,10 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
     consignee_col = next((c for c in df_lr.columns if c in ['CONSIGNEE', 'CONSIGNEE_NAME']), None)
     dest_col = next((c for c in df_lr.columns if c in ['DESTINATION', 'PLACE', 'AREA']), None)
     status_col = next((c for c in df_lr.columns if c in ['LR STATUS', 'LRSTATUS', 'STATUS']), None)
-    sup_col = next((c for c in df_lr.columns if c in ['LD SUPERVISOR', 'SUPERVISOR', 'LD_SUPERVISOR']), None)
     box_col = next((c for c in df_lr.columns if c in ['BOX QTY', 'BOXQTY', 'BOXES', 'QUANTITY']), None)
     
     processed_lrs = []
     cancelled_lrs = []
-    
-    consignor_counts = {}
-    dest_counts = {}
-    branch_counts = {}
     
     raw_total = len(df_lr)
     cancelled_count = 0
@@ -405,21 +425,23 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
     
     delay_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 'more': 0, 'invalid': 0}
     
-    branches_list = set(supervisor_map.values())
-    
     # Leaderboard trackers
     branch_stats = {}
     driver_stats = {}
     
+    unmapped_supervisors = set()
+    exclude_sundays = True
+    custom_holidays = []
+    
     for _, r in df_lr.iterrows():
-        lr_no = str(r[lr_col]).strip() if lr_col else ""
-        raw_status = str(r[status_col]).strip() if status_col else "Open"
-        consignor = str(r[consignor_col]).strip() if consignor_col else "UNKNOWN"
-        consignee = str(r[consignee_col]).strip() if consignee_col else "UNKNOWN"
-        area = str(r[dest_col]).strip() if dest_col else "UNKNOWN"
-        lr_date = str(r[date_col]).strip() if date_col else ""
-        del_time = str(r[del_time_col]).strip() if del_time_col else ""
-        box_qty = int(r[box_col]) if box_col and pd.notna(r[box_col]) else 0
+        lr_no = clean_val(r[lr_col]) if lr_col else ""
+        raw_status = clean_val(r[status_col], "Open") if status_col else "Open"
+        consignor = clean_val(r[consignor_col]) if consignor_col else ""
+        consignee = clean_val(r[consignee_col]) if consignee_col else ""
+        area = clean_val(r[dest_col]) if dest_col else ""
+        lr_date = clean_val(r[date_col]) if date_col else ""
+        del_time = clean_val(r[del_time_col]) if del_time_col else ""
+        box_qty = int(r[box_col]) if box_col and pd.notna(r[box_col]) and str(r[box_col]).strip().isdigit() else 0
         
         # Mapped Status
         status_map = {
@@ -437,13 +459,16 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
             total_excluded_consignors += 1
             continue
             
-        # Supervisor and Branch Mapping
-        sup_val = str(r[sup_col]).strip().upper() if sup_col and pd.notna(r[sup_col]) else ""
-        if not sup_val and lr_no in despatch_map:
-            # Try getting driver name or supervisor mapping if available
-            pass
-        branch = supervisor_map.get(sup_val, "N/A")
+        # Supervisor and Branch Mapping (Look up from Despatch map)
+        desp_info = despatch_map.get(lr_no, {})
+        sup_val = desp_info.get("supervisor", "")
+        norm_sup = normalize_name(sup_val)
+        branch = supervisor_map.get(norm_sup, "N/A")
         
+        # Track unmapped supervisors for reporting in email
+        if sup_val and branch == "N/A":
+            unmapped_supervisors.add(sup_val)
+            
         item = {
             "lrNo": lr_no,
             "area": area,
@@ -467,8 +492,7 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
         # Delivery delays
         if mapped_status == 'Delivery Process completed.':
             delivered_count += 1
-            despatch_info = despatch_map.get(lr_no, {})
-            despatch_date = despatch_info.get("despatch_date", lr_date) # Fallback to LR date if no despatch date
+            despatch_date = desp_info.get("despatch_date", lr_date) # Fallback to LR date if no despatch date
             
             delay = calculate_delay(despatch_date, del_time, consignor, holidays=custom_holidays, exclude_sundays=exclude_sundays)
             item["delay"] = delay
@@ -487,7 +511,7 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
             
         processed_lrs.append(item)
         
-        # Accumulate Leaderboard Stats for Branch
+        # Accumulate Leaderboard Stats for Branch (only if mapped to a valid branch)
         b_name = branch
         if b_name not in branch_stats:
             branch_stats[b_name] = {
@@ -506,7 +530,7 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
             bs["delaysCount"] += 1
             
         # Accumulate Leaderboard Stats for Driver
-        driver_name = despatch_map.get(lr_no, {}).get("driver", "").strip()
+        driver_name = desp_info.get("driver", "").strip()
         if driver_name and driver_name != '-':
             split_drivers = [d.strip() for d in driver_name.split(',') if d.strip()]
             for d in split_drivers:
@@ -518,6 +542,12 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
                 ds = driver_stats[d]
                 ds["totalLrs"] += 1
                 ds["totalBoxes"] += box_qty
+                if consignee or area:
+                    ds["deliveryPoints"].add(p_key)
+                if mapped_status == 'Delivery Process completed.' and item["delay"] is not None:
+                    ds["deliveredLrs"] += 1
+                    ds["totalDelayDays"] += item["delay"]
+                    ds["delaysCount"] += 1
                 if consignee or area:
                     ds["deliveryPoints"].add(p_key)
                 if mapped_status == 'Delivery Process completed.' and item["delay"] is not None:
@@ -698,26 +728,69 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
             desp_date = keys[1] if isinstance(keys, tuple) else ""
             driver = keys[2] if isinstance(keys, tuple) else ""
             
-            # Find branch from supervisors of LRs in this group
-            gp_lrs = group[lr_col_desp].dropna().astype(str).tolist() if lr_col_desp in group.columns else []
-            gp_supervisors = df_lr[df_lr[lr_col].astype(str).isin(gp_lrs)][sup_col].dropna().unique() if lr_col in df_lr.columns and sup_col in df_lr.columns else []
-            gp_branches = [supervisor_map.get(str(s).strip().upper(), "N/A") for s in gp_supervisors]
+            # Find branch and supervisor directly from df_despatch group
+            gp_sups = group[sup_col_desp].dropna().unique() if sup_col_desp in group.columns else []
+            gp_branches = [supervisor_map.get(normalize_name(s), "N/A") for s in gp_sups]
             branch = gp_branches[0] if gp_branches else "N/A"
+            supervisor_name_val = gp_sups[0] if len(gp_sups) > 0 else "N/A"
             
             box_qty_tot = group[box_field].sum() if box_field in group.columns else 0
             del_points = group[dest_field].nunique() if dest_field in group.columns else 0
             
+            gp_lrs = group[lr_col_desp].dropna().astype(str).tolist() if lr_col_desp in group.columns else []
+            
+            # Get the statuses of the LRs in this group from the LR report
+            gp_lr_statuses = []
+            if lr_col in df_lr.columns and status_col in df_lr.columns:
+                matching_lrs = df_lr[df_lr[lr_col].astype(str).isin(gp_lrs)]
+                for _, lr_row in matching_lrs.iterrows():
+                    raw_status = clean_val(lr_row[status_col], "Open")
+                    status_map = {
+                        'Despatched': 'On transit',
+                        'Open': 'Not Despatched',
+                        'Delivered': 'Delivery Process completed.',
+                        'Despatched from Branch': 'Cancelled LR'
+                    }
+                    mapped_status = status_map.get(raw_status, "Not Despatched")
+                    if "cancelled" in raw_status.lower() or mapped_status == 'Cancelled LR':
+                        mapped_status = 'Cancelled LR'
+                    gp_lr_statuses.append(mapped_status)
+            
+            # Overall delivery status for the despatch
+            if not gp_lr_statuses:
+                despatch_status = "Despatched"
+            elif all(s == 'Delivery Process completed.' for s in gp_lr_statuses):
+                despatch_status = "Delivered"
+            else:
+                despatch_status = "Despatched"
+            
             # Find delivery times in LR report
             lr_del_times = df_lr[df_lr[lr_col].astype(str).isin(gp_lrs)][del_time_col].dropna().tolist() if lr_col in df_lr.columns and del_time_col in df_lr.columns else []
             lr_del_parsed = [parse_date(t) for t in lr_del_times if parse_date(t)]
-            first_del = min(lr_del_parsed).strftime("%d/%m/%Y %I:%M %p") if lr_del_parsed else "-"
-            last_del = max(lr_del_parsed).strftime("%d/%m/%Y %I:%M %p") if lr_del_parsed else "-"
+            
+            if lr_del_parsed:
+                min_del = min(lr_del_parsed)
+                max_del = max(lr_del_parsed)
+                if min_del.hour == 0 and min_del.minute == 0:
+                    first_del = min_del.strftime("%d/%m/%Y")
+                else:
+                    first_del = min_del.strftime("%d/%m/%Y %I:%M %p")
+                    
+                if max_del.hour == 0 and max_del.minute == 0:
+                    last_del = max_del.strftime("%d/%m/%Y")
+                else:
+                    last_del = max_del.strftime("%d/%m/%Y %I:%M %p")
+            else:
+                first_del = "-"
+                last_del = "-"
             
             despatch_rows.append({
                 "Branch": branch,
+                "Supervisor": supervisor_name_val,
                 "Despatch No": desp_no,
                 "Despatch Date": desp_date,
                 "Total LR count": len(group),
+                "Delivery Status": despatch_status,
                 "Total Delivery Point": del_points,
                 "Delivery Driver": driver,
                 "Box Qty": box_qty_tot,
@@ -760,39 +833,40 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
     wb = openpyxl.load_workbook(processed_file)
     
     # Style 1. Overall Summary
-    apply_styles(wb["1. Overall Summary"], len(df_summary), 4, "summary")
+    apply_styles(wb["1. Overall Summary"], len(df_summary), 4, "summary", enable_filter=False)
     
     # Style 2. Destination Breakdown
-    apply_styles(wb["2. Destination Breakdown"], len(df_dest) + 1, len(df_dest.columns))
+    apply_styles(wb["2. Destination Breakdown"], len(df_dest) + 1, len(df_dest.columns), enable_filter=True)
     
     # Style 3. Consignor Breakdown
-    apply_styles(wb["3. Consignor Breakdown"], len(df_consignor) + 1, len(df_consignor.columns))
+    apply_styles(wb["3. Consignor Breakdown"], len(df_consignor) + 1, len(df_consignor.columns), enable_filter=True)
     
     # Style 4. Active LRs
-    apply_styles(wb["4. Active LRs"], len(df_active) + 1, len(df_active.columns))
+    apply_styles(wb["4. Active LRs"], len(df_active) + 1, len(df_active.columns), enable_filter=True)
     
     # Style 5. Cancelled LRs
-    apply_styles(wb["5. Cancelled LRs"], len(df_cancelled) + 1, len(df_cancelled.columns))
+    apply_styles(wb["5. Cancelled LRs"], len(df_cancelled) + 1, len(df_cancelled.columns), enable_filter=True)
     
     # Style 6. Branch Breakdown
-    apply_styles(wb["6. Branch Breakdown"], len(df_branch) + 1, len(df_branch.columns))
+    apply_styles(wb["6. Branch Breakdown"], len(df_branch) + 1, len(df_branch.columns), enable_filter=True)
     
     # Style 7. Despatch Summary Report
-    apply_styles(wb["7. Despatch Summary Report"], len(df_desp_report) + 1, len(df_desp_report.columns))
+    apply_styles(wb["7. Despatch Summary Report"], len(df_desp_report) + 1, len(df_desp_report.columns), enable_filter=True)
     
     # Style 8. Performance Leaderboard
     ws_leader = wb["8. Performance Leaderboard"]
-    apply_styles(ws_leader, len(df_leaderboard), 8, "leaderboard")
+    apply_styles(ws_leader, len(df_leaderboard), 8, "leaderboard", enable_filter=False)
     
     # Style 9. Supervisor Mapping
-    apply_styles(wb["9. Supervisor Mapping"], len(df_sup_mapping) + 1, len(df_sup_mapping.columns))
+    apply_styles(wb["9. Supervisor Mapping"], len(df_sup_mapping) + 1, len(df_sup_mapping.columns), enable_filter=True)
     
     wb.save(processed_file)
     print("Workbook styled and saved!")
-    return processed_file
+    return processed_file, unmapped_supervisors
 
 # 8. Email function
-def email_report(processed_file_path, raw_lr_path, raw_despatch_path, from_date=None, to_date=None):
+# 8. Email function
+def email_report(processed_file_path, raw_lr_path, raw_despatch_path, from_date=None, to_date=None, unmapped_supervisors=None):
     print("Sending daily report email...")
     
     # Format the dates for display in the email
@@ -812,12 +886,18 @@ def email_report(processed_file_path, raw_lr_path, raw_despatch_path, from_date=
     today_str = datetime.now().strftime("%d-%m-%Y")
     msg['Subject'] = f"Daily ERP Dispatch & Delivery Performance Report - {today_str} 📊"
     
+    unmapped_str = ""
+    if unmapped_supervisors:
+        unmapped_str = "\n⚠️ Unmapped Supervisors found today (Please add them to the Supervisor Mapping table in the dashboard to assign them to branches):\n"
+        for s in sorted(unmapped_supervisors):
+            unmapped_str += f"- {s}\n"
+            
     body = f"""Dear User,
 
 Please find attached the daily ERP Dispatch & Delivery delay processing report sheets for {today_str}.
 
 Report Date Range / Period: {date_range_str} 📅
-
+{unmapped_str}
 Included sheets in Interactive_Delivery_Report.xlsx:
 1. Overall Summary (Delivered/Open/Transit ratios & delay charts)
 2. Destination Breakdown
@@ -898,10 +978,10 @@ def main():
         supervisor_map = fetch_supervisor_mappings()
         
         # Process and generate formatted workbook
-        processed_file = generate_excel_report(lr_file, despatch_file, supervisor_map)
+        processed_file, unmapped_supervisors = generate_excel_report(lr_file, despatch_file, supervisor_map)
         
         # Email report
-        email_report(processed_file, lr_file, despatch_file, from_date, to_date)
+        email_report(processed_file, lr_file, despatch_file, from_date, to_date, unmapped_supervisors)
         
         print(f"[{datetime.now()}] All tasks completed successfully! Have a great day!")
     except Exception as e:
