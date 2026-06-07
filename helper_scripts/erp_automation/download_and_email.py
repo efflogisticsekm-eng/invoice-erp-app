@@ -135,22 +135,22 @@ def download_erp_reports():
         page.on("pageerror", lambda err: print(f"Browser Page Error: {err}"))
         
         try:
-            # Step 1: Navigating to Despatch page & Log in
-            print(f"Navigating to {despatch_url}...")
-            page.goto(despatch_url)
+            # Step 1: Navigating to main login page directly
+            main_login_url = "https://eff.aadhocc.in/eff_2021/login"
+            print(f"Navigating to login page: {main_login_url}...")
+            page.goto(main_login_url)
             page.wait_for_load_state("networkidle")
             
             # Check for login inputs
-            if "login" in page.url.lower() or page.locator("input[name='username']").count() > 0 or page.locator("input[type='password']").count() > 0:
+            if page.locator("#login_user_id").count() > 0 or "login" in page.url.lower():
                 print("Performing ERP Login...")
-                # Try finding standard selectors, else try finding generic input fields
-                if page.locator("input[name='username']").count() > 0:
-                    page.fill("input[name='username']", ERP_USERNAME)
+                if page.locator("#login_user_id").count() > 0:
+                    page.fill("#login_user_id", ERP_USERNAME)
                 else:
                     page.fill("input[type='text']", ERP_USERNAME)
                     
-                if page.locator("input[name='password']").count() > 0:
-                    page.fill("input[name='password']", ERP_PASSWORD)
+                if page.locator("#login_password").count() > 0:
+                    page.fill("#login_password", ERP_PASSWORD)
                 else:
                     page.fill("input[type='password']", ERP_PASSWORD)
                     
@@ -159,7 +159,7 @@ def download_erp_reports():
                 print("Filled credentials screenshot saved.")
                 
                 # Submit login form
-                submit_button = page.locator("input[type='submit'], button[type='submit'], input[value='Sign in'], button")
+                submit_button = page.locator("form#login_form button[type='submit'], button[type='submit']")
                 if submit_button.count() > 0:
                     submit_button.first.click()
                 else:
@@ -178,8 +178,8 @@ def download_erp_reports():
                 except Exception as nav_err:
                     print("Navigation timeout or did not leave login page. Current URL:", page.url)
                     # Check if error message is displayed
-                    if page.locator(".alert, .alert-danger, .error, #error").count() > 0:
-                        error_text = page.locator(".alert, .alert-danger, .error, #error").first.inner_text()
+                    if page.locator("#auth_msg").count() > 0:
+                        error_text = page.locator("#auth_msg").inner_text()
                         print(f"ERP Login Error Message: {error_text.strip()}")
             
             # Download Despatch Report
