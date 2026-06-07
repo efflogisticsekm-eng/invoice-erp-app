@@ -297,9 +297,31 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
         if head == b"PK\x03\x04" or head == b"\xd0\xcf\x11\xe0":
             return pd.read_excel(file_path)
         else:
+            import csv
+            import io
+            cleaned_rows = []
             for enc in ["utf-8", "latin1", "utf-8-sig"]:
                 try:
-                    return pd.read_csv(file_path, encoding=enc)
+                    with open(file_path, "r", encoding=enc) as f_csv:
+                        reader = csv.reader(f_csv)
+                        header = next(reader)
+                        num_cols = len(header)
+                        cleaned_rows.append(header)
+                        
+                        for row in reader:
+                            if len(row) > num_cols:
+                                last_col_val = ",".join(row[num_cols-1:])
+                                cleaned_row = row[:num_cols-1] + [last_col_val]
+                                cleaned_rows.append(cleaned_row)
+                            else:
+                                cleaned_row = row + [""] * (num_cols - len(row))
+                                cleaned_rows.append(cleaned_row)
+                    
+                    output = io.StringIO()
+                    writer = csv.writer(output)
+                    writer.writerows(cleaned_rows)
+                    output.seek(0)
+                    return pd.read_csv(output)
                 except Exception:
                     continue
             return pd.read_csv(file_path)
