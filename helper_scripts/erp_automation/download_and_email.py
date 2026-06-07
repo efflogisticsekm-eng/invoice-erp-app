@@ -139,7 +139,7 @@ def download_erp_reports():
             main_login_url = "https://eff.aadhocc.in/eff_2021/login"
             print(f"Navigating to login page: {main_login_url}...")
             page.goto(main_login_url)
-            page.wait_for_load_state("networkidle")
+            page.wait_for_load_state("load")
             
             # Check for login inputs
             if page.locator("#login_user_id").count() > 0 or "login" in page.url.lower():
@@ -173,7 +173,7 @@ def download_erp_reports():
                 # Wait for navigation to complete (expecting to leave the login page)
                 try:
                     page.wait_for_url("**/login", exclude=True, timeout=10000)
-                    page.wait_for_load_state("networkidle")
+                    page.wait_for_load_state("load")
                     print("Login complete. Current URL:", page.url)
                 except Exception as nav_err:
                     print("Navigation timeout or did not leave login page. Current URL:", page.url)
@@ -182,26 +182,34 @@ def download_erp_reports():
                         error_text = page.locator("#auth_msg").inner_text()
                         print(f"ERP Login Error Message: {error_text.strip()}")
             
-            # Download Despatch Report
+            # Navigate to Despatch page
+            print(f"Navigating to Despatch Listing: {despatch_url}...")
+            page.goto(despatch_url)
+            page.wait_for_load_state("load")
+            
+            # Download Despatch Report by clicking the export button
             print("Downloading Despatch raw report...")
-            with page.expect_download() as download_info:
-                try:
-                    page.goto(despatch_url)
-                except Exception as e:
-                    if "ERR_ABORTED" not in str(e):
-                        raise e
+            despatch_btn = page.locator("a.exportDespatchExcel, button#exportDespatchExcel, #exportDespatchExcel").first
+            despatch_btn.wait_for(state="visible", timeout=15000)
+            
+            with page.expect_download(timeout=60000) as download_info:
+                despatch_btn.click()
             download = download_info.value
             download.save_as(despatch_file_path)
             print("Despatch report saved to:", despatch_file_path)
             
-            # Navigate to LR page and download LR Report
-            print("Navigating to LR Report page...")
-            with page.expect_download() as download_info_lr:
-                try:
-                    page.goto(lr_url)
-                except Exception as e:
-                    if "ERR_ABORTED" not in str(e):
-                        raise e
+            # Navigate to LR page
+            print(f"Navigating to LR Report page: {lr_url}...")
+            page.goto(lr_url)
+            page.wait_for_load_state("load")
+            
+            # Download LR Report by clicking the export button
+            print("Downloading LR raw report...")
+            lr_btn = page.locator("a.export_lr_excel, button#excelExport1, #excelExport1").first
+            lr_btn.wait_for(state="visible", timeout=15000)
+            
+            with page.expect_download(timeout=60000) as download_info_lr:
+                lr_btn.click()
             download_lr = download_info_lr.value
             download_lr.save_as(lr_file_path)
             print("LR raw report saved to:", lr_file_path)
