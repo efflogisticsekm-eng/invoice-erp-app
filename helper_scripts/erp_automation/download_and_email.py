@@ -53,16 +53,21 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # 2. Date Parsing Helper
 def parse_date(val):
-    if pd.isna(val) or not val:
+    if pd.isna(val) or not val or val is pd.NaT:
         return None
     val_str = str(val).strip().split()[0]
+    if val_str.lower() in ('nat', 'nan', 'null', 'none', '-', ''):
+        return None
     for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%d.%m.%Y'):
         try:
             return datetime.strptime(val_str, fmt)
         except ValueError:
             continue
     try:
-        return pd.to_datetime(val_str).to_pydatetime()
+        pdt = pd.to_datetime(val_str)
+        if pd.isna(pdt) or pdt is pd.NaT:
+            return None
+        return pdt.to_pydatetime()
     except Exception:
         return None
 
