@@ -119,8 +119,6 @@ def fetch_supervisor_mappings():
 # 5. Playwright ERP Download
 def download_erp_reports():
     print("Starting Playwright ERP download flow...")
-    print(f"Debug ERP_USERNAME: length={len(ERP_USERNAME) if ERP_USERNAME else 0}, starts_with_quote={ERP_USERNAME.startswith('\"') or ERP_USERNAME.startswith(\"'\") if ERP_USERNAME else False}, ends_with_quote={ERP_USERNAME.endswith('\"') or ERP_USERNAME.endswith(\"'\") if ERP_USERNAME else False}")
-    print(f"Debug ERP_PASSWORD: length={len(ERP_PASSWORD) if ERP_PASSWORD else 0}, starts_with_quote={ERP_PASSWORD.startswith('\"') or ERP_PASSWORD.startswith(\"'\") if ERP_PASSWORD else False}, ends_with_quote={ERP_PASSWORD.endswith('\"') or ERP_PASSWORD.endswith(\"'\") if ERP_PASSWORD else False}")
     despatch_url = "https://eff.aadhocc.in/eff_2021/main/effdespatch"
     lr_url = "https://eff.aadhocc.in/eff_2021/main/lr/"
     
