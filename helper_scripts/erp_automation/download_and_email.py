@@ -153,35 +153,24 @@ def download_erp_reports():
             
             # Download Despatch Report
             print("Downloading Despatch raw report...")
-            page.goto(despatch_url)
-            page.wait_for_load_state("networkidle")
-            
             with page.expect_download() as download_info:
-                # Find download button/link
-                if page.locator("text=Download").count() > 0:
-                    download_btn = page.locator("text=Download").first
-                elif page.locator("text=Export").count() > 0:
-                    download_btn = page.locator("text=Export").first
-                else:
-                    download_btn = page.locator("button").first
-                download_btn.click()
+                try:
+                    page.goto(despatch_url)
+                except Exception as e:
+                    if "ERR_ABORTED" not in str(e):
+                        raise e
             download = download_info.value
             download.save_as(despatch_file_path)
             print("Despatch report saved to:", despatch_file_path)
             
             # Navigate to LR page and download LR Report
             print("Navigating to LR Report page...")
-            page.goto(lr_url)
-            page.wait_for_load_state("networkidle")
-            
             with page.expect_download() as download_info_lr:
-                if page.locator("text=Download").count() > 0:
-                    download_btn_lr = page.locator("text=Download").first
-                elif page.locator("text=Export").count() > 0:
-                    download_btn_lr = page.locator("text=Export").first
-                else:
-                    download_btn_lr = page.locator("button").first
-                download_btn_lr.click()
+                try:
+                    page.goto(lr_url)
+                except Exception as e:
+                    if "ERR_ABORTED" not in str(e):
+                        raise e
             download_lr = download_info_lr.value
             download_lr.save_as(lr_file_path)
             print("LR raw report saved to:", lr_file_path)
