@@ -291,8 +291,21 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
     print("Generating Interactive_Delivery_Report.xlsx...")
     
     # Read raw sheets
-    df_lr = pd.read_excel(lr_file)
-    df_despatch = pd.read_excel(despatch_file)
+    def load_df(file_path):
+        with open(file_path, "rb") as f:
+            head = f.read(4)
+        if head == b"PK\x03\x04" or head == b"\xd0\xcf\x11\xe0":
+            return pd.read_excel(file_path)
+        else:
+            for enc in ["utf-8", "latin1", "utf-8-sig"]:
+                try:
+                    return pd.read_csv(file_path, encoding=enc)
+                except Exception:
+                    continue
+            return pd.read_csv(file_path)
+            
+    df_lr = load_df(lr_file)
+    df_despatch = load_df(despatch_file)
     
     # Exclude Sundays (True by default)
     exclude_sundays = True
