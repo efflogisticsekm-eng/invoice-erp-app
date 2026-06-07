@@ -40,3 +40,11 @@ jobs:
         RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
       run: |
         python helper_scripts/erp_automation/download_and_email.py
+
+    - name: Upload Error Screenshot
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: error-screenshot
+        path: /home/runner/Downloads/erp_temp_downloads/
+
