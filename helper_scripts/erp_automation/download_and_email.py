@@ -224,10 +224,14 @@ def download_erp_reports():
                 print(f"Entering dates on LR search form: Date From={from_date_lr}, Date To={to_date_lr}")
                 page.fill("#search_date", from_date_lr)
                 page.fill("#search_date_to", to_date_lr)
+                
+                print("Selecting 'All' in LR Current Status filter...")
+                page.select_option("#lr_current_status", "-1")
+                
                 # Give page a brief moment to update input fields
                 page.wait_for_timeout(1000)
             except Exception as date_err:
-                print(f"Error formatting/filling dates on LR page: {date_err}")
+                print(f"Error formatting/filling dates or selecting status on LR page: {date_err}")
             
             # Download LR Report by clicking the export button
             print("Downloading LR raw report...")
