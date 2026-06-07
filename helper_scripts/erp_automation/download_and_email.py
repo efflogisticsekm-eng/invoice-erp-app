@@ -142,14 +142,23 @@ def download_erp_reports():
                     page.fill("input[type='password']", ERP_PASSWORD)
                     
                 # Submit login form
-                submit_button = page.locator("button[type='submit']")
+                submit_button = page.locator("input[type='submit'], button[type='submit'], input[value='Sign in'], button")
                 if submit_button.count() > 0:
-                    submit_button.click()
+                    submit_button.first.click()
                 else:
                     page.keyboard.press("Enter")
                     
-                page.wait_for_load_state("networkidle")
-                print("Login complete. Current URL:", page.url)
+                # Wait for navigation to complete (expecting to leave the login page)
+                try:
+                    page.wait_for_url("**/login", exclude=True, timeout=10000)
+                    page.wait_for_load_state("networkidle")
+                    print("Login complete. Current URL:", page.url)
+                except Exception as nav_err:
+                    print("Navigation timeout or did not leave login page. Current URL:", page.url)
+                    # Check if error message is displayed
+                    if page.locator(".alert, .alert-danger, .error, #error").count() > 0:
+                        error_text = page.locator(".alert, .alert-danger, .error, #error").first.inner_text()
+                        print(f"ERP Login Error Message: {error_text.strip()}")
             
             # Download Despatch Report
             print("Downloading Despatch raw report...")
