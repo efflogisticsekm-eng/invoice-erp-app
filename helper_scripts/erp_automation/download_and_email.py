@@ -214,6 +214,21 @@ def download_erp_reports():
             page.goto(lr_url)
             page.wait_for_load_state("load")
             
+            # Convert from YYYY-MM-DD to DD-MM-YYYY
+            try:
+                from_dt = datetime.strptime(from_date, "%Y-%m-%d")
+                to_dt = datetime.strptime(to_date, "%Y-%m-%d")
+                from_date_lr = from_dt.strftime("%d-%m-%Y")
+                to_date_lr = to_dt.strftime("%d-%m-%Y")
+                
+                print(f"Entering dates on LR search form: Date From={from_date_lr}, Date To={to_date_lr}")
+                page.fill("#search_date", from_date_lr)
+                page.fill("#search_date_to", to_date_lr)
+                # Give page a brief moment to update input fields
+                page.wait_for_timeout(1000)
+            except Exception as date_err:
+                print(f"Error formatting/filling dates on LR page: {date_err}")
+            
             # Download LR Report by clicking the export button
             print("Downloading LR raw report...")
             lr_btn = page.locator("a.export_lr_excel, button#excelExport1, #excelExport1").first
@@ -225,7 +240,7 @@ def download_erp_reports():
             download_lr.save_as(lr_file_path)
             print("LR raw report saved to:", lr_file_path)
             
-            return lr_file_path, despatch_file_path
+            return lr_file_path, despatch_file_path, from_date, to_date
             
         except Exception as e:
             print("Error downloading from ERP:", e)
@@ -768,9 +783,19 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
     return processed_file
 
 # 8. Email function
-def email_report(processed_file_path, raw_lr_path, raw_despatch_path):
+def email_report(processed_file_path, raw_lr_path, raw_despatch_path, from_date=None, to_date=None):
     print("Sending daily report email...")
     
+    # Format the dates for display in the email
+    date_range_str = "N/A"
+    if from_date and to_date:
+        try:
+            from_dt = datetime.strptime(from_date, "%Y-%m-%d")
+            to_dt = datetime.strptime(to_date, "%Y-%m-%d")
+            date_range_str = f"{from_dt.strftime('%d-%m-%Y')} to {to_dt.strftime('%d-%m-%Y')}"
+        except Exception:
+            date_range_str = f"{from_date} to {to_date}"
+            
     # Set up email message
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
@@ -781,6 +806,8 @@ def email_report(processed_file_path, raw_lr_path, raw_despatch_path):
     body = f"""Dear User,
 
 Please find attached the daily ERP Dispatch & Delivery delay processing report sheets for {today_str}.
+
+Report Date Range / Period: {date_range_str} 📅
 
 Included sheets in Interactive_Delivery_Report.xlsx:
 1. Overall Summary (Delivered/Open/Transit ratios & delay charts)
@@ -800,11 +827,30 @@ ERP Daily Automation Engine ⚡
 """
     msg.attach(MIMEText(body, 'plain'))
     
+    # Helper to check file signature and get correct extension
+    def get_extension(file_path):
+        if not os.path.exists(file_path):
+            return ".xlsx"
+        try:
+            with open(file_path, "rb") as f:
+                head = f.read(4)
+            if head == b"PK\x03\x04":
+                return ".xlsx"
+            elif head == b"\xd0\xcf\x11\xe0":
+                return ".xls"
+            else:
+                return ".csv"
+        except Exception:
+            return ".xlsx"
+
+    lr_ext = get_extension(raw_lr_path)
+    desp_ext = get_extension(raw_despatch_path)
+    
     # Attach files
     files_to_attach = [
         (processed_file_path, f"Interactive_Delivery_Report_{today_str}.xlsx"),
-        (raw_lr_path, f"raw_lr_data_{today_str}.xlsx"),
-        (raw_despatch_path, f"raw_despatch_data_{today_str}.xlsx")
+        (raw_lr_path, f"raw_lr_data_{today_str}{lr_ext}"),
+        (raw_despatch_path, f"raw_despatch_data_{today_str}{desp_ext}")
     ]
     
     for file_path, attachment_name in files_to_attach:
@@ -837,7 +883,7 @@ def main():
     print(f"[{datetime.now()}] Starting daily report process...")
     try:
         # Download files
-        lr_file, despatch_file = download_erp_reports()
+        lr_file, despatch_file, from_date, to_date = download_erp_reports()
         
         # Load mappings
         supervisor_map = fetch_supervisor_mappings()
@@ -846,7 +892,7 @@ def main():
         processed_file = generate_excel_report(lr_file, despatch_file, supervisor_map)
         
         # Email report
-        email_report(processed_file, lr_file, despatch_file)
+        email_report(processed_file, lr_file, despatch_file, from_date, to_date)
         
         print(f"[{datetime.now()}] All tasks completed successfully! Have a great day!")
     except Exception as e:
