@@ -1,0 +1,46 @@
+# Ignore environment secrets
+.env
+.env.*
+*.local
+
+# Ignore logs and temp files
+*.log
+.DS_Store
+
+# Ignore dependencies and builds
+node_modules/
+dist/
+.vercel/
+downloads/
+erp_temp_downloads/
+error_screenshot.png
+
+# Ignore other private workspace folders
+DUBAI/
+EFF PARCEL FREIGHT WORKING/
+ERP nxt Data collection/
+docs/
+hr-recruit-ai/
+logs/
+scratch/
+task.md
+walkthrough.md
+Project_Documentation.txt
+Consignee_Master.csv
+
+# Ignore local helper scripts except erp_automation
+helper_scripts/*
+!helper_scripts/erp_automation/
+
+# Ignore local test and scratch files in consignee-app
+INDIA/consignee-app/test_*.js
+INDIA/consignee-app/check_*.js
+INDIA/consignee-app/run_*.js
+INDIA/consignee-app/create_*.js
+INDIA/consignee-app/dns_test.js
+INDIA/consignee-app/get_*.js
+INDIA/consignee-app/inspect_*.js
+INDIA/consignee-app/print_*.js
+INDIA/consignee-app/local-server.js
+INDIA/consignee-app/compare_april.js
+INDIA/consignee-app/scratch_test.js
