@@ -1298,27 +1298,32 @@ export default function DeliveryDashboard() {
     }
   }, [customHolidays, excludeSundays, despatchMap, supervisorMap]);
 
-  const addHoliday = async () => {
-    if (newHoliday && !customHolidays.includes(newHoliday)) {
-      try {
-        const res = await fetch('/api/explorer/create/holidays', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ date: newHoliday, description: 'Custom Holiday' })
-        });
-        if (res.ok) {
-          const result = await res.json();
-          const newRow = result.data;
-          if (newRow) {
-            setHolidaysDbList(prev => [...prev, newRow]);
-            const dateOnly = newRow.date ? newRow.date.split('T')[0] : newHoliday;
-            setCustomHolidays(prev => [...prev, dateOnly]);
-            setNewHoliday('');
-          }
+  const addHolidayDate = async (dateStr) => {
+    if (!dateStr || customHolidays.includes(dateStr)) return;
+    try {
+      const res = await fetch('/api/explorer/create/holidays', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: dateStr, description: 'Custom Holiday' })
+      });
+      if (res.ok) {
+        const result = await res.json();
+        const newRow = result.data;
+        if (newRow) {
+          setHolidaysDbList(prev => [...prev, newRow]);
+          const dateOnly = newRow.date ? newRow.date.split('T')[0] : dateStr;
+          setCustomHolidays(prev => [...prev, dateOnly]);
         }
-      } catch (err) {
-        console.error("Error adding holiday:", err);
       }
+    } catch (err) {
+      console.error("Error adding holiday:", err);
+    }
+  };
+
+  const addHoliday = async () => {
+    if (newHoliday) {
+      await addHolidayDate(newHoliday);
+      setNewHoliday('');
     }
   };
 
@@ -1999,9 +2004,7 @@ export default function DeliveryDashboard() {
                           const parsed = parseLocalInputDate(val);
                           if (parsed) {
                             const formatted = getDateStr(parsed);
-                            if (!customHolidays.includes(formatted)) {
-                              setCustomHolidays([...customHolidays, formatted]);
-                            }
+                            addHolidayDate(formatted);
                           }
                           e.target.value = ''; // Reset input
                         }
