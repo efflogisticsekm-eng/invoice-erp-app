@@ -69,13 +69,25 @@ def parse_date(val):
     val_str = clean_val(val)
     if not val_str:
         return None
-    for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%d.%m.%Y'):
+    val_str = val_str.strip()
+    
+    # Try explicit formats first, prioritizing Day-Month-Year and handling times
+    formats = (
+        '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %I:%M:%S %p', '%Y-%m-%d %H:%M', '%Y-%m-%d %I:%M %p', '%Y-%m-%d',
+        '%d-%m-%Y %H:%M:%S', '%d-%m-%Y %I:%M:%S %p', '%d-%m-%Y %H:%M', '%d-%m-%Y %I:%M %p', '%d-%m-%Y',
+        '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %I:%M:%S %p', '%d/%m/%Y %H:%M', '%d/%m/%Y %I:%M %p', '%d/%m/%Y',
+        '%d.%m.%Y %H:%M:%S', '%d.%m.%Y %I:%M:%S %p', '%d.%m.%Y %H:%M', '%d.%m.%Y %I:%M %p', '%d.%m.%Y',
+        '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y %H:%M', '%m/%d/%Y %I:%M %p', '%m/%d/%Y',
+    )
+    for fmt in formats:
         try:
             return datetime.strptime(val_str, fmt)
         except ValueError:
             continue
+            
+    # Fallback to pandas with dayfirst=True to avoid MM/DD/YYYY parsing of Indian dates
     try:
-        pdt = pd.to_datetime(val_str)
+        pdt = pd.to_datetime(val_str, dayfirst=True)
         if pd.isna(pdt) or pdt is pd.NaT:
             return None
         return pdt.to_pydatetime()
@@ -135,9 +147,29 @@ def fetch_supervisor_mappings():
     except Exception as e:
         print(f"Error fetching supervisor mappings: {e}. Defaulting to empty mapping.")
         return {}
+
+# 4.1 Fetch holidays from Supabase
+def fetch_holidays():
+    print("Fetching holidays from Supabase...")
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/holidays?select=*"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}"
+        }
+        res = requests.get(url, headers=headers)
+        res.raise_for_status()
+        data = res.json()
+        print(f"Loaded {len(data)} holidays.")
+        holidays_list = []
+        for item in data:
+            d_str = item.get('date')
+            if d_str:
+                holidays_list.append(clean_val(d_str))
+        return holidays_list
     except Exception as e:
-        print(f"Error fetching supervisor mappings: {e}. Defaulting to empty mapping.")
-        return {}
+        print(f"Error fetching holidays: {e}. Defaulting to empty list.")
+        return []
 
 # 5. Playwright ERP Download
 def download_erp_reports():
@@ -334,7 +366,7 @@ def apply_styles(ws, row_count, col_count, sheet_type="default", enable_filter=F
         ws.auto_filter.ref = f"A1:{col_letter}{row_count}"
 
 # 7. Generate Excel file
-def generate_excel_report(lr_file, despatch_file, supervisor_map):
+def generate_excel_report(lr_file, despatch_file, supervisor_map, custom_holidays):
     print("Generating Interactive_Delivery_Report.xlsx...")
     
     # Read raw sheets
@@ -378,7 +410,6 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map):
     
     # Exclude Sundays (True by default)
     exclude_sundays = True
-    custom_holidays = [] # Can be populated if needed, or fetched from database
     
     # Clean LR column names
     df_lr.columns = [str(c).strip().upper() for c in df_lr.columns]
@@ -972,8 +1003,11 @@ def main():
         # Load mappings
         supervisor_map = fetch_supervisor_mappings()
         
+        # Load holidays
+        custom_holidays = fetch_holidays()
+        
         # Process and generate formatted workbook
-        processed_file, unmapped_supervisors = generate_excel_report(lr_file, despatch_file, supervisor_map)
+        processed_file, unmapped_supervisors = generate_excel_report(lr_file, despatch_file, supervisor_map, custom_holidays)
         
         # Email report
         email_report(processed_file, lr_file, despatch_file, from_date, to_date, unmapped_supervisors)

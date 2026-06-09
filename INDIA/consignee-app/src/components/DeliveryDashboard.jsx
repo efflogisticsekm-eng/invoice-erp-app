@@ -155,6 +155,7 @@ export default function DeliveryDashboard() {
 
   const [excludeSundays, setExcludeSundays] = useState(true);
   const [customHolidays, setCustomHolidays] = useState([]);
+  const [holidaysDbList, setHolidaysDbList] = useState([]);
   const [newHoliday, setNewHoliday] = useState('');
 
   const [selectedConsignor, setSelectedConsignor] = useState('All');
@@ -183,6 +184,26 @@ export default function DeliveryDashboard() {
   useEffect(() => {
     setSelectedDestination(null);
   }, [selectedConsignor, selectedBranch, filterStartDate, filterEndDate]);
+
+  useEffect(() => {
+    const fetchHolidays = async () => {
+      try {
+        const res = await fetch('/api/explorer/data/holidays');
+        if (res.ok) {
+          const result = await res.json();
+          const list = result.data || [];
+          setHolidaysDbList(list);
+          setCustomHolidays(list.map(h => {
+            const dateOnly = h.date ? h.date.split('T')[0] : '';
+            return dateOnly;
+          }).filter(Boolean));
+        }
+      } catch (err) {
+        console.error("Error fetching holidays:", err);
+      }
+    };
+    fetchHolidays();
+  }, []);
 
   const consignorsList = React.useMemo(() => {
     if (!data) return [];
@@ -1277,15 +1298,52 @@ export default function DeliveryDashboard() {
     }
   }, [customHolidays, excludeSundays, despatchMap, supervisorMap]);
 
-  const addHoliday = () => {
+  const addHoliday = async () => {
     if (newHoliday && !customHolidays.includes(newHoliday)) {
-      setCustomHolidays([...customHolidays, newHoliday]);
-      setNewHoliday('');
+      try {
+        const res = await fetch('/api/explorer/create/holidays', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date: newHoliday, description: 'Custom Holiday' })
+        });
+        if (res.ok) {
+          const result = await res.json();
+          const newRow = result.data;
+          if (newRow) {
+            setHolidaysDbList(prev => [...prev, newRow]);
+            const dateOnly = newRow.date ? newRow.date.split('T')[0] : newHoliday;
+            setCustomHolidays(prev => [...prev, dateOnly]);
+            setNewHoliday('');
+          }
+        }
+      } catch (err) {
+        console.error("Error adding holiday:", err);
+      }
     }
   };
 
-  const removeHoliday = (h) => {
-    setCustomHolidays(customHolidays.filter(item => item !== h));
+  const removeHoliday = async (h) => {
+    const holidayObj = holidaysDbList.find(item => {
+      const dateOnly = item.date ? item.date.split('T')[0] : '';
+      return dateOnly === h;
+    });
+    if (holidayObj) {
+      try {
+        const res = await fetch('/api/explorer/delete/holidays', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: holidayObj.id })
+        });
+        if (res.ok) {
+          setCustomHolidays(prev => prev.filter(item => item !== h));
+          setHolidaysDbList(prev => prev.filter(item => item.id !== holidayObj.id));
+        }
+      } catch (err) {
+        console.error("Error deleting holiday:", err);
+      }
+    } else {
+      setCustomHolidays(prev => prev.filter(item => item !== h));
+    }
   };
 
   const getDestinationBreakdown = (category) => {

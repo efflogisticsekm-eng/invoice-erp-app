@@ -1146,6 +1146,16 @@ app.get('/api/migrate', async (req, res) => {
           `;
           await client.query(createSupervisorTableSql);
 
+          const createHolidaysTableSql = `
+            CREATE TABLE IF NOT EXISTS public.holidays (
+              id BIGSERIAL PRIMARY KEY,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+              date DATE UNIQUE NOT NULL,
+              description TEXT
+            );
+          `;
+          await client.query(createHolidaysTableSql);
+
           const alterTableSql = `
             ALTER TABLE public.pod_register ADD COLUMN IF NOT EXISTS invoice_value_total TEXT;
             ALTER TABLE public.pod_register ADD COLUMN IF NOT EXISTS invoice_item_total_count TEXT;
@@ -1696,7 +1706,7 @@ app.post('/api/payroll/draft/save', express.json({ limit: '20mb' }), async (req,
 app.get('/api/explorer/data/:table', async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
-  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping'].includes(table)) {
+  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'holidays'].includes(table)) {
     return res.status(400).json({ error: "Invalid table name" });
   }
   try {
@@ -1711,7 +1721,7 @@ app.get('/api/explorer/data/:table', async (req, res) => {
 app.post('/api/explorer/create/:table', express.json({ limit: '5mb' }), async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
-  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping'].includes(table)) {
+  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'holidays'].includes(table)) {
     return res.status(400).json({ error: "Invalid table name" });
   }
   const newRow = req.body;
@@ -1747,7 +1757,7 @@ app.post('/api/explorer/create/:table', express.json({ limit: '5mb' }), async (r
 app.post('/api/explorer/update/:table', express.json({ limit: '5mb' }), async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
-  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping'].includes(table)) {
+  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'holidays'].includes(table)) {
     return res.status(400).json({ error: "Invalid table name" });
   }
   const { id, ...updatedFields } = req.body;
@@ -1768,7 +1778,7 @@ app.post('/api/explorer/update/:table', express.json({ limit: '5mb' }), async (r
 app.post('/api/explorer/delete/:table', express.json(), async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
-  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping'].includes(table)) {
+  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'holidays'].includes(table)) {
     return res.status(400).json({ error: "Invalid table name" });
   }
   const { id } = req.body;
