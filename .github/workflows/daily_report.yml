@@ -2,8 +2,8 @@ name: Daily ERP Report Automation
 
 on:
   schedule:
-    # 7:30 PM IST is 2:00 PM UTC (14:00 UTC)
-    - cron: '0 14 * * *'
+    # 7:17 PM IST is 1:47 PM UTC (13:47 UTC)
+    - cron: '47 13 * * *'
   workflow_dispatch: # Allows manual trigger from GitHub UI
 
 jobs:
