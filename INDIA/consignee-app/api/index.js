@@ -1156,6 +1156,24 @@ app.get('/api/migrate', async (req, res) => {
           `;
           await client.query(createHolidaysTableSql);
 
+          const createDespatchSnapshotTableSql = `
+            CREATE TABLE IF NOT EXISTS public.daily_despatch_snapshot (
+              id BIGSERIAL PRIMARY KEY,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+              despatch_date TEXT,
+              despatch_no TEXT,
+              lr_no TEXT,
+              driver_name TEXT,
+              supervisor_name TEXT,
+              branch TEXT,
+              box_qty INTEGER,
+              destination TEXT,
+              consignee TEXT,
+              UNIQUE (despatch_date, despatch_no, lr_no)
+            );
+          `;
+          await client.query(createDespatchSnapshotTableSql);
+
           const alterTableSql = `
             ALTER TABLE public.pod_register ADD COLUMN IF NOT EXISTS invoice_value_total TEXT;
             ALTER TABLE public.pod_register ADD COLUMN IF NOT EXISTS invoice_item_total_count TEXT;
