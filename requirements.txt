@@ -9,3 +9,4 @@ gspread
 oauth2client
 requests
 supabase
+Pillow>=10.0.0

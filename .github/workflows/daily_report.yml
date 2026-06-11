@@ -2,9 +2,20 @@ name: Daily ERP Report Automation
 
 on:
   schedule:
-    # 7:17 PM IST is 1:47 PM UTC (13:47 UTC)
-    - cron: '47 13 * * *'
-  workflow_dispatch: # Allows manual trigger from GitHub UI
+    # Evening Job at 7:13 PM IST (13:43 UTC)
+    - cron: '43 13 * * *'
+    # Morning Job at 6:15 AM IST (00:45 UTC)
+    - cron: '45 0 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run Mode (morning or evening)'
+        required: true
+        default: 'morning'
+        type: choice
+        options:
+          - morning
+          - evening
 
 jobs:
   run-automation:
@@ -23,7 +34,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas openpyxl requests playwright python-dotenv numpy
+        pip install -r requirements.txt
+        pip install Pillow
 
     - name: Install Playwright Browsers
       run: |
@@ -38,8 +50,24 @@ jobs:
         SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
         SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
         RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+        WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
+        WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+        RECIPIENT_PHONE_NUMBER: ${{ secrets.RECIPIENT_PHONE_NUMBER }}
       run: |
-        python helper_scripts/erp_automation/download_and_email.py
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "Running manually triggered workflow in ${{ github.event.inputs.mode }} mode..."
+          python helper_scripts/erp_automation/download_and_email.py --mode ${{ github.event.inputs.mode }}
+        else
+          hour=$(date -u +%H)
+          echo "Running scheduled cron job. Current UTC hour is $hour."
+          if [ "$hour" -eq 13 ] || [ "$hour" -eq 14 ]; then
+            echo "Detected evening scheduled run time..."
+            python helper_scripts/erp_automation/download_and_email.py --mode evening
+          else
+            echo "Detected morning scheduled run time..."
+            python helper_scripts/erp_automation/download_and_email.py --mode morning
+          fi
+        fi
 
     - name: Upload Error Screenshot
       if: failure()
@@ -47,4 +75,3 @@ jobs:
       with:
         name: error-screenshot
         path: /home/runner/Downloads/erp_temp_downloads/
-

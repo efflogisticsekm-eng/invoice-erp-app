@@ -1054,7 +1054,6 @@ app.post('/api/extract-pod', async (req, res) => {
 app.get('/api/migrate', async (req, res) => {
   const projectRef = "ktxhjnhghgzcyokbcsoe";
   const database = "postgres";
-  const user = `postgres.${projectRef}`;
   
   const regions = [
     'ap-south-1',      // Mumbai (User location)
@@ -1083,130 +1082,160 @@ app.get('/api/migrate', async (req, res) => {
     process.env.SUPABASE_KEY
   ].filter(Boolean);
 
-  let errors = [];
-  
+  const attempts = [];
   for (const region of regions) {
-    const host = `aws-0-${region}.pooler.supabase.com`;
-    for (const password of passwords) {
-      for (const port of [6543, 5432]) {
-        console.log(`Auto-Migrating: trying ${host}:${port} with password prefix ${password.substring(0, 3)}...`);
-        const client = new Client({
-          host,
+    for (const port of [6543, 5432]) {
+      for (const password of passwords) {
+        attempts.push({
+          host: `aws-0-${region}.pooler.supabase.com`,
           port,
-          user,
-          password,
-          database,
-          ssl: { rejectUnauthorized: false },
-          connectionTimeoutMillis: 2500 // 2.5s timeout to speed up checks
+          user: `postgres.${projectRef}`,
+          password
         });
-
-        try {
-          await client.connect();
-          console.log(`SUCCESS! Connected to ${host}:${port}`);
-          
-          const createTableSql = `
-            CREATE TABLE IF NOT EXISTS public.pod_register (
-              id BIGSERIAL PRIMARY KEY,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-              date TEXT,
-              invoice_no TEXT,
-              lr_number TEXT,
-              uploaded_date TEXT,
-              uploaded_time TEXT,
-              uploaded_doc TEXT,
-              consignor TEXT,
-              consignor_gstin TEXT,
-              ship_to_party_consignee TEXT,
-              consignee_code TEXT,
-              ship_to_party_consignee_gstin TEXT,
-              place TEXT,
-              area TEXT,
-              district TEXT,
-              state TEXT,
-              pin_code TEXT,
-              phone_number TEXT,
-              address TEXT,
-              remarks TEXT,
-              remarks_from_consignee TEXT,
-              seal_ok TEXT,
-              sign_ok TEXT,
-              date_ok TEXT,
-              consignee_seal_matched TEXT
-            );
-          `;
-          await client.query(createTableSql);
-
-          const createSupervisorTableSql = `
-            CREATE TABLE IF NOT EXISTS public.supervisor_branch_mapping (
-              id BIGSERIAL PRIMARY KEY,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-              supervisor_name TEXT UNIQUE NOT NULL,
-              branch TEXT NOT NULL
-            );
-          `;
-          await client.query(createSupervisorTableSql);
-
-          const createHolidaysTableSql = `
-            CREATE TABLE IF NOT EXISTS public.holidays (
-              id BIGSERIAL PRIMARY KEY,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-              date DATE UNIQUE NOT NULL,
-              description TEXT
-            );
-          `;
-          await client.query(createHolidaysTableSql);
-
-          const createDespatchSnapshotTableSql = `
-            CREATE TABLE IF NOT EXISTS public.daily_despatch_snapshot (
-              id BIGSERIAL PRIMARY KEY,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-              despatch_date TEXT,
-              despatch_no TEXT,
-              lr_no TEXT,
-              driver_name TEXT,
-              supervisor_name TEXT,
-              branch TEXT,
-              box_qty INTEGER,
-              destination TEXT,
-              consignee TEXT,
-              UNIQUE (despatch_date, despatch_no, lr_no)
-            );
-          `;
-          await client.query(createDespatchSnapshotTableSql);
-
-          const alterTableSql = `
-            ALTER TABLE public.pod_register ADD COLUMN IF NOT EXISTS invoice_value_total TEXT;
-            ALTER TABLE public.pod_register ADD COLUMN IF NOT EXISTS invoice_item_total_count TEXT;
-            ALTER TABLE public.pod_register ADD COLUMN IF NOT EXISTS item_wise_count TEXT;
-
-            ALTER TABLE public.live_scanned_invoices ADD COLUMN IF NOT EXISTS invoice_value_total TEXT;
-            ALTER TABLE public.live_scanned_invoices ADD COLUMN IF NOT EXISTS invoice_item_total_count TEXT;
-            ALTER TABLE public.live_scanned_invoices ADD COLUMN IF NOT EXISTS item_wise_count TEXT;
-
-            ALTER TABLE public.all_invoices ADD COLUMN IF NOT EXISTS invoice_value_total TEXT;
-            ALTER TABLE public.all_invoices ADD COLUMN IF NOT EXISTS invoice_item_total_count TEXT;
-            ALTER TABLE public.all_invoices ADD COLUMN IF NOT EXISTS item_wise_count TEXT;
-          `;
-          await client.query(alterTableSql);
-          await client.end();
-          
-          return res.json({
-            status: "success",
-            message: `Migration completed successfully on region ${region} via port ${port}!`
-          });
-        } catch (err) {
-          console.error(`Failed ${host}:${port}: ${err.message}`);
-          errors.push(`${host}:${port} (${password.substring(0, 3)}): ${err.message}`);
-          try { await client.end(); } catch (e) {}
-        }
       }
     }
   }
 
-  return res.status(500).json({
-    error: "All connection attempts and password fallbacks failed",
-    details: errors.slice(-15) // return last 15 errors for complete debug context
-  });
+  for (const password of passwords) {
+    attempts.push({
+      host: "2406:da14:25a:5801:2280:b643:74c9:b400",
+      port: 5432,
+      user: "postgres",
+      password
+    });
+    attempts.push({
+      host: "db.ktxhjnhghgzcyokbcsoe.supabase.co",
+      port: 5432,
+      user: "postgres",
+      password
+    });
+  }
+
+  const testConnection = async (att) => {
+    const client = new Client({
+      host: att.host,
+      port: att.port,
+      user: att.user,
+      password: att.password,
+      database: "postgres",
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 3000
+    });
+    try {
+      await client.connect();
+      return { client, attempt: att };
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  try {
+    const { client, attempt } = await Promise.any(
+      attempts.map(att => testConnection(att).catch(err => {
+        throw new Error(`${att.host}:${att.port}:${att.user}: ${err.message}`);
+      }))
+    );
+
+    console.log(`CONNECTED to database via ${attempt.host}:${attempt.port} as ${attempt.user}`);
+
+    const createTableSql = `
+      CREATE TABLE IF NOT EXISTS public.pod_register (
+        id BIGSERIAL PRIMARY KEY,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+        date TEXT,
+        invoice_no TEXT,
+        lr_number TEXT,
+        uploaded_date TEXT,
+        uploaded_time TEXT,
+        uploaded_doc TEXT,
+        consignor TEXT,
+        consignor_gstin TEXT,
+        ship_to_party_consignee TEXT,
+        consignee_code TEXT,
+        ship_to_party_consignee_gstin TEXT,
+        place TEXT,
+        area TEXT,
+        district TEXT,
+        state TEXT,
+        pin_code TEXT,
+        phone_number TEXT,
+        address TEXT,
+        remarks TEXT,
+        remarks_from_consignee TEXT,
+        seal_ok TEXT,
+        sign_ok TEXT,
+        date_ok TEXT,
+        consignee_seal_matched TEXT
+      );
+    `;
+    await client.query(createTableSql);
+
+    const createSupervisorTableSql = `
+      CREATE TABLE IF NOT EXISTS public.supervisor_branch_mapping (
+        id BIGSERIAL PRIMARY KEY,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+        supervisor_name TEXT UNIQUE NOT NULL,
+        branch TEXT NOT NULL
+      );
+    `;
+    await client.query(createSupervisorTableSql);
+
+    const createHolidaysTableSql = `
+      CREATE TABLE IF NOT EXISTS public.holidays (
+        id BIGSERIAL PRIMARY KEY,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+        date DATE UNIQUE NOT NULL,
+        description TEXT
+      );
+    `;
+    await client.query(createHolidaysTableSql);
+
+    const createDespatchSnapshotTableSql = `
+      CREATE TABLE IF NOT EXISTS public.daily_despatch_snapshot (
+        id BIGSERIAL PRIMARY KEY,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+        despatch_date TEXT,
+        despatch_no TEXT,
+        lr_no TEXT,
+        driver_name TEXT,
+        supervisor_name TEXT,
+        branch TEXT,
+        box_qty INTEGER,
+        destination TEXT,
+        consignee TEXT,
+        UNIQUE (despatch_date, despatch_no, lr_no)
+      );
+    `;
+    await client.query(createDespatchSnapshotTableSql);
+
+    const alterTableSql = `
+      ALTER TABLE public.pod_register ADD COLUMN IF NOT EXISTS invoice_value_total TEXT;
+      ALTER TABLE public.pod_register ADD COLUMN IF NOT EXISTS invoice_item_total_count TEXT;
+      ALTER TABLE public.pod_register ADD COLUMN IF NOT EXISTS item_wise_count TEXT;
+
+      ALTER TABLE public.live_scanned_invoices ADD COLUMN IF NOT EXISTS invoice_value_total TEXT;
+      ALTER TABLE public.live_scanned_invoices ADD COLUMN IF NOT EXISTS invoice_item_total_count TEXT;
+      ALTER TABLE public.live_scanned_invoices ADD COLUMN IF NOT EXISTS item_wise_count TEXT;
+
+      ALTER TABLE public.all_invoices ADD COLUMN IF NOT EXISTS invoice_value_total TEXT;
+      ALTER TABLE public.all_invoices ADD COLUMN IF NOT EXISTS invoice_item_total_count TEXT;
+      ALTER TABLE public.all_invoices ADD COLUMN IF NOT EXISTS item_wise_count TEXT;
+    `;
+    await client.query(alterTableSql);
+    await client.end();
+
+    return res.json({
+      status: "success",
+      message: `Migration completed successfully via ${attempt.host}:${attempt.port} with user ${attempt.user}!`
+    });
+
+  } catch (error) {
+    console.error("Migration failed:", error);
+    res.status(500).json({
+      error: "All connection attempts and password fallbacks failed",
+      details: error.errors ? error.errors.map(e => e.message) : [error.message]
+    });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
