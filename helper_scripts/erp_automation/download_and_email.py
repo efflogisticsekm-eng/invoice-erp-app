@@ -62,6 +62,8 @@ RECEIVER_EMAIL = clean_env_var(RECEIVER_EMAIL)
 WHATSAPP_TOKEN = clean_env_var(WHATSAPP_TOKEN)
 WHATSAPP_PHONE_NUMBER_ID = clean_env_var(WHATSAPP_PHONE_NUMBER_ID)
 RECIPIENT_PHONE_NUMBER = clean_env_var(RECIPIENT_PHONE_NUMBER)
+if RECIPIENT_PHONE_NUMBER:
+    RECIPIENT_PHONE_NUMBER = "".join(c for c in RECIPIENT_PHONE_NUMBER if c.isdigit())
 
 DOWNLOAD_DIR = os.path.expanduser("~/Downloads/erp_temp_downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
