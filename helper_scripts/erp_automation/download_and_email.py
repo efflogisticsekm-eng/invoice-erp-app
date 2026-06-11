@@ -2,7 +2,8 @@ import os
 import sys
 import time
 import smtplib
-from datetime import datetime
+import argparse
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -13,7 +14,7 @@ import requests
 from playwright.sync_api import sync_playwright
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils.dataframe import dataframe_to_rows
+from PIL import Image, ImageDraw, ImageFont
 
 # 1. Load Configurations from Env
 ERP_USERNAME = os.getenv("ERP_USERNAME")
@@ -23,6 +24,11 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
+
+# WhatsApp Business API Config
+WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
+WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+RECIPIENT_PHONE_NUMBER = os.getenv("RECIPIENT_PHONE_NUMBER")
 
 # Default settings if no env (e.g. for local testing, fallback to local .env values if present)
 if not ERP_USERNAME or not ERP_PASSWORD:
@@ -38,18 +44,63 @@ if not ERP_USERNAME or not ERP_PASSWORD:
     SENDER_EMAIL = os.getenv("SENDER_EMAIL")
     SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
     RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
+    WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
+    WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+    RECIPIENT_PHONE_NUMBER = os.getenv("RECIPIENT_PHONE_NUMBER")
 
 # Strip surrounding quotes from env variables (handles user paste errors in GitHub Secrets)
-if ERP_USERNAME: ERP_USERNAME = ERP_USERNAME.strip("'\"")
-if ERP_PASSWORD: ERP_PASSWORD = ERP_PASSWORD.strip("'\"")
-if SUPABASE_URL: SUPABASE_URL = SUPABASE_URL.strip("'\"")
-if SUPABASE_KEY: SUPABASE_KEY = SUPABASE_KEY.strip("'\"")
-if SENDER_EMAIL: SENDER_EMAIL = SENDER_EMAIL.strip("'\"")
-if SENDER_PASSWORD: SENDER_PASSWORD = SENDER_PASSWORD.strip("'\"")
-if RECEIVER_EMAIL: RECEIVER_EMAIL = RECEIVER_EMAIL.strip("'\"")
+def clean_env_var(val):
+    return val.strip("'\"") if val else ""
+
+ERP_USERNAME = clean_env_var(ERP_USERNAME)
+ERP_PASSWORD = clean_env_var(ERP_PASSWORD)
+SUPABASE_URL = clean_env_var(SUPABASE_URL)
+SUPABASE_KEY = clean_env_var(SUPABASE_KEY)
+SENDER_EMAIL = clean_env_var(SENDER_EMAIL)
+SENDER_PASSWORD = clean_env_var(SENDER_PASSWORD)
+RECEIVER_EMAIL = clean_env_var(RECEIVER_EMAIL)
+WHATSAPP_TOKEN = clean_env_var(WHATSAPP_TOKEN)
+WHATSAPP_PHONE_NUMBER_ID = clean_env_var(WHATSAPP_PHONE_NUMBER_ID)
+RECIPIENT_PHONE_NUMBER = clean_env_var(RECIPIENT_PHONE_NUMBER)
 
 DOWNLOAD_DIR = os.path.expanduser("~/Downloads/erp_temp_downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# Helper to load pandas dataframe from excel or csv
+def load_df(file_path):
+    with open(file_path, "rb") as f:
+        head = f.read(4)
+    if head == b"PK\x03\x04" or head == b"\xd0\xcf\x11\xe0":
+        return pd.read_excel(file_path)
+    else:
+        import csv
+        import io
+        cleaned_rows = []
+        for enc in ["utf-8", "latin1", "utf-8-sig"]:
+            try:
+                with open(file_path, "r", encoding=enc) as f_csv:
+                    reader = csv.reader(f_csv)
+                    header = next(reader)
+                    num_cols = len(header)
+                    cleaned_rows.append(header)
+                    
+                    for row in reader:
+                        if len(row) > num_cols:
+                            last_col_val = ",".join(row[num_cols-1:])
+                            cleaned_row = row[:num_cols-1] + [last_col_val]
+                            cleaned_rows.append(cleaned_row)
+                        else:
+                            cleaned_row = row + [""] * (num_cols - len(row))
+                            cleaned_rows.append(cleaned_row)
+                
+                output = io.StringIO()
+                writer = csv.writer(output)
+                writer.writerows(cleaned_rows)
+                output.seek(0)
+                return pd.read_csv(output)
+            except Exception:
+                continue
+        return pd.read_csv(file_path)
 
 # 2. Date and String Helper Utilities
 def clean_val(val, default=""):
@@ -71,7 +122,6 @@ def parse_date(val):
         return None
     val_str = val_str.strip()
     
-    # Try explicit formats first, prioritizing Day-Month-Year and handling times
     formats = (
         '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %I:%M:%S %p', '%Y-%m-%d %H:%M', '%Y-%m-%d %I:%M %p', '%Y-%m-%d',
         '%d-%m-%Y %H:%M:%S', '%d-%m-%Y %I:%M:%S %p', '%d-%m-%Y %H:%M', '%d-%m-%Y %I:%M %p', '%d-%m-%Y',
@@ -85,7 +135,6 @@ def parse_date(val):
         except ValueError:
             continue
             
-    # Fallback to pandas with dayfirst=True to avoid MM/DD/YYYY parsing of Indian dates
     try:
         pdt = pd.to_datetime(val_str, dayfirst=True)
         if pd.isna(pdt) or pdt is pd.NaT:
@@ -94,36 +143,7 @@ def parse_date(val):
     except Exception:
         return None
 
-# 3. Delay Calculator
-def calculate_delay(start_str, end_str, consignor, holidays, exclude_sundays):
-    start = parse_date(start_str)
-    end = parse_date(end_str)
-    
-    if not start or not end:
-        return None
-    
-    diff_days = (end.date() - start.date()).days
-    calculated_delay = diff_days
-    
-    # Exclude Sundays & Holidays
-    temp = start
-    normalized_holidays = []
-    for h in holidays:
-        pd_h = parse_date(h)
-        if pd_h:
-            normalized_holidays.append(pd_h.date())
-            
-    while temp.date() < end.date():
-        temp_date = temp.date()
-        is_sunday = temp.weekday() == 6 # Sunday in python is 6
-        
-        if temp_date in normalized_holidays or (exclude_sundays and is_sunday and temp_date not in normalized_holidays):
-            calculated_delay -= 1
-        temp += pd.Timedelta(days=1)
-        
-    return max(0, calculated_delay)
-
-# 4. Fetch supervisor mappings from Supabase
+# Fetch supervisor mappings from Supabase via REST
 def fetch_supervisor_mappings():
     print("Fetching supervisor/branch mappings from Supabase...")
     try:
@@ -136,7 +156,6 @@ def fetch_supervisor_mappings():
         res.raise_for_status()
         data = res.json()
         print(f"Loaded {len(data)} supervisor mappings.")
-        # Normalize supervisor names to single-spaced uppercase
         mapping = {}
         for item in data:
             name = item.get('supervisor_name')
@@ -148,7 +167,7 @@ def fetch_supervisor_mappings():
         print(f"Error fetching supervisor mappings: {e}. Defaulting to empty mapping.")
         return {}
 
-# 4.1 Fetch holidays from Supabase
+# Fetch holidays from Supabase
 def fetch_holidays():
     print("Fetching holidays from Supabase...")
     try:
@@ -171,32 +190,61 @@ def fetch_holidays():
         print(f"Error fetching holidays: {e}. Defaulting to empty list.")
         return []
 
+# Dynamic branch resolver (guesses branch based on destination/area if supervisor is missing)
+def resolve_branch_name(area, supervisor, supervisor_map):
+    if supervisor:
+        norm_sup = normalize_name(supervisor)
+        if norm_sup in supervisor_map:
+            return supervisor_map[norm_sup]
+            
+    if area:
+        norm_area = area.strip().upper()
+        for branch_name in set(supervisor_map.values()):
+            if branch_name in norm_area or norm_area in branch_name:
+                return branch_name
+                
+    return "N/A"
+
 # 5. Playwright ERP Download
-def download_erp_reports():
-    print("Starting Playwright ERP download flow...")
-    despatch_url = "https://eff.aadhocc.in/eff_2021/main/effdespatch"
-    lr_url = "https://eff.aadhocc.in/eff_2021/main/lr/"
+def download_erp_reports(mode="morning", from_override=None, to_override=None):
+    print(f"Starting Playwright ERP download flow for mode: {mode}...")
+    
+    # Determine dates in IST
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(ist_tz)
+    
+    if mode == "evening":
+        from_date_str = from_override if from_override else now_ist.strftime("%Y-%m-%d")
+        to_date_str = to_override if to_override else now_ist.strftime("%Y-%m-%d")
+    else:
+        yesterday = now_ist - timedelta(days=1)
+        from_date_str = from_override if from_override else (yesterday - timedelta(days=30)).strftime("%Y-%m-%d")
+        to_date_str = to_override if to_override else now_ist.strftime("%Y-%m-%d")
+        
+    print(f"Date range resolved: fromDate={from_date_str}, toDate={to_date_str}")
     
     despatch_file_path = os.path.join(DOWNLOAD_DIR, "despatch_raw.xlsx")
     lr_file_path = os.path.join(DOWNLOAD_DIR, "lr_raw.xlsx")
     
+    # Clean old files to prevent reading stale reports on failures
+    for f_path in [despatch_file_path, lr_file_path]:
+        if os.path.exists(f_path):
+            os.remove(f_path)
+            
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context()
         page = context.new_page()
         
-        # Listen to browser console and page errors
         page.on("console", lambda msg: print(f"Browser Console: {msg.text}"))
         page.on("pageerror", lambda err: print(f"Browser Page Error: {err}"))
         
         try:
-            # Step 1: Navigating to main login page directly
             main_login_url = "https://eff.aadhocc.in/eff_2021/login"
             print(f"Navigating to login page: {main_login_url}...")
             page.goto(main_login_url)
             page.wait_for_load_state("load")
             
-            # Check for login inputs
             if page.locator("#login_user_id").count() > 0 or "login" in page.url.lower():
                 print("Performing ERP Login...")
                 if page.locator("#login_user_id").count() > 0:
@@ -209,70 +257,50 @@ def download_erp_reports():
                 else:
                     page.fill("input[type='password']", ERP_PASSWORD)
                     
-                # Take screenshot to verify fields are filled
-                page.screenshot(path=os.path.join(DOWNLOAD_DIR, "filled.png"), timeout=5000)
-                print("Filled credentials screenshot saved.")
-                
-                # Submit login form
                 submit_button = page.locator("form#login_form button[type='submit'], button[type='submit']")
                 if submit_button.count() > 0:
                     submit_button.first.click()
                 else:
                     page.keyboard.press("Enter")
                     
-                # Take screenshot immediately after click attempt
-                page.wait_for_timeout(2000) # wait 2s to allow page load/update
-                page.screenshot(path=os.path.join(DOWNLOAD_DIR, "clicked.png"), timeout=5000)
-                print("Clicked submit screenshot saved.")
-                
+                page.wait_for_timeout(2000)
                 # Wait for navigation to complete (expecting to leave the login page)
                 try:
-                    page.wait_for_url("**/login", exclude=True, timeout=10000)
+                    page.wait_for_url(lambda u: "/login" not in u, timeout=15000)
                     page.wait_for_load_state("load")
                     print("Login complete. Current URL:", page.url)
                 except Exception as nav_err:
                     print("Navigation timeout or did not leave login page. Current URL:", page.url)
-                    # Check if error message is displayed
-                    if page.locator("#auth_msg").count() > 0:
-                        error_text = page.locator("#auth_msg").inner_text()
-                        print(f"ERP Login Error Message: {error_text.strip()}")
             
-            # Navigate to Despatch page
-            print(f"Navigating to Despatch Listing: {despatch_url}...")
+            # 1. Download Despatch Report (Required for both evening and morning runs)
+            despatch_url = "https://eff.aadhocc.in/eff_2021/main/effdespatch"
+            print(f"Navigating to Despatch page: {despatch_url}...")
             page.goto(despatch_url)
             page.wait_for_load_state("load")
             
-            # Read fromDate and toDate input values pre-filled on the page
-            page.locator("#fromDate").wait_for(state="visible", timeout=15000)
-            from_date = page.locator("#fromDate").get_attribute("value")
-            to_date = page.locator("#toDate").get_attribute("value")
-            print(f"Found pre-filled dates: fromDate={from_date}, toDate={to_date}")
-            
-            # Construct the correct download URL and set it as the href of the export link
-            correct_href = f"https://eff.aadhocc.in/eff_2021/main/effdespatch/exportDespatchExcel?despatch_number=&location_id=&lr_number=&from_date={from_date}&to_date={to_date}&delivery_staff_search="
+            correct_href = f"https://eff.aadhocc.in/eff_2021/main/effdespatch/exportDespatchExcel?despatch_number=&location_id=&lr_number=&from_date={from_date_str}&to_date={to_date_str}&delivery_staff_search="
             print(f"Setting export link href to: {correct_href}")
+            page.locator("a.exportDespatchExcel").wait_for(state="visible", timeout=15000)
             page.evaluate(f"document.querySelector('a.exportDespatchExcel').href = '{correct_href}'")
             
-            # Download Despatch Report by clicking the export button
             print("Downloading Despatch raw report...")
             despatch_btn = page.locator("a.exportDespatchExcel").first
-            despatch_btn.wait_for(state="visible", timeout=15000)
-            
             with page.expect_download(timeout=60000) as download_info:
                 despatch_btn.click(no_wait_after=True)
             download = download_info.value
             download.save_as(despatch_file_path)
             print("Despatch report saved to:", despatch_file_path)
             
-            # Navigate to LR page
-            print(f"Navigating to LR Report page: {lr_url}...")
-            page.goto(lr_url)
-            page.wait_for_load_state("load")
-            
-            # Convert from YYYY-MM-DD to DD-MM-YYYY
-            try:
-                from_dt = datetime.strptime(from_date, "%Y-%m-%d")
-                to_dt = datetime.strptime(to_date, "%Y-%m-%d")
+            # 2. Download LR Report (Only required in morning mode)
+            if mode == "morning":
+                lr_url = "https://eff.aadhocc.in/eff_2021/main/lr/"
+                print(f"Navigating to LR page: {lr_url}...")
+                page.goto(lr_url)
+                page.wait_for_load_state("load")
+                
+                # Convert dates to DD-MM-YYYY for input fields
+                from_dt = datetime.strptime(from_date_str, "%Y-%m-%d")
+                to_dt = datetime.strptime(to_date_str, "%Y-%m-%d")
                 from_date_lr = from_dt.strftime("%d-%m-%Y")
                 to_date_lr = to_dt.strftime("%d-%m-%Y")
                 
@@ -282,24 +310,18 @@ def download_erp_reports():
                 
                 print("Selecting 'All' in LR Current Status filter...")
                 page.select_option("#lr_current_status", "-1")
-                
-                # Give page a brief moment to update input fields
                 page.wait_for_timeout(1000)
-            except Exception as date_err:
-                print(f"Error formatting/filling dates or selecting status on LR page: {date_err}")
-            
-            # Download LR Report by clicking the export button
-            print("Downloading LR raw report...")
-            lr_btn = page.locator("a.export_lr_excel, button#excelExport1, #excelExport1").first
-            lr_btn.wait_for(state="visible", timeout=15000)
-            
-            with page.expect_download(timeout=60000) as download_info_lr:
-                lr_btn.click(no_wait_after=True)
-            download_lr = download_info_lr.value
-            download_lr.save_as(lr_file_path)
-            print("LR raw report saved to:", lr_file_path)
-            
-            return lr_file_path, despatch_file_path, from_date, to_date
+                
+                print("Downloading LR raw report...")
+                lr_btn = page.locator("a.export_lr_excel, button#excelExport1, #excelExport1").first
+                lr_btn.wait_for(state="visible", timeout=15000)
+                with page.expect_download(timeout=60000) as download_info_lr:
+                    lr_btn.click(no_wait_after=True)
+                download_lr = download_info_lr.value
+                download_lr.save_as(lr_file_path)
+                print("LR raw report saved to:", lr_file_path)
+                
+            return lr_file_path if mode == "morning" else None, despatch_file_path, from_date_str, to_date_str
             
         except Exception as e:
             print("Error downloading from ERP:", e)
@@ -309,26 +331,23 @@ def download_erp_reports():
                 print("Screenshot saved to:", screenshot_path)
             except Exception as ss_err:
                 print("Could not save error screenshot:", ss_err)
-            browser.close()
             raise e
         finally:
             browser.close()
 
 # 6. Apply openpyxl styles
 def apply_styles(ws, row_count, col_count, sheet_type="default", enable_filter=False):
-    # Styles Definition
     header_font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid") # slate-800
+    header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
     header_align = Alignment(vertical="center", horizontal="center", wrap_text=True)
     
     data_font = Font(name="Arial", size=10)
     data_border = Border(
-        bottom=Side(style="thin", color="E2E8F0"), # slate-200
+        bottom=Side(style="thin", color="E2E8F0"),
         left=Side(style="thin", color="E2E8F0"),
         right=Side(style="thin", color="E2E8F0")
     )
     
-    # Header styles
     for col in range(1, col_count + 1):
         cell = ws.cell(row=1, column=col)
         cell.font = header_font
@@ -341,9 +360,7 @@ def apply_styles(ws, row_count, col_count, sheet_type="default", enable_filter=F
             right=Side(style="thin", color="000000")
         )
         
-    # Data row styles
     for row in range(2, row_count + 1):
-        # Zebra striping for even rows
         row_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid") if row % 2 == 0 else PatternFill(fill_type=None)
         for col in range(1, col_count + 1):
             cell = ws.cell(row=row, column=col)
@@ -352,7 +369,6 @@ def apply_styles(ws, row_count, col_count, sheet_type="default", enable_filter=F
             if row % 2 == 0:
                 cell.fill = row_fill
             
-            # Alignments
             if sheet_type == "summary":
                 cell.alignment = Alignment(vertical="center", horizontal="left")
             elif col == 1:
@@ -365,76 +381,235 @@ def apply_styles(ws, row_count, col_count, sheet_type="default", enable_filter=F
         col_letter = openpyxl.utils.get_column_letter(col_count)
         ws.auto_filter.ref = f"A1:{col_letter}{row_count}"
 
-# 7. Generate Excel file
-def generate_excel_report(lr_file, despatch_file, supervisor_map, custom_holidays):
-    print("Generating Interactive_Delivery_Report.xlsx...")
+# Draw Pillow Dashboard Image
+def get_pillow_font(size, bold=False):
+    font_paths = []
+    if bold:
+        font_paths = [
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "/Library/Fonts/Arial Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "Arial-Bold.ttf",
+            "DejaVuSans-Bold.ttf"
+        ]
+    else:
+        font_paths = [
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/Library/Fonts/Arial.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "Arial.ttf",
+            "DejaVuSans.ttf"
+        ]
+    for p in font_paths:
+        if os.path.exists(p):
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+def generate_pillow_dashboard(overall_stats, date_str):
+    im = Image.new("RGB", (800, 320), "#F8FAFC")
+    draw = ImageDraw.Draw(im)
     
-    # Read raw sheets
-    def load_df(file_path):
-        with open(file_path, "rb") as f:
-            head = f.read(4)
-        if head == b"PK\x03\x04" or head == b"\xd0\xcf\x11\xe0":
-            return pd.read_excel(file_path)
+    title_font = get_pillow_font(20, bold=True)
+    card_title_font = get_pillow_font(13, bold=True)
+    card_number_font = get_pillow_font(36, bold=True)
+    card_detail_font = get_pillow_font(11, bold=False)
+    
+    draw.text((30, 20), f"DAILY ERP SUMMARY ({date_str}) 📊", fill="#0F172A", font=title_font)
+    
+    # Card 1: Delivered
+    draw.rounded_rectangle([30, 70, 260, 280], radius=12, fill="#F0FDF4", outline="#DCFCE7", width=2)
+    draw.text((50, 90), "DELIVERED YESTERDAY", fill="#166534", font=card_title_font)
+    draw.text((50, 120), f"{overall_stats['delivered_count']} LRs", fill="#14532D", font=card_number_font)
+    draw.text((50, 180), f"Max Delay: {overall_stats['delivered_max_age']} Days\n({overall_stats['delivered_max_age_count']} LRs)", fill="#15803D", font=card_detail_font)
+    
+    # Card 2: Returned
+    draw.rounded_rectangle([280, 70, 510, 280], radius=12, fill="#FEF2F2", outline="#FEE2E2", width=2)
+    draw.text((300, 90), "RETURNED YESTERDAY", fill="#991B1B", font=card_title_font)
+    draw.text((300, 120), f"{overall_stats['returned_count']} LRs", fill="#7F1D1D", font=card_number_font)
+    draw.text((300, 180), f"Max Aging: {overall_stats['returned_max_age']} Days\n({overall_stats['returned_max_age_count']} LRs)", fill="#B91C1C", font=card_detail_font)
+    
+    # Card 3: Open
+    draw.rounded_rectangle([530, 70, 760, 280], radius=12, fill="#EFF6FF", outline="#DBEAFE", width=2)
+    draw.text((550, 90), "OPEN LRS (as of 7 AM)", fill="#1D4ED8", font=card_title_font)
+    draw.text((550, 120), f"{overall_stats['open_count']} LRs", fill="#1E3A8A", font=card_number_font)
+    draw.text((550, 180), f"Max Aging: {overall_stats['open_max_age']} Days\n({overall_stats['open_max_age_count']} LRs)", fill="#1E40AF", font=card_detail_font)
+    
+    image_path = os.path.join(DOWNLOAD_DIR, "daily_dashboard.png")
+    im.save(image_path)
+    print(f"Pillow dashboard image generated at: {image_path}")
+    return image_path
+
+# Send WhatsApp Business Cloud API Message
+def send_whatsapp_message(message_text):
+    if not WHATSAPP_TOKEN or not WHATSAPP_PHONE_NUMBER_ID or not RECIPIENT_PHONE_NUMBER:
+        print("⚠️ WhatsApp API credentials missing. Skipping WhatsApp notification.")
+        return
+        
+    url = f"https://graph.facebook.com/v18.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": RECIPIENT_PHONE_NUMBER,
+        "type": "text",
+        "text": {
+            "preview_url": False,
+            "body": message_text
+        }
+    }
+    try:
+        res = requests.post(url, json=payload, headers=headers)
+        if res.status_code in (200, 201):
+            print("🎉 WhatsApp message sent successfully!")
         else:
-            import csv
-            import io
-            cleaned_rows = []
-            for enc in ["utf-8", "latin1", "utf-8-sig"]:
-                try:
-                    with open(file_path, "r", encoding=enc) as f_csv:
-                        reader = csv.reader(f_csv)
-                        header = next(reader)
-                        num_cols = len(header)
-                        cleaned_rows.append(header)
-                        
-                        for row in reader:
-                            if len(row) > num_cols:
-                                last_col_val = ",".join(row[num_cols-1:])
-                                cleaned_row = row[:num_cols-1] + [last_col_val]
-                                cleaned_rows.append(cleaned_row)
-                            else:
-                                cleaned_row = row + [""] * (num_cols - len(row))
-                                cleaned_rows.append(cleaned_row)
-                    
-                    output = io.StringIO()
-                    writer = csv.writer(output)
-                    writer.writerows(cleaned_rows)
-                    output.seek(0)
-                    return pd.read_csv(output)
-                except Exception:
-                    continue
-            return pd.read_csv(file_path)
+            print(f"❌ Failed to send WhatsApp message: Status {res.status_code}, Response: {res.text}")
+    except Exception as e:
+        print(f"❌ Error sending WhatsApp message: {e}")
+
+# Run Evening Flow
+def run_evening_flow(despatch_file, supervisor_map):
+    print("Running Evening Flow: Uploading today's dispatches to Supabase...")
+    df = load_df(despatch_file)
+    if df.empty:
+        print("No dispatches found in the downloaded report.")
+        return
+        
+    df.columns = [str(c).strip().upper() for c in df.columns]
+    
+    lr_col = next((c for c in df.columns if c in ['LR NO', 'LRNO', 'LR_NUMBER', 'LR_NO']), None)
+    desp_date_col = next((c for c in df.columns if c in ['DESPATCH DATE', 'DISPATCH DATE', 'DESPATCH_DATE']), None)
+    desp_no_col = next((c for c in df.columns if c in ['DESPATCH NO', 'DISPATCH NO', 'DESPATCH_NO']), None)
+    driver_col = next((c for c in df.columns if c in ['DELIVERY DRIVER', 'DRIVER', 'DRIVER_NAME']), None)
+    sup_col = next((c for c in df.columns if c in ['LD SUPERVISOR', 'SUPERVISOR', 'LD_SUPERVISOR']), None)
+    box_col = next((c for c in df.columns if c in ['BOX QTY', 'BOXQTY', 'BOXES', 'QUANTITY']), None)
+    dest_col = next((c for c in df.columns if c in ['DESTINATION', 'PLACE', 'AREA']), None)
+    consignee_col = next((c for c in df.columns if c in ['CONSIGNEE', 'CONSIGNEE NAME', 'SHIP TO PARTY', 'CONSIGNEE_NAME']), None)
+    
+    if not lr_col or not desp_date_col:
+        print("Error: Required columns (LR NO, DESPATCH DATE) not found in Despatch report.")
+        return
+        
+    payload = []
+    for _, r in df.iterrows():
+        lr_val = clean_val(r[lr_col])
+        if not lr_val:
+            continue
             
-    df_lr = load_df(lr_file)
-    df_despatch = load_df(despatch_file)
+        sup_val = clean_val(r[sup_col]) if sup_col else ""
+        driver_val = clean_val(r[driver_col]) if driver_col else ""
+        desp_no_val = clean_val(r[desp_no_col]) if desp_no_col else ""
+        
+        norm_sup = normalize_name(sup_val)
+        branch_val = supervisor_map.get(norm_sup, "N/A")
+        
+        box_qty_val = 0
+        if box_col and pd.notna(r[box_col]):
+            try:
+                box_qty_val = int(float(r[box_col]))
+            except ValueError:
+                box_qty_val = 0
+                
+        dest_val = clean_val(r[dest_col]) if dest_col else ""
+        consignee_val = clean_val(r[consignee_col]) if consignee_col else ""
+        
+        d_parsed = parse_date(clean_val(r[desp_date_col]))
+        desp_date_str = d_parsed.strftime("%Y-%m-%d") if d_parsed else clean_val(r[desp_date_col])
+        
+        payload.append({
+            "despatch_date": desp_date_str,
+            "despatch_no": desp_no_val,
+            "lr_no": lr_val,
+            "driver_name": driver_val,
+            "supervisor_name": sup_val,
+            "branch": branch_val,
+            "box_qty": box_qty_val,
+            "destination": dest_val,
+            "consignee": consignee_val
+        })
+        
+    if not payload:
+        print("No valid rows found to upload.")
+        return
+        
+    # Bulk upload using REST API upsert
+    print(f"Uploading {len(payload)} rows to Supabase daily_despatch_snapshot...")
+    chunk_size = 100
+    for i in range(0, len(payload), chunk_size):
+        chunk = payload[i:i+chunk_size]
+        url = f"{SUPABASE_URL}/rest/v1/daily_despatch_snapshot?on_conflict=despatch_date,despatch_no,lr_no"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates"
+        }
+        res = requests.post(url, json=chunk, headers=headers)
+        res.raise_for_status()
+        
+    print("Evening upload completed successfully!")
+
+# Run Morning Flow
+def calculate_aging_metrics(lrs, reference_date):
+    if not lrs:
+        return 0, 0, 0
+    agings = [x["aging"] for x in lrs]
+    max_age = max(agings)
+    max_age_count = sum(1 for x in agings if x == max_age)
+    unique_pts = len(set(f"{x['consignee'].lower()}||{x['destination'].lower()}" for x in lrs))
+    return max_age, max_age_count, unique_pts
+
+def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
+    print(f"Running Morning Flow: Analyzing deliveries for date {yesterday_str}...")
     
-    # Exclude Sundays (True by default)
-    exclude_sundays = True
+    # 1. Fetch yesterday's snapshot from Supabase REST API
+    url = f"{SUPABASE_URL}/rest/v1/daily_despatch_snapshot?despatch_date=eq.{yesterday_str}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}"
+    }
+    res = requests.get(url, headers=headers)
+    res.raise_for_status()
+    snapshot_data = res.json()
+    print(f"Fetched {len(snapshot_data)} yesterday dispatches from Supabase.")
     
-    # Clean LR column names
-    df_lr.columns = [str(c).strip().upper() for c in df_lr.columns]
-    df_despatch.columns = [str(c).strip().upper() for c in df_despatch.columns]
+    # Group yesterday's snapshot dispatches by LR NO
+    snapshot_lrs = {item["lr_no"]: item for item in snapshot_data if item.get("lr_no")}
     
-    # Map LRs to despatch info for faster lookup
-    lr_col_desp = next((c for c in df_despatch.columns if c in ['LR NO', 'LRNO', 'LR_NO']), None)
-    desp_date_col = next((c for c in df_despatch.columns if c in ['DESPATCH DATE', 'DISPATCH DATE', 'DESPATCH_DATE']), None)
-    desp_no_col = next((c for c in df_despatch.columns if c in ['DESPATCH NO', 'DISPATCH NO', 'DESPATCH_NO', 'DISPATCH_NO']), None)
-    driver_col = next((c for c in df_despatch.columns if c in ['DELIVERY DRIVER', 'DRIVER', 'DRIVER_NAME']), None)
-    sup_col_desp = next((c for c in df_despatch.columns if c in ['LD SUPERVISOR', 'SUPERVISOR', 'LD_SUPERVISOR']), None)
-    
-    despatch_map = {}
-    if lr_col_desp and desp_date_col:
-        for _, r in df_despatch.iterrows():
+    # 2. Build 30-day dispatch map from the downloaded despatch file as supervisor fallback
+    df_desp = load_df(despatch_file)
+    desp_30d_map = {}
+    if not df_desp.empty:
+        df_desp.columns = [str(c).strip().upper() for c in df_desp.columns]
+        lr_col_desp = next((c for c in df_desp.columns if c in ['LR NO', 'LRNO', 'LR_NUMBER', 'LR_NO']), None)
+        sup_col_desp = next((c for c in df_desp.columns if c in ['LD SUPERVISOR', 'SUPERVISOR', 'LD_SUPERVISOR']), None)
+        driver_col_desp = next((c for c in df_desp.columns if c in ['DELIVERY DRIVER', 'DRIVER', 'DRIVER_NAME']), None)
+        desp_no_col_desp = next((c for c in df_desp.columns if c in ['DESPATCH NO', 'DISPATCH NO', 'DESPATCH_NO']), None)
+        
+        for _, r in df_desp.iterrows():
             lr = clean_val(r[lr_col_desp])
             if lr:
-                despatch_map[lr] = {
-                    "despatch_date": clean_val(r[desp_date_col]),
-                    "despatch_no": clean_val(r[desp_no_col]) if desp_no_col else "",
-                    "driver": clean_val(r[driver_col]) if driver_col else "",
-                    "supervisor": clean_val(r[sup_col_desp]) if sup_col_desp else ""
+                desp_30d_map[lr] = {
+                    "supervisor": clean_val(r[sup_col_desp]) if sup_col_desp else "",
+                    "driver": clean_val(r[driver_col_desp]) if driver_col_desp else "",
+                    "despatch_no": clean_val(r[desp_no_col_desp]) if desp_no_col_desp else ""
                 }
-            
-    # Process LR rows
+                
+    # 3. Load LR Report
+    df_lr = load_df(lr_file)
+    if df_lr.empty:
+        print("Error: LR raw report is empty.")
+        sys.exit(1)
+        
+    df_lr.columns = [str(c).strip().upper() for c in df_lr.columns]
+    
     lr_col = next((c for c in df_lr.columns if c in ['LR NO', 'LRNO', 'LR_NUMBER', 'LR_NO']), None)
     date_col = next((c for c in df_lr.columns if c in ['DATE', 'LR DATE', 'LR_DATE']), None)
     del_time_col = next((c for c in df_lr.columns if c in ['DELIVERY TIME', 'DELIVERY_TIME', 'DELIVERED_DATE']), None)
@@ -444,37 +619,35 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map, custom_holiday
     status_col = next((c for c in df_lr.columns if c in ['LR STATUS', 'LRSTATUS', 'STATUS']), None)
     box_col = next((c for c in df_lr.columns if c in ['BOX QTY', 'BOXQTY', 'BOXES', 'QUANTITY']), None)
     
-    processed_lrs = []
-    cancelled_lrs = []
+    # Build LR map from LR report
+    lr_rows_map = {clean_val(r[lr_col]): r for _, r in df_lr.iterrows() if clean_val(r[lr_col])}
     
-    raw_total = len(df_lr)
-    cancelled_count = 0
-    total_excluded_consignors = 0
-    delivered_count = 0
-    open_count = 0
-    despatched_count = 0
+    yesterday_dt = datetime.strptime(yesterday_str, "%Y-%m-%d")
+    yesterday_7am = datetime(yesterday_dt.year, yesterday_dt.month, yesterday_dt.day, 7, 0, 0)
     
-    delay_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 'more': 0, 'invalid': 0}
-    
-    # Leaderboard trackers
     branch_stats = {}
-    driver_stats = {}
-    
     unmapped_supervisors = set()
-    exclude_sundays = True
-    custom_holidays = []
     
-    for _, r in df_lr.iterrows():
-        lr_no = clean_val(r[lr_col]) if lr_col else ""
-        raw_status = clean_val(r[status_col], "Open") if status_col else "Open"
-        consignor = clean_val(r[consignor_col]) if consignor_col else ""
-        consignee = clean_val(r[consignee_col]) if consignee_col else ""
-        area = clean_val(r[dest_col]) if dest_col else ""
-        lr_date = clean_val(r[date_col]) if date_col else ""
-        del_time = clean_val(r[del_time_col]) if del_time_col else ""
-        box_qty = int(r[box_col]) if box_col and pd.notna(r[box_col]) and str(r[box_col]).strip().isdigit() else 0
+    # Lists for spreadsheet generation
+    despatch_snapshot_rows = []
+    open_lrs_rows = []
+    
+    # Aggregate statistics
+    for lr_no, snap in snapshot_lrs.items():
+        # Get matching row in downloaded LR report
+        row = lr_rows_map.get(lr_no)
         
-        # Mapped Status
+        consignor = clean_val(row[consignor_col]) if row is not None else snap.get("consignor", "")
+        if consignor.upper().startswith('EFF'):
+            continue
+            
+        consignee = clean_val(row[consignee_col]) if row is not None else snap.get("consignee", "")
+        destination = clean_val(row[dest_col]) if row is not None else snap.get("destination", "")
+        box_qty = int(row[box_col]) if (row is not None and box_col and pd.notna(row[box_col]) and str(row[box_col]).strip().isdigit()) else int(snap.get("box_qty", 0) or 0)
+        lr_date = clean_val(row[date_col]) if row is not None else snap.get("despatch_date", yesterday_str)
+        del_time = clean_val(row[del_time_col]) if row is not None else ""
+        
+        raw_status = clean_val(row[status_col], "Open") if row is not None else "Open"
         status_map = {
             'Despatched': 'On transit',
             'Open': 'Not Despatched',
@@ -485,464 +658,334 @@ def generate_excel_report(lr_file, despatch_file, supervisor_map, custom_holiday
         if "cancelled" in raw_status.lower() or mapped_status == 'Cancelled LR':
             mapped_status = 'Cancelled LR'
             
-        # Exclude EFF consignors
-        if consignor.upper().startswith('EFF'):
-            total_excluded_consignors += 1
-            continue
-            
-        # Supervisor and Branch Mapping (Look up from Despatch map)
-        desp_info = despatch_map.get(lr_no, {})
-        sup_val = desp_info.get("supervisor", "")
-        norm_sup = normalize_name(sup_val)
-        branch = supervisor_map.get(norm_sup, "N/A")
+        lr_date_dt = parse_date(lr_date)
+        del_time_dt = parse_date(del_time)
         
-        # Track unmapped supervisors for reporting in email
-        if sup_val and branch == "N/A":
-            unmapped_supervisors.add(sup_val)
+        branch = snap.get("branch", "N/A")
+        driver = snap.get("driver_name", "")
+        despatch_no = snap.get("despatch_no", "")
+        supervisor = snap.get("supervisor_name", "")
+        
+        if supervisor and branch == "N/A":
+            unmapped_supervisors.add(supervisor)
             
-        item = {
-            "lrNo": lr_no,
-            "area": area,
-            "branch": branch,
-            "supervisor": sup_val if sup_val else "N/A",
-            "consignor": consignor,
+        lr_item = {
+            "lr_no": lr_no,
             "consignee": consignee,
-            "date": lr_date,
-            "deliveryTime": del_time,
-            "boxQty": box_qty,
+            "destination": destination,
+            "box_qty": box_qty,
+            "lr_date": lr_date,
+            "delivery_time": del_time,
             "status": mapped_status,
-            "delay": None
+            "driver": driver,
+            "despatch_no": despatch_no,
+            "aging": 0
         }
         
-        # Check Cancellation
-        if mapped_status == 'Cancelled LR':
-            cancelled_count += 1
-            cancelled_lrs.append(item)
+        is_delivered = (mapped_status == 'Delivery Process completed.')
+        
+        if is_delivered:
+            lr_item["aging"] = (del_time_dt.date() - lr_date_dt.date()).days if lr_date_dt and del_time_dt else 0
+        else:
+            lr_item["aging"] = (yesterday_dt.date() - lr_date_dt.date()).days if lr_date_dt else 0
+            
+        # Accumulate Branch statistics
+        if branch not in branch_stats:
+            branch_stats[branch] = {
+                "delivered_lrs": [], "returned_lrs": [], "open_lrs": [], "dispatches": {}
+            }
+            
+        b_group = branch_stats[branch]
+        if is_delivered:
+            b_group["delivered_lrs"].append(lr_item)
+        else:
+            b_group["returned_lrs"].append(lr_item)
+            
+        # Accumulate Dispatch/Driver statistics
+        disp_key = (driver, despatch_no)
+        if disp_key not in b_group["dispatches"]:
+            b_group["dispatches"][disp_key] = {"delivered_lrs": [], "returned_lrs": []}
+            
+        disp_group = b_group["dispatches"][disp_key]
+        if is_delivered:
+            disp_group["delivered_lrs"].append(lr_item)
+        else:
+            disp_group["returned_lrs"].append(lr_item)
+            
+        # Snapshot sheet row
+        despatch_snapshot_rows.append({
+            "Branch": branch,
+            "Despatch No": despatch_no,
+            "Despatch Date": snap.get("despatch_date"),
+            "Driver Name": driver,
+            "Supervisor Name": supervisor,
+            "LR No": lr_no,
+            "Consignee": consignee,
+            "Destination": destination,
+            "Box Qty": box_qty,
+            "Current Status": mapped_status,
+            "Delivery Time": del_time if is_delivered else "-",
+            "LR Age (Days)": lr_item["aging"]
+        })
+
+    # Classify Open LRs as of yesterday 7:00 AM
+    for lr_no, r in lr_rows_map.items():
+        consignor = clean_val(r[consignor_col])
+        if consignor.upper().startswith('EFF'):
             continue
             
-        # Delivery delays
-        if mapped_status == 'Delivery Process completed.':
-            delivered_count += 1
-            despatch_date = desp_info.get("despatch_date", lr_date) # Fallback to LR date if no despatch date
+        lr_date = clean_val(r[date_col])
+        lr_date_dt = parse_date(lr_date)
+        if not lr_date_dt or lr_date_dt.date() > yesterday_dt.date():
+            continue
             
-            delay = calculate_delay(despatch_date, del_time, consignor, holidays=custom_holidays, exclude_sundays=exclude_sundays)
-            item["delay"] = delay
+        raw_status = clean_val(r[status_col], "Open")
+        status_map = {
+            'Despatched': 'On transit',
+            'Open': 'Not Despatched',
+            'Delivered': 'Delivery Process completed.',
+            'Despatched from Branch': 'Cancelled LR'
+        }
+        mapped_status = status_map.get(raw_status, "Not Despatched")
+        if "cancelled" in raw_status.lower() or mapped_status == 'Cancelled LR':
+            continue  # Exclude cancelled LRs
             
-            if delay is not None:
-                if delay in delay_counts:
-                    delay_counts[delay] += 1
-                else:
-                    delay_counts['more'] += 1
-            else:
-                delay_counts['invalid'] += 1
-        elif mapped_status == 'On transit':
-            despatched_count += 1
-        else:
-            open_count += 1
-            
-        processed_lrs.append(item)
+        del_time = clean_val(r[del_time_col])
+        del_time_dt = parse_date(del_time)
         
-        # Accumulate Leaderboard Stats for Branch (only if mapped to a valid branch)
-        b_name = branch
-        if b_name not in branch_stats:
-            branch_stats[b_name] = {
-                "name": b_name, "totalLrs": 0, "deliveredLrs": 0, "totalBoxes": 0,
-                "deliveryPoints": set(), "totalDelayDays": 0, "delaysCount": 0
-            }
-        bs = branch_stats[b_name]
-        bs["totalLrs"] += 1
-        bs["totalBoxes"] += box_qty
-        p_key = f"{consignee.lower()}||{area.lower()}"
-        if consignee or area:
-            bs["deliveryPoints"].add(p_key)
-        if mapped_status == 'Delivery Process completed.' and item["delay"] is not None:
-            bs["deliveredLrs"] += 1
-            bs["totalDelayDays"] += item["delay"]
-            bs["delaysCount"] += 1
+        # Determine if undelivered as of yesterday 7:00 AM
+        is_open_at_7am = False
+        if mapped_status != 'Delivery Process completed.':
+            is_open_at_7am = True
+        elif del_time_dt and del_time_dt > yesterday_7am:
+            is_open_at_7am = True
             
-        # Accumulate Leaderboard Stats for Driver
-        driver_name = desp_info.get("driver", "").strip()
-        if driver_name and driver_name != '-':
-            split_drivers = [d.strip() for d in driver_name.split(',') if d.strip()]
-            for d in split_drivers:
-                if d not in driver_stats:
-                    driver_stats[d] = {
-                        "name": d, "totalLrs": 0, "deliveredLrs": 0, "totalBoxes": 0,
-                        "deliveryPoints": set(), "totalDelayDays": 0, "delaysCount": 0
-                    }
-                ds = driver_stats[d]
-                ds["totalLrs"] += 1
-                ds["totalBoxes"] += box_qty
-                if consignee or area:
-                    ds["deliveryPoints"].add(p_key)
-                if mapped_status == 'Delivery Process completed.' and item["delay"] is not None:
-                    ds["deliveredLrs"] += 1
-                    ds["totalDelayDays"] += item["delay"]
-                    ds["delaysCount"] += 1
-                if consignee or area:
-                    ds["deliveryPoints"].add(p_key)
-                if mapped_status == 'Delivery Process completed.' and item["delay"] is not None:
-                    ds["deliveredLrs"] += 1
-                    ds["totalDelayDays"] += item["delay"]
-                    ds["delaysCount"] += 1
+        if is_open_at_7am:
+            # Resolve branch using 30-day despatch map or fallback
+            branch = "N/A"
+            dest_val = clean_val(r[dest_col])
+            consignee_val = clean_val(r[consignee_col])
+            box_qty_val = int(r[box_col]) if (box_col and pd.notna(r[box_col]) and str(r[box_col]).strip().isdigit()) else 0
+            
+            # 1. Try yesterday snapshot
+            if lr_no in snapshot_lrs:
+                branch = snapshot_lrs[lr_no].get("branch", "N/A")
+            # 2. Try 30-day despatch report
+            elif lr_no in desp_30d_map:
+                sup = desp_30d_map[lr_no].get("supervisor")
+                branch = resolve_branch_name(dest_val, sup, supervisor_map)
+            # 3. Guess based on area
+            else:
+                branch = resolve_branch_name(dest_val, "", supervisor_map)
+                
+            open_age = (yesterday_dt.date() - lr_date_dt.date()).days
+            
+            open_item = {
+                "lr_no": lr_no,
+                "consignee": consignee_val,
+                "destination": dest_val,
+                "box_qty": box_qty_val,
+                "lr_date": lr_date,
+                "status": mapped_status,
+                "aging": open_age
+            }
+            
+            if branch not in branch_stats:
+                branch_stats[branch] = {
+                    "delivered_lrs": [], "returned_lrs": [], "open_lrs": [], "dispatches": {}
+                }
+            branch_stats[branch]["open_lrs"].append(open_item)
+            
+            open_lrs_rows.append({
+                "Branch": branch,
+                "LR No": lr_no,
+                "LR Date": lr_date,
+                "Consignor": consignor,
+                "Consignee": consignee_val,
+                "Destination": dest_val,
+                "Box Qty": box_qty_val,
+                "Current Status": mapped_status,
+                "LR Age (Days)": open_age
+            })
 
-    active_total = delivered_count + open_count + despatched_count
+    # Calculations for Overall Summary Card
+    overall_delivered = []
+    overall_returned = []
+    overall_open = []
+    for b, stats in branch_stats.items():
+        overall_delivered.extend(stats["delivered_lrs"])
+        overall_returned.extend(stats["returned_lrs"])
+        overall_open.extend(stats["open_lrs"])
+        
+    overall_del_max_age, overall_del_max_age_count, _ = calculate_aging_metrics(overall_delivered, yesterday_dt)
+    overall_ret_max_age, overall_ret_max_age_count, _ = calculate_aging_metrics(overall_returned, yesterday_dt)
+    overall_open_max_age, overall_open_max_age_count, _ = calculate_aging_metrics(overall_open, yesterday_dt)
     
-    # Build Excel Workbook
+    overall_stats = {
+        "delivered_count": len(overall_delivered),
+        "delivered_max_age": overall_del_max_age,
+        "delivered_max_age_count": overall_del_max_age_count,
+        "returned_count": len(overall_returned),
+        "returned_max_age": overall_ret_max_age,
+        "returned_max_age_count": overall_ret_max_age_count,
+        "open_count": len(overall_open),
+        "open_max_age": overall_open_max_age,
+        "open_max_age_count": overall_open_max_age_count
+    }
+    
+    # 4. Construct WhatsApp Message text
+    date_display = yesterday_dt.strftime("%d/%m/%Y")
+    wa_msg = f"DAILY ERP SUMMARY ({date_display}) 📊\n\n"
+    wa_msg += f"🟢 DELIVERED YESTERDAY: {overall_stats['delivered_count']} LRs ⏱️ Max Delay: {overall_stats['delivered_max_age']} days ({overall_stats['delivered_max_age_count']} LRs)\n"
+    wa_msg += f"🔴 RETURNED YESTERDAY: {overall_stats['returned_count']} LRs ⏳ Max Aging: {overall_stats['returned_max_age']} days ({overall_stats['returned_max_age_count']} LRs)\n"
+    wa_msg += f"📦 OPEN/DESPATCH (as of 7 AM): {overall_stats['open_count']} LRs ⏳ Max Aging: {overall_stats['open_max_age']} days ({overall_stats['open_max_age_count']} LRs)\n\n"
+    
+    # Branch and Driver Wise detail
+    branch_summary_excel_rows = []
+    
+    for b in sorted(branch_stats.keys()):
+        if b == "N/A" and not branch_stats[b]["delivered_lrs"] and not branch_stats[b]["returned_lrs"] and not branch_stats[b]["open_lrs"]:
+            continue
+            
+        b_group = branch_stats[b]
+        del_max_age, del_max_age_count, del_pts = calculate_aging_metrics(b_group["delivered_lrs"], yesterday_dt)
+        ret_max_age, ret_max_age_count, ret_pts = calculate_aging_metrics(b_group["returned_lrs"], yesterday_dt)
+        open_max_age, open_max_age_count, _ = calculate_aging_metrics(b_group["open_lrs"], yesterday_dt)
+        
+        wa_msg += f"{b} BRANCH 🏢\n"
+        wa_msg += f"🟢 Delivered: {len(b_group['delivered_lrs'])} LRs, (max Aging {del_max_age}Day {del_max_age_count}nos),Total Delivery {del_pts} Nos.\n"
+        wa_msg += f"🔴 Returned: {len(b_group['returned_lrs'])} LRs,(max Aging {ret_max_age} Day {ret_max_age_count}nos),Total Delivery {ret_pts} Nos.\n"
+        
+        branch_summary_excel_rows.append({
+            "Branch": b,
+            "Delivered Count": len(b_group["delivered_lrs"]),
+            "Delivered Max Aging (Days)": del_max_age,
+            "Delivered Max Aging Count": del_max_age_count,
+            "Delivered Unique Points": del_pts,
+            "Returned Count": len(b_group["returned_lrs"]),
+            "Returned Max Aging (Days)": ret_max_age,
+            "Returned Max Aging Count": ret_max_age_count,
+            "Returned Unique Points": ret_pts,
+            "Open Count": len(b_group["open_lrs"]),
+            "Open Max Aging (Days)": open_max_age,
+            "Open Max Aging Count": open_max_age_count
+        })
+        
+        # Driver/Despatch details
+        drv_idx = 1
+        for (driver, desp_no), disp in sorted(b_group["dispatches"].items()):
+            drv_del_max_age, drv_del_max_age_count, drv_del_pts = calculate_aging_metrics(disp["delivered_lrs"], yesterday_dt)
+            drv_ret_max_age, drv_ret_max_age_count, drv_ret_pts = calculate_aging_metrics(disp["returned_lrs"], yesterday_dt)
+            
+            # Parse delivery times
+            del_times_dt = [parse_date(x["delivery_time"]) for x in disp["delivered_lrs"] if parse_date(x["delivery_time"])]
+            if del_times_dt:
+                min_time = min(del_times_dt).strftime("%I:%M%p")
+                max_time = max(del_times_dt).strftime("%I:%M%p")
+            else:
+                min_time = "-"
+                max_time = "-"
+                
+            wa_msg += f"{drv_idx}) Driver: {driver if driver else 'N/A'} :-Despatch# {desp_no}.\n"
+            wa_msg += f"🟢 Delivered: {len(disp['delivered_lrs'])} LRs, (max Aging {drv_del_max_age}Day {drv_del_max_age_count}nos),Total Delivery {drv_del_pts}Nos. 1st delivery Time {min_time},\n"
+            wa_msg += f"🔴 Returned: {len(disp['returned_lrs'])} LRs (max Aging {drv_ret_max_age}Day {drv_ret_max_age_count}nos),Total Delivery {drv_ret_pts}Nos. Last delivery Time {max_time},\n"
+            drv_idx += 1
+            
+        wa_msg += "\n"
+        
+    print("Generated WhatsApp Message:\n", wa_msg)
+    
+    # Send WhatsApp Business Message
+    send_whatsapp_message(wa_msg)
+    
+    # 5. Generate Excel file
     processed_file = os.path.join(DOWNLOAD_DIR, "Interactive_Delivery_Report.xlsx")
     writer = pd.ExcelWriter(processed_file, engine='openpyxl')
     
-    # Helper to convert Set to count
-    def get_leaderboard_row(item_stats, is_branch=True):
-        rows_data = []
-        for name, s in item_stats.items():
-            avg_delay = (s["totalDelayDays"] / s["delaysCount"]) if s["delaysCount"] > 0 else 0
-            pts = len(s["deliveryPoints"])
-            # Score formula: (Delivered LRs * 10) + (Total Boxes * 1) + (Points * 20) - (Average Delay * 30)
-            score = (s["deliveredLrs"] * 10) + (s["totalBoxes"] * 1) + (pts * 20) - (avg_delay * 30)
-            score = max(0, int(round(score)))
-            rows_data.append({
-                "Name": name,
-                "Type": "Branch" if is_branch else "Driver",
-                "Performance Score": score,
-                "Delivered LRs": s["deliveredLrs"],
-                "Delivery Points": pts,
-                "Delivered Boxes": s["totalBoxes"],
-                "Average Delay (Days)": round(avg_delay, 1) if s["delaysCount"] > 0 else '-'
-            })
-        df = pd.DataFrame(rows_data)
-        if not df.empty:
-            df = df.sort_values(by="Performance Score", ascending=False)
-            df.insert(0, "Rank", range(1, len(df) + 1))
-        return df
-
-    # Sheet 1: Overall Summary
-    def get_progress_bar(val, max_val=100):
-        if not max_val or max_val <= 0:
-            return '░░░░░░░░░░ 0%'
-        bars = 10
-        filled = min(bars, max(0, int(round((val / max_val) * bars))))
-        empty = bars - filled
-        pct = int(round((val / max_val) * 100))
-        return '█' * filled + '░' * empty + f" {pct}%"
-        
-    pct_delivered = f"{round((delivered_count/active_total)*100, 1)}%" if active_total > 0 else "0%"
-    pct_open = f"{round((open_count/active_total)*100, 1)}%" if active_total > 0 else "0%"
-    pct_transit = f"{round((despatched_count/active_total)*100, 1)}%" if active_total > 0 else "0%"
+    # Create sheets
+    # Sheet 1: Daily Summary
+    df_branch_summary = pd.DataFrame(branch_summary_excel_rows)
+    df_branch_summary.to_excel(writer, sheet_name="1. Daily Summary", index=False)
     
-    summary_data = [
-        ["DELIVERY DELAY REPORT - SUMMARY", "", "", ""],
-        ["", "", "", ""],
-        ["OVERALL STATS", "COUNT", "% (of Active)", "VISUAL CHART"],
-        ["Total LRs in File", raw_total, "-", ""],
-        ["Cancelled LRs", cancelled_count, "-", ""],
-        ["Excluded EFF LRs", total_excluded_consignors, "-", ""],
-        ["", "", "", ""],
-        ["A) Total LR Count (Except Cancelled & EFF)", active_total, "100%", get_progress_bar(active_total, active_total)],
-        ["Delivered", delivered_count, pct_delivered, get_progress_bar(delivered_count, active_total)],
-        ["Not Despatched (Open)", open_count, pct_open, get_progress_bar(open_count, active_total)],
-        ["On Transit (Despatched)", despatched_count, pct_transit, get_progress_bar(despatched_count, active_total)],
-        ["", "", "", ""],
-        ["DELAY BREAKDOWN (Delivered Only)", "COUNT", "% (of Active)", "VISUAL CHART"],
-        ["Same Day (0)", delay_counts[0], f"{round((delay_counts[0]/active_total)*100, 1)}%" if active_total > 0 else "0%", get_progress_bar(delay_counts[0], active_total)],
-        ["Next Day (1)", delay_counts[1], f"{round((delay_counts[1]/active_total)*100, 1)}%" if active_total > 0 else "0%", get_progress_bar(delay_counts[1], active_total)],
-        ["2nd Day", delay_counts[2], f"{round((delay_counts[2]/active_total)*100, 1)}%" if active_total > 0 else "0%", get_progress_bar(delay_counts[2], active_total)],
-        ["3rd Day", delay_counts[3], f"{round((delay_counts[3]/active_total)*100, 1)}%" if active_total > 0 else "0%", get_progress_bar(delay_counts[3], active_total)],
-        ["4th Day", delay_counts[4], f"{round((delay_counts[4]/active_total)*100, 1)}%" if active_total > 0 else "0%", get_progress_bar(delay_counts[4], active_total)],
-        ["5th Day", delay_counts[5], f"{round((delay_counts[5]/active_total)*100, 1)}%" if active_total > 0 else "0%", get_progress_bar(delay_counts[5], active_total)],
-        ["6th Day", delay_counts[6], f"{round((delay_counts[6]/active_total)*100, 1)}%" if active_total > 0 else "0%", get_progress_bar(delay_counts[6], active_total)],
-        ["7th Day", delay_counts[7], f"{round((delay_counts[7]/active_total)*100, 1)}%" if active_total > 0 else "0%", get_progress_bar(delay_counts[7], active_total)],
-        ["> 7 Days", delay_counts['more'], f"{round((delay_counts['more']/active_total)*100, 1)}%" if active_total > 0 else "0%", get_progress_bar(delay_counts['more'], active_total)]
-    ]
+    # Sheet 2: Despatch Snapshot
+    df_despatch_snap = pd.DataFrame(despatch_snapshot_rows)
+    if df_despatch_snap.empty:
+        df_despatch_snap = pd.DataFrame(columns=["Branch", "Despatch No", "Despatch Date", "Driver Name", "Supervisor Name", "LR No", "Consignee", "Destination", "Box Qty", "Current Status", "Delivery Time", "LR Age (Days)"])
+    df_despatch_snap.to_excel(writer, sheet_name="2. Despatch Snapshot", index=False)
     
-    if delay_counts['invalid'] > 0:
-        summary_data.append(["No Date Info / Invalid", delay_counts['invalid'], f"{round((delay_counts['invalid']/active_total)*100, 1)}%" if active_total > 0 else "0%", get_progress_bar(delay_counts['invalid'], active_total)])
-        
-    df_summary = pd.DataFrame(summary_data)
-    df_summary.to_excel(writer, sheet_name="1. Overall Summary", index=False, header=False)
+    # Sheet 3: Open LRs
+    df_open_lrs = pd.DataFrame(open_lrs_rows)
+    if df_open_lrs.empty:
+        df_open_lrs = pd.DataFrame(columns=["Branch", "LR No", "LR Date", "Consignor", "Consignee", "Destination", "Box Qty", "Current Status", "LR Age (Days)"])
+    df_open_lrs.to_excel(writer, sheet_name="3. Open LRs", index=False)
     
-    # Standard pivot-like breakdowns for destinations, consignors, and branches
-    def create_breakdown_df(lrs_list, key_field):
-        breakdown_map = {}
-        for x in lrs_list:
-            val = x[key_field]
-            if val not in breakdown_map:
-                breakdown_map[val] = {c: 0 for c in [0,1,2,3,4,5,6,7,'more','invalid','open','transit','cancelled']}
-                breakdown_map[val]['total'] = 0
-            
-            # Map categories
-            if x["status"] == 'Cancelled LR':
-                cat = 'cancelled'
-            elif x["status"] == 'Not Despatched':
-                cat = 'open'
-            elif x["status"] == 'On transit':
-                cat = 'transit'
-            else:
-                d = x["delay"]
-                if d is None:
-                    cat = 'invalid'
-                elif d > 7:
-                    cat = 'more'
-                else:
-                    cat = d
-            
-            breakdown_map[val][cat] += 1
-            breakdown_map[val]['total'] += 1
-            
-        rows_data = []
-        for name, cats in breakdown_map.items():
-            row = {
-                key_field.capitalize(): name,
-                "Same Day (0)": cats[0], "Next Day (1)": cats[1],
-                "2nd Day": cats[2], "3rd Day": cats[3], "4th Day": cats[4],
-                "5th Day": cats[5], "6th Day": cats[6], "7th Day": cats[7],
-                "> 7 Days": cats['more'], "No Date": cats['invalid'],
-                "Not Despatched": cats['open'], "On Transit": cats['transit'],
-                "Cancelled": cats['cancelled'], "TOTAL": cats['total']
-            }
-            rows_data.append(row)
-        df = pd.DataFrame(rows_data)
-        if not df.empty:
-            df = df.sort_values(by="TOTAL", ascending=False)
-        return df
-
-    df_dest = create_breakdown_df(processed_lrs + cancelled_lrs, "area")
-    df_dest.rename(columns={"Area": "Destination"}, inplace=True)
-    df_dest.to_excel(writer, sheet_name="2. Destination Breakdown", index=False)
-    
-    df_consignor = create_breakdown_df(processed_lrs + cancelled_lrs, "consignor")
-    df_consignor.rename(columns={"Consignor": "Consignor Name"}, inplace=True)
-    df_consignor.to_excel(writer, sheet_name="3. Consignor Breakdown", index=False)
-    
-    # Sheet 4: Active LRs
-    df_active = pd.DataFrame([{
-        "LR NO": x["lrNo"], "AREA": x["area"], "BRANCH": x["branch"], "SUPERVISOR": x["supervisor"],
-        "CONSIGNOR": x["consignor"], "CONSIGNEE": x["consignee"], "DATE": x["date"],
-        "DELIVERY TIME": x["deliveryTime"], "DELAY (DAYS)": x["delay"] if x["delay"] is not None else '-',
-        "STATUS": x["status"]
-    } for x in processed_lrs])
-    df_active.to_excel(writer, sheet_name="4. Active LRs", index=False)
-    
-    # Sheet 5: Cancelled LRs
-    df_cancelled = pd.DataFrame([{
-        "LR NO": x["lrNo"], "AREA": x["area"], "BRANCH": x["branch"], "SUPERVISOR": x["supervisor"],
-        "CONSIGNOR": x["consignor"], "CONSIGNEE": x["consignee"], "DATE": x["date"],
-        "DELIVERY TIME": x["deliveryTime"], "STATUS": x["status"]
-    } for x in cancelled_lrs])
-    df_cancelled.to_excel(writer, sheet_name="5. Cancelled LRs", index=False)
-    
-    # Sheet 6: Branch Breakdown
-    df_branch = create_breakdown_df(processed_lrs + cancelled_lrs, "branch")
-    df_branch.to_excel(writer, sheet_name="6. Branch Breakdown", index=False)
-    
-    # Sheet 7: Despatch Summary Report
-    # We aggregate despatch raw report data
-    despatch_rows = []
-    # Key fields in despatch report: DESPATCH DATE, DISPATCH DATE, DESPATCH NO, DISPATCH NO, LR NO, LRNO
-    if not df_despatch.empty:
-        # We group df_despatch by branch, despatch date, despatch no, and delivery driver
-        desp_no_field = next((c for c in df_despatch.columns if c in ['DESPATCH NO', 'DISPATCH NO', 'DESPATCH_NO', 'DISPATCH_NO']), None)
-        desp_date_field = next((c for c in df_despatch.columns if c in ['DESPATCH DATE', 'DISPATCH DATE', 'DESPATCH_DATE']), None)
-        driver_field = next((c for c in df_despatch.columns if c in ['DELIVERY DRIVER', 'DRIVER', 'DRIVER_NAME']), None)
-        box_field = next((c for c in df_despatch.columns if c in ['BOX QTY', 'BOXQTY', 'BOXES', 'QUANTITY']), None)
-        dest_field = next((c for c in df_despatch.columns if c in ['DESTINATION', 'PLACE', 'AREA']), None)
-        
-        # Build unique list of despatches
-        df_desp_grouped = df_despatch.groupby([desp_no_field, desp_date_field, driver_field] if desp_no_field and desp_date_field and driver_field else [df_despatch.columns[0]])
-        for keys, group in df_desp_grouped:
-            desp_no = keys[0] if isinstance(keys, tuple) else keys
-            desp_date = keys[1] if isinstance(keys, tuple) else ""
-            driver = keys[2] if isinstance(keys, tuple) else ""
-            
-            # Find branch and supervisor directly from df_despatch group
-            gp_sups = group[sup_col_desp].dropna().unique() if sup_col_desp in group.columns else []
-            gp_branches = [supervisor_map.get(normalize_name(s), "N/A") for s in gp_sups]
-            branch = gp_branches[0] if gp_branches else "N/A"
-            supervisor_name_val = gp_sups[0] if len(gp_sups) > 0 else "N/A"
-            
-            box_qty_tot = group[box_field].sum() if box_field in group.columns else 0
-            del_points = group[dest_field].nunique() if dest_field in group.columns else 0
-            
-            gp_lrs = group[lr_col_desp].dropna().astype(str).tolist() if lr_col_desp in group.columns else []
-            
-            # Get the statuses of the LRs in this group from the LR report
-            gp_lr_statuses = []
-            if lr_col in df_lr.columns and status_col in df_lr.columns:
-                matching_lrs = df_lr[df_lr[lr_col].astype(str).isin(gp_lrs)]
-                for _, lr_row in matching_lrs.iterrows():
-                    raw_status = clean_val(lr_row[status_col], "Open")
-                    status_map = {
-                        'Despatched': 'On transit',
-                        'Open': 'Not Despatched',
-                        'Delivered': 'Delivery Process completed.',
-                        'Despatched from Branch': 'Cancelled LR'
-                    }
-                    mapped_status = status_map.get(raw_status, "Not Despatched")
-                    if "cancelled" in raw_status.lower() or mapped_status == 'Cancelled LR':
-                        mapped_status = 'Cancelled LR'
-                    gp_lr_statuses.append(mapped_status)
-            
-            # Overall delivery status for the despatch
-            if not gp_lr_statuses:
-                despatch_status = "Despatched"
-            elif all(s == 'Delivery Process completed.' for s in gp_lr_statuses):
-                despatch_status = "Delivered"
-            else:
-                despatch_status = "Despatched"
-            
-            # Find delivery times in LR report
-            lr_del_times = df_lr[df_lr[lr_col].astype(str).isin(gp_lrs)][del_time_col].dropna().tolist() if lr_col in df_lr.columns and del_time_col in df_lr.columns else []
-            lr_del_parsed = [parse_date(t) for t in lr_del_times if parse_date(t)]
-            
-            if lr_del_parsed:
-                min_del = min(lr_del_parsed)
-                max_del = max(lr_del_parsed)
-                if min_del.hour == 0 and min_del.minute == 0:
-                    first_del = min_del.strftime("%d/%m/%Y")
-                else:
-                    first_del = min_del.strftime("%d/%m/%Y %I:%M %p")
-                    
-                if max_del.hour == 0 and max_del.minute == 0:
-                    last_del = max_del.strftime("%d/%m/%Y")
-                else:
-                    last_del = max_del.strftime("%d/%m/%Y %I:%M %p")
-            else:
-                first_del = "-"
-                last_del = "-"
-            
-            despatch_rows.append({
-                "Branch": branch,
-                "Supervisor": supervisor_name_val,
-                "Despatch No": desp_no,
-                "Despatch Date": desp_date,
-                "Total LR count": len(group),
-                "Delivery Status": despatch_status,
-                "Total Delivery Point": del_points,
-                "Delivery Driver": driver,
-                "Box Qty": box_qty_tot,
-                "First Delivery Time": first_del,
-                "Last Delivery Time": last_del
-            })
-            
-    df_desp_report = pd.DataFrame(despatch_rows)
-    df_desp_report.to_excel(writer, sheet_name="7. Despatch Summary Report", index=False)
-    
-    # Sheet 8: Performance Leaderboard
-    df_branch_leader = get_leaderboard_row(branch_stats, is_branch=True)
-    df_driver_leader = get_leaderboard_row(driver_stats, is_branch=False)
-    
-    # Combine Branch & Driver Leaderboards with empty spacer row
-    leader_rows = []
-    if not df_branch_leader.empty:
-        leader_rows.append(["BRANCH PERFORMANCE LEADERBOARD", "", "", "", "", "", "", ""])
-        leader_rows.append(list(df_branch_leader.columns))
-        leader_rows.extend(df_branch_leader.values.tolist())
-        leader_rows.append([]) # spacer
-        
-    if not df_driver_leader.empty:
-        leader_rows.append(["DRIVER PERFORMANCE LEADERBOARD", "", "", "", "", "", "", ""])
-        leader_rows.append(list(df_driver_leader.columns))
-        leader_rows.extend(df_driver_leader.values.tolist())
-        
-    df_leaderboard = pd.DataFrame(leader_rows)
-    df_leaderboard.to_excel(writer, sheet_name="8. Performance Leaderboard", index=False, header=False)
-    
-    # Sheet 9: Supervisor Mapping
-    df_sup_mapping = pd.DataFrame([{"Supervisor": k, "Branch": v} for k, v in supervisor_map.items()])
-    df_sup_mapping.to_excel(writer, sheet_name="9. Supervisor Mapping", index=False)
-    
-    # Save Workbook
     writer.close()
-    print("Workbook generated successfully!")
     
-    # Apply Openpyxl design aesthetics
+    # Format and Style Workbook
     wb = openpyxl.load_workbook(processed_file)
-    
-    # Style 1. Overall Summary
-    apply_styles(wb["1. Overall Summary"], len(df_summary), 4, "summary", enable_filter=False)
-    
-    # Style 2. Destination Breakdown
-    apply_styles(wb["2. Destination Breakdown"], len(df_dest) + 1, len(df_dest.columns), enable_filter=True)
-    
-    # Style 3. Consignor Breakdown
-    apply_styles(wb["3. Consignor Breakdown"], len(df_consignor) + 1, len(df_consignor.columns), enable_filter=True)
-    
-    # Style 4. Active LRs
-    apply_styles(wb["4. Active LRs"], len(df_active) + 1, len(df_active.columns), enable_filter=True)
-    
-    # Style 5. Cancelled LRs
-    apply_styles(wb["5. Cancelled LRs"], len(df_cancelled) + 1, len(df_cancelled.columns), enable_filter=True)
-    
-    # Style 6. Branch Breakdown
-    apply_styles(wb["6. Branch Breakdown"], len(df_branch) + 1, len(df_branch.columns), enable_filter=True)
-    
-    # Style 7. Despatch Summary Report
-    apply_styles(wb["7. Despatch Summary Report"], len(df_desp_report) + 1, len(df_desp_report.columns), enable_filter=True)
-    
-    # Style 8. Performance Leaderboard
-    ws_leader = wb["8. Performance Leaderboard"]
-    apply_styles(ws_leader, len(df_leaderboard), 8, "leaderboard", enable_filter=False)
-    
-    # Style 9. Supervisor Mapping
-    apply_styles(wb["9. Supervisor Mapping"], len(df_sup_mapping) + 1, len(df_sup_mapping.columns), enable_filter=True)
-    
+    apply_styles(wb["1. Daily Summary"], len(df_branch_summary) + 1, len(df_branch_summary.columns), enable_filter=True)
+    apply_styles(wb["2. Despatch Snapshot"], len(df_despatch_snap) + 1, len(df_despatch_snap.columns), enable_filter=True)
+    apply_styles(wb["3. Open LRs"], len(df_open_lrs) + 1, len(df_open_lrs.columns), enable_filter=True)
     wb.save(processed_file)
-    print("Workbook styled and saved!")
-    return processed_file, unmapped_supervisors
+    
+    # 6. Generate Pillow Dashboard Image
+    dashboard_image_path = generate_pillow_dashboard(overall_stats, date_display)
+    
+    return processed_file, dashboard_image_path, unmapped_supervisors
 
-# 8. Email function
-# 8. Email function
-def email_report(processed_file_path, raw_lr_path, raw_despatch_path, from_date=None, to_date=None, unmapped_supervisors=None):
+# Email function
+def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_image_path, from_date=None, to_date=None, unmapped_supervisors=None):
     print("Sending daily report email...")
+    if not SENDER_EMAIL or not SENDER_PASSWORD or not RECEIVER_EMAIL:
+        print("⚠️ Email credentials (SENDER_EMAIL, SENDER_PASSWORD, RECEIVER_EMAIL) are missing. Skipping email sending.")
+        return
     
     # Format the dates for display in the email
-    date_range_str = "N/A"
-    if from_date and to_date:
-        try:
-            from_dt = datetime.strptime(from_date, "%Y-%m-%d")
-            to_dt = datetime.strptime(to_date, "%Y-%m-%d")
-            date_range_str = f"{from_dt.strftime('%d-%m-%Y')} to {to_dt.strftime('%d-%m-%Y')}"
-        except Exception:
-            date_range_str = f"{from_date} to {to_date}"
-            
-    # Set up email message
-    msg = MIMEMultipart()
+    today_str = datetime.now().strftime("%d-%m-%Y")
+    msg = MIMEMultipart('related')
     msg['From'] = SENDER_EMAIL
     msg['To'] = RECEIVER_EMAIL
-    today_str = datetime.now().strftime("%d-%m-%Y")
     msg['Subject'] = f"Daily ERP Dispatch & Delivery Performance Report - {today_str} 📊"
+    
+    msg_alt = MIMEMultipart('alternative')
+    msg.attach(msg_alt)
     
     unmapped_str = ""
     if unmapped_supervisors:
-        unmapped_str = "\n⚠️ Unmapped Supervisors found today (Please add them to the Supervisor Mapping table in the dashboard to assign them to branches):\n"
+        unmapped_str = "<br>⚠️ <b>Unmapped Supervisors found today</b> (Please add them to the Supervisor Mapping table in the dashboard to assign them to branches):<br>"
         for s in sorted(unmapped_supervisors):
-            unmapped_str += f"- {s}\n"
+            unmapped_str += f"- {s}<br>"
             
-    body = f"""Dear User,
-
-Please find attached the daily ERP Dispatch & Delivery delay processing report sheets for {today_str}.
-
-Report Date Range / Period: {date_range_str} 📅
-{unmapped_str}
-Included sheets in Interactive_Delivery_Report.xlsx:
-1. Overall Summary (Delivered/Open/Transit ratios & delay charts)
-2. Destination Breakdown
-3. Consignor Breakdown
-4. Active LRs
-5. Cancelled LRs
-6. Branch Breakdown
-7. Despatch Summary Report
-8. Performance Leaderboards (Branches & Drivers)
-9. Supervisor Master Mapping Table
-
-Also attached are the raw downloaded ERP sheets for your reference.
-
-Best Regards,
-ERP Daily Automation Engine ⚡
-"""
-    msg.attach(MIMEText(body, 'plain'))
+    html_body = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; color: #1E293B;">
+        <p>Dear User,</p>
+        <p>Please find the daily ERP Dispatch & Delivery performance dashboard summary for <b>{today_str}</b> below:</p>
+        <img src="cid:dashboard_image"><br>
+        <p>Report Period: <b>{from_date}</b> to <b>{to_date}</b> 📅</p>
+        {unmapped_str}
+        <p><b>Included sheets in Interactive_Delivery_Report.xlsx:</b><br>
+        1. Daily Summary (Overall & Branch summaries)<br>
+        2. Despatch Snapshot (Yesterday's LRs and their final morning status)<br>
+        3. Open LRs (List of undelivered LRs as of yesterday morning 7:00 AM)</p>
+        <p>Also attached are the raw downloaded ERP reports for your reference.</p>
+        <p>Best Regards,<br>
+        <b>ERP Daily Automation Engine</b> ⚡</p>
+      </body>
+    </html>
+    """
+    msg_alt.attach(MIMEText(html_body, 'html'))
     
-    # Helper to check file signature and get correct extension
+    # Inline image attachment
+    with open(dashboard_image_path, 'rb') as f:
+        img_part = MIMEBase('image', 'png')
+        img_part.set_payload(f.read())
+        encode_base64(img_part)
+        img_part.add_header('Content-ID', '<dashboard_image>')
+        img_part.add_header('Content-Disposition', 'inline', filename='daily_dashboard.png')
+        msg.attach(img_part)
+        
+    # File attachments
     def get_extension(file_path):
         if not os.path.exists(file_path):
             return ".xlsx"
@@ -958,18 +1001,18 @@ ERP Daily Automation Engine ⚡
         except Exception:
             return ".xlsx"
 
-    lr_ext = get_extension(raw_lr_path)
+    lr_ext = get_extension(raw_lr_path) if raw_lr_path else ".xlsx"
     desp_ext = get_extension(raw_despatch_path)
     
-    # Attach files
     files_to_attach = [
         (processed_file_path, f"Interactive_Delivery_Report_{today_str}.xlsx"),
-        (raw_lr_path, f"raw_lr_data_{today_str}{lr_ext}"),
         (raw_despatch_path, f"raw_despatch_data_{today_str}{desp_ext}")
     ]
-    
+    if raw_lr_path:
+        files_to_attach.append((raw_lr_path, f"raw_lr_data_{today_str}{lr_ext}"))
+        
     for file_path, attachment_name in files_to_attach:
-        if os.path.exists(file_path):
+        if file_path and os.path.exists(file_path):
             with open(file_path, "rb") as attachment:
                 part = MIMEBase("application", "octet-stream")
                 part.set_payload(attachment.read())
@@ -981,7 +1024,6 @@ ERP Daily Automation Engine ⚡
                 msg.attach(part)
                 print(f"Attached: {attachment_name}")
                 
-    # Connect to Gmail SMTP
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
@@ -995,27 +1037,38 @@ ERP Daily Automation Engine ⚡
 
 # 9. Main orchestrator
 def main():
-    print(f"[{datetime.now()}] Starting daily report process...")
-    try:
-        # Download files
-        lr_file, despatch_file, from_date, to_date = download_erp_reports()
+    parser = argparse.ArgumentParser(description="ERP Dispatch & Delivery Performance Report")
+    parser.add_argument("--mode", choices=["evening", "morning"], required=True, help="Run mode (evening or morning)")
+    parser.add_argument("--from-date", help="Override from date (YYYY-MM-DD)")
+    parser.add_argument("--to-date", help="Override to date (YYYY-MM-DD)")
+    args = parser.parse_args()
+    
+    print(f"[{datetime.now()}] Starting daily report automation runner in mode: {args.mode}")
+    
+    # Fetch mappings
+    supervisor_map = fetch_supervisor_mappings()
+    
+    if args.mode == "evening":
+        # Download despatch report
+        lr_file, despatch_file, from_date, to_date = download_erp_reports(mode="evening", from_override=args.from_date, to_override=args.to_date)
+        run_evening_flow(despatch_file, supervisor_map)
+        print("Evening flow execution completed successfully.")
         
-        # Load mappings
-        supervisor_map = fetch_supervisor_mappings()
+    elif args.mode == "morning":
+        # Download both reports
+        lr_file, despatch_file, from_date, to_date = download_erp_reports(mode="morning", from_override=args.from_date, to_override=args.to_date)
         
-        # Load holidays
-        custom_holidays = fetch_holidays()
-        
-        # Process and generate formatted workbook
-        processed_file, unmapped_supervisors = generate_excel_report(lr_file, despatch_file, supervisor_map, custom_holidays)
+        # Yesterday's date in IST
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        yesterday_str = (datetime.now(ist_tz) - timedelta(days=1)).strftime("%Y-%m-%d")
+        if args.from_date:
+            yesterday_str = args.from_date  # Use overridden date as yesterday's date
+            
+        processed_file, dashboard_image_path, unmapped_supervisors = run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str)
         
         # Email report
-        email_report(processed_file, lr_file, despatch_file, from_date, to_date, unmapped_supervisors)
-        
-        print(f"[{datetime.now()}] All tasks completed successfully! Have a great day!")
-    except Exception as e:
-        print(f"[{datetime.now()}] Critical failure in daily automation run: {e}")
-        sys.exit(1)
+        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors)
+        print("Morning flow execution completed successfully.")
 
 if __name__ == "__main__":
     main()
