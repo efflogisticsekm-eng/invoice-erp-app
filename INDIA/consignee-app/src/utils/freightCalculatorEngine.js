@@ -184,7 +184,7 @@ export function parseHtmlExcelSheet(sheet, sheetName) {
     for (let i = 0; i < Math.min(100, rawRows.length); i++) {
         const row = rawRows[i];
         if (Array.isArray(row)) {
-            const rowUpper = row.map(cell => String(cell).trim().toUpperCase());
+            const rowUpper = Array.from(row).map(cell => String(cell ?? '').trim().toUpperCase());
             if (rowUpper.includes('LR NO')) {
                 headerIdx = i;
                 break;
@@ -194,7 +194,7 @@ export function parseHtmlExcelSheet(sheet, sheetName) {
     
     if (headerIdx === -1) return [];
     
-    const headers = rawRows[headerIdx].map(cell => String(cell).trim().toUpperCase());
+    const headers = Array.from(rawRows[headerIdx] || []).map(cell => String(cell ?? '').trim().toUpperCase());
     const dataRows = rawRows.slice(headerIdx + 1);
     
     const getColIdx = (name) => headers.findIndex(h => h.includes(name));
