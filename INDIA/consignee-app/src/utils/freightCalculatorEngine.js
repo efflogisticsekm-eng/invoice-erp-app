@@ -837,11 +837,13 @@ export function processFreightData(workbookLr, workbookRates) {
         });
         
         let periodStr = "";
-        const parseDateForMinMax = (dateStr) => {
-            if (!dateStr) return null;
+        const parseDateForMinMax = (dateVal) => {
+            if (!dateVal) return null;
+            if (dateVal instanceof Date) return dateVal;
+            const dateStr = String(dateVal).trim();
             const pts = dateStr.split('/');
             if (pts.length === 3) {
-                return new Date(parseInt(pts[2]), parseInt(pts[1]) - 1, parseInt(pts[0]));
+                return new Date(parseInt(pts[2], 10), parseInt(pts[1], 10) - 1, parseInt(pts[0], 10));
             }
             const parsed = Date.parse(dateStr);
             return isNaN(parsed) ? null : new Date(parsed);
