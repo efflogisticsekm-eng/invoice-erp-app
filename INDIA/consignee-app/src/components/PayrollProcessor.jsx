@@ -262,13 +262,18 @@ export default function PayrollProcessor() {
             const row = secJson[r];
             if (row && row[0] && String(row[0]).trim() !== "") {
               foundSections.push({
-                dept: String(row[0]).trim(),
+                dept: String(row[0] || "").trim(),
                 ot_eligibility: String(row[6] || "NO").trim(),
                 target_km: Number(row[7] || 0),
                 sr_code: String(row[8] || "").trim(),
+                material_desc: String(row[9] || "").trim(),
                 rate: Number(row[10] || 0),
                 addl_sr: String(row[11] || "").trim(),
-                addl_rate: Number(row[13] || 0)
+                addl_material_desc: String(row[12] || "").trim(),
+                addl_rate: Number(row[13] || 0),
+                addl_hr_sr: String(row[14] || "").trim(),
+                addl_hr_material_desc: String(row[15] || "").trim(),
+                addl_hr_rate: Number(row[16] || 0)
               });
             }
           }

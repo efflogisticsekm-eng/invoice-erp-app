@@ -291,6 +291,49 @@ export function calculatePayroll({ trips, advances, drivers, sections, deduction
     });
   });
 
+  function resolveDescription(rowDef, sections) {
+    const { srCode, desc } = rowDef;
+    const isAddlKms = desc.includes("ADDL") || desc.includes("ADDITIONAL RUNNING KMS");
+    const isAddlHrs = desc.includes("ADDITIONAL HOURS") || desc.includes("ADDL SHIFT HOURS") || desc.includes("ADDL-HR");
+    
+    const targetSr = String(srCode).trim();
+    
+    if (isAddlKms) {
+      if (targetSr === "9009152") {
+        if (desc.includes("8HRS") || desc.includes("8HR")) {
+          const sec = sections.find(s => String(s.sr_code).trim() === "9009148" && s.addl_material_desc && (s.addl_material_desc.includes("8HR") || s.addl_material_desc.includes("8 HR")));
+          if (sec) return sec.addl_material_desc;
+          const secFallback = sections.find(s => String(s.sr_code).trim() === "9009148" && s.addl_material_desc);
+          if (secFallback) return secFallback.addl_material_desc;
+        } else {
+          const sec = sections.find(s => (String(s.sr_code).trim() === "914950" || String(s.sr_code).trim() === "9014950") && s.addl_material_desc && (s.addl_material_desc.includes("24HR") || s.addl_material_desc.includes("24 HR")));
+          if (sec) return sec.addl_material_desc;
+          const secFallback = sections.find(s => (String(s.sr_code).trim() === "914950" || String(s.sr_code).trim() === "9014950") && s.addl_material_desc);
+          if (secFallback) return secFallback.addl_material_desc;
+        }
+      }
+      const sec = sections.find(s => String(s.addl_sr).trim() === targetSr && s.addl_material_desc);
+      if (sec) return sec.addl_material_desc;
+    } else if (isAddlHrs) {
+      const sec = sections.find(s => String(s.addl_hr_sr).trim() === targetSr && s.addl_hr_material_desc);
+      if (sec) return sec.addl_hr_material_desc;
+      
+      if (targetSr === "9009156") {
+        const sec = sections.find(s => String(s.sr_code).trim() === "9009148" && s.addl_hr_material_desc);
+        if (sec) return sec.addl_hr_material_desc;
+      }
+      if (targetSr === "9014954") {
+        const sec = sections.find(s => String(s.sr_code).trim() === "9014950" && s.addl_hr_material_desc);
+        if (sec) return sec.addl_hr_material_desc;
+      }
+    } else {
+      const sec = sections.find(s => String(s.sr_code).trim() === targetSr && s.material_desc);
+      if (sec) return sec.material_desc;
+    }
+    
+    return desc;
+  }
+
   // 4. Compile Work Done Sheet Results (Rows 2 to 21)
   const workDone = [];
   
@@ -331,7 +374,6 @@ export function calculatePayroll({ trips, advances, drivers, sections, deduction
     let netAmount = 0;
 
     if (isAddlKms) {
-      // Find excess KM based on target mapping
       if (srCode === "9009152") {
         if (desc.includes("8HRS")) {
           qty = wdPlusKM8;
@@ -352,13 +394,11 @@ export function calculatePayroll({ trips, advances, drivers, sections, deduction
       amount = qty * rate;
       netAmount = amount;
     } else if (isAddlHrs) {
-      // Manual inputs needed, default to 0
       qty = 0;
       rate = 0;
       amount = 0;
       netAmount = 0;
     } else {
-      // Main SR code
       qty = wdQty[srCode] || 0;
       lessKM = wdLessKM[srCode] || 0;
       rate = wdRate[srCode] || 0;
@@ -367,9 +407,11 @@ export function calculatePayroll({ trips, advances, drivers, sections, deduction
       netAmount = amount - lessKMAmt;
     }
 
+    const materialDesc = resolveDescription(rowDef, sections);
+
     workDone.push({
       srCode,
-      description: desc,
+      description: materialDesc,
       qty: Number(qty.toFixed(2)),
       lessKM: Number(lessKM.toFixed(2)),
       rate: Number(rate.toFixed(2)),

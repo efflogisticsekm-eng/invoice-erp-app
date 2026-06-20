@@ -1593,9 +1593,14 @@ app.get('/api/migrate-payroll', async (req, res) => {
       ot_eligibility TEXT,
       target_km NUMERIC DEFAULT 0,
       sr_code TEXT,
+      material_desc TEXT,
       rate NUMERIC DEFAULT 0,
       addl_sr TEXT,
+      addl_material_desc TEXT,
       addl_rate NUMERIC DEFAULT 0,
+      addl_hr_sr TEXT,
+      addl_hr_material_desc TEXT,
+      addl_hr_rate NUMERIC DEFAULT 0,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
     );
 
@@ -1625,6 +1630,14 @@ app.get('/api/migrate-payroll', async (req, res) => {
       supervisor_name TEXT UNIQUE NOT NULL,
       branch TEXT NOT NULL
     );
+
+    -- Ensure missing columns are added to existing tables
+    ALTER TABLE public.payroll_sections 
+    ADD COLUMN IF NOT EXISTS material_desc TEXT,
+    ADD COLUMN IF NOT EXISTS addl_material_desc TEXT,
+    ADD COLUMN IF NOT EXISTS addl_hr_sr TEXT,
+    ADD COLUMN IF NOT EXISTS addl_hr_material_desc TEXT,
+    ADD COLUMN IF NOT EXISTS addl_hr_rate NUMERIC DEFAULT 0;
   `;
 
   const testConnection = async (att) => {
