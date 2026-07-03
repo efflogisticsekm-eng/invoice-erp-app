@@ -4,6 +4,8 @@ on:
   schedule:
     # 14:45 UTC is 20:15 IST (8:15 PM IST)
     - cron: '45 14 * * *'
+    # 07:30 UTC is 13:00 IST (1:00 PM IST)
+    - cron: '30 07 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -15,6 +17,7 @@ on:
           - daily_evening_report
           - morning
           - evening
+          - afternoon_open_lrs
 
 jobs:
   run-daily-report:
@@ -52,8 +55,15 @@ jobs:
           echo "Running manually triggered workflow in ${{ github.event.inputs.mode }} mode..."
           python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode ${{ github.event.inputs.mode }}
         else
-          echo "Running scheduled cron job at 8:15 PM IST..."
-          python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode daily_evening_report
+          # Check current UTC hour to decide which cron triggered this
+          CURRENT_HOUR=$(date -u +"%H")
+          if [ "$CURRENT_HOUR" = "07" ]; then
+            echo "Running scheduled cron job at 1:00 PM IST (Afternoon Open LRs)..."
+            python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode afternoon_open_lrs
+          else
+            echo "Running scheduled cron job at 8:15 PM IST (Daily Evening Report)..."
+            python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode daily_evening_report
+          fi
         fi
 
     - name: Upload Error Screenshot

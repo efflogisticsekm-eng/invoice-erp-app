@@ -217,8 +217,9 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
     
     if mode == "evening":
         from_date_str = from_override if from_override else now_ist.strftime("%Y-%m-%d")
+        from_date_str = from_override if from_override else now_ist.strftime("%Y-%m-%d")
         to_date_str = to_override if to_override else now_ist.strftime("%Y-%m-%d")
-    elif mode == "daily_evening_report":
+    elif mode in ("daily_evening_report", "afternoon_open_lrs"):
         yesterday = now_ist - timedelta(days=1)
         from_date_str = from_override if from_override else yesterday.strftime("%Y-%m-%d")
         to_date_str = to_override if to_override else now_ist.strftime("%Y-%m-%d")
@@ -278,27 +279,29 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 except Exception as nav_err:
                     print("Navigation timeout or did not leave login page. Current URL:", page.url)
             
-            # 1. Download Despatch Report (Required for both evening and morning runs)
-            despatch_url = "https://eff.aadhocc.in/eff_2021/main/effdespatch"
-            print(f"Navigating to Despatch page: {despatch_url}...")
-            page.goto(despatch_url)
-            page.wait_for_load_state("load")
+            # 1. Download Despatch Report
+            despatch_url = "https://eff.aadhocc.in/eff_2021/main/effdespatch"            
+            # For afternoon_open_lrs, we ONLY need the LR report, not the despatch report
+            if mode != "afternoon_open_lrs":
+                print("Downloading Despatch raw report...")
+                page.goto(despatch_url)
+                page.wait_for_load_state("load")
+                
+                correct_href = f"https://eff.aadhocc.in/eff_2021/main/effdespatch/exportDespatchExcel?despatch_number=&location_id=&lr_number=&from_date={from_date_str}&to_date={to_date_str}&delivery_staff_search="
+                print(f"Setting export link href to: {correct_href}")
+                page.locator("a.exportDespatchExcel").wait_for(state="visible", timeout=15000)
+                page.evaluate(f"document.querySelector('a.exportDespatchExcel').href = '{correct_href}'")
+                
+                print("Downloading Despatch raw report...")
+                despatch_btn = page.locator("a.exportDespatchExcel").first
+                with page.expect_download(timeout=60000) as download_info:
+                    despatch_btn.click(no_wait_after=True)
+                download = download_info.value
+                download.save_as(despatch_file_path)
+                print("Despatch raw report saved to:", despatch_file_path)
             
-            correct_href = f"https://eff.aadhocc.in/eff_2021/main/effdespatch/exportDespatchExcel?despatch_number=&location_id=&lr_number=&from_date={from_date_str}&to_date={to_date_str}&delivery_staff_search="
-            print(f"Setting export link href to: {correct_href}")
-            page.locator("a.exportDespatchExcel").wait_for(state="visible", timeout=15000)
-            page.evaluate(f"document.querySelector('a.exportDespatchExcel').href = '{correct_href}'")
-            
-            print("Downloading Despatch raw report...")
-            despatch_btn = page.locator("a.exportDespatchExcel").first
-            with page.expect_download(timeout=60000) as download_info:
-                despatch_btn.click(no_wait_after=True)
-            download = download_info.value
-            download.save_as(despatch_file_path)
-            print("Despatch report saved to:", despatch_file_path)
-            
-            # 2. Download LR Report (Only required in morning and daily_evening_report mode)
-            if mode in ("morning", "daily_evening_report"):
+            # 2. Download LR Report
+            if mode in ("morning", "daily_evening_report", "afternoon_open_lrs"):
                 lr_url = "https://eff.aadhocc.in/eff_2021/main/lr/"
                 print(f"Navigating to LR page: {lr_url}...")
                 page.goto(lr_url)
@@ -327,7 +330,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 download_lr.save_as(lr_file_path)
                 print("LR raw report saved to:", lr_file_path)
                 
-            return lr_file_path if mode in ("morning", "daily_evening_report") else None, despatch_file_path, from_date_str, to_date_str
+            return lr_file_path if mode in ("morning", "daily_evening_report", "afternoon_open_lrs") else None, despatch_file_path if mode != "afternoon_open_lrs" else None, from_date_str, to_date_str
             
         except Exception as e:
             print("Error downloading from ERP:", e)
@@ -1441,6 +1444,28 @@ def main():
         # Email report
         email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors)
         print("Morning flow execution completed successfully.")
+
+    elif args.mode == "afternoon_open_lrs":
+        # We need to import the afternoon flow script
+        from run_afternoon_open_lrs import run_afternoon_open_lrs_flow
+        
+        # Download ONLY the LR reports for 30 days
+        # We use from_override to go back 30 days
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        now_ist = datetime.now(ist_tz)
+        from_30_days = (now_ist - timedelta(days=30)).strftime("%Y-%m-%d")
+        
+        lr_file, despatch_file, from_date, to_date = download_erp_reports(
+            mode="afternoon_open_lrs", 
+            from_override=args.from_date if args.from_date else from_30_days, 
+            to_override=args.to_date
+        )
+        
+        if lr_file:
+            run_afternoon_open_lrs_flow(lr_file)
+            print("Afternoon Open LRs flow execution completed successfully.")
+        else:
+            print("Failed to download LR file. Aborting.")
 
 if __name__ == "__main__":
     main()
