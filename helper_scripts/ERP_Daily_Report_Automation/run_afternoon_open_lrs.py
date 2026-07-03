@@ -12,7 +12,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from playwright.sync_api import sync_playwright
 
 from download_and_email import (
-    fetch_supervisor_mappings, clean_val, parse_date, SENDER_EMAIL, SENDER_PASSWORD,
+    fetch_supervisor_mappings, fetch_holidays, clean_val, parse_date, SENDER_EMAIL, SENDER_PASSWORD,
     RECEIVER_EMAIL, ERP_USERNAME, ERP_PASSWORD, load_df
 )
 
@@ -99,8 +99,8 @@ def verify_open_lrs_in_erp(open_lrs):
                 row = page.locator(f"tr:has-text('{lr_no}')")
                 if row.count() > 0:
                     html_content = row.first.inner_html().lower()
-                    if "cancelled" in html_content or "despatched from branch" in html_content:
-                        print(f"LR {lr_no} is actually CANCELLED/DESPATCHED on UI. Skipping.")
+                    if "cancelled" in html_content or "despatched from branch" in html_content or "delivered" in html_content or "delivery process completed" in html_content or "on transit" in html_content:
+                        print(f"LR {lr_no} is actually CANCELLED/DESPATCHED/DELIVERED on UI. Skipping.")
                         continue
                 
                 print(f"LR {lr_no} is verified as OPEN.")
@@ -115,8 +115,25 @@ def verify_open_lrs_in_erp(open_lrs):
             
     return verified_open_lrs
 
+
+def calculate_delay(start_dt, end_dt, holidays):
+    if not start_dt or not end_dt: return 0
+    from datetime import timedelta
+    start_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_dt = end_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    delay = (end_dt - start_dt).days
+    curr = start_dt
+    while curr < end_dt:
+        d_str = curr.strftime("%Y-%m-%d")
+        d_str2 = curr.strftime("%d/%m/%Y")
+        if curr.weekday() == 6 or d_str in holidays or d_str2 in holidays:
+            delay -= 1
+        curr += timedelta(days=1)
+    return max(0, delay)
+
 def run_afternoon_open_lrs_flow(lr_file_path):
     print("Running Afternoon Open LRs Flow...")
+    holidays = fetch_holidays()
     
     # Read LR Data
     try:
@@ -154,13 +171,13 @@ def run_afternoon_open_lrs_flow(lr_file_path):
     # Find Open LRs
     for r in lr_records:
         status = clean_val(r.get(status_col, ""))
-        if status not in ["delivered", "cancelled", "despatched from branch", "despatch"] and status != "":
+        if status not in ["delivered", "cancelled", "despatched from branch", "despatch", "delivery process completed.", "delivery process completed", "on transit"] and status != "":
             lr_no = clean_val(r.get(lr_no_col, ""))
             if not lr_no: continue
             
             lr_date_val = clean_val(r.get(date_col, ""))
             dt_obj = parse_date(lr_date_val)
-            age = (datetime.now() - dt_obj).days if dt_obj else 0
+            age = calculate_delay(dt_obj, datetime.now(), holidays) if dt_obj else 0
             
             initial_open_lrs.append({
                 "LR No": lr_no,
