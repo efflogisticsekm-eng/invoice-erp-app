@@ -13,7 +13,7 @@ from playwright.sync_api import sync_playwright
 
 from download_and_email import (
     fetch_supervisor_mappings, clean_val, parse_date, SENDER_EMAIL, SENDER_PASSWORD,
-    RECEIVER_EMAIL, ERP_USERNAME, ERP_PASSWORD
+    RECEIVER_EMAIL, ERP_USERNAME, ERP_PASSWORD, load_df
 )
 
 def encode_base64(part):
@@ -120,10 +120,7 @@ def run_afternoon_open_lrs_flow(lr_file_path):
     
     # Read LR Data
     try:
-        if lr_file_path.endswith('.csv'):
-            df_lr = pd.read_csv(lr_file_path)
-        else:
-            df_lr = pd.read_excel(lr_file_path)
+        df_lr = load_df(lr_file_path)
         lr_records = df_lr.to_dict('records')
     except Exception as e:
         print(f"Failed to read LR file: {e}")
