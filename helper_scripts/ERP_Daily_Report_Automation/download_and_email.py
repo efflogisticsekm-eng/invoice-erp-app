@@ -35,7 +35,7 @@ if not ERP_USERNAME or not ERP_PASSWORD:
     # Try loading from local .env files
     from dotenv import load_dotenv
     from pathlib import Path
-    env_path = Path(__file__).parent.parent / "INDIA" / "consignee-app" / ".env"
+    env_path = Path(__file__).parent.parent.parent / "INDIA" / "consignee-app" / ".env"
     load_dotenv(dotenv_path=env_path)
     ERP_USERNAME = os.getenv("ERP_USERNAME")
     ERP_PASSWORD = os.getenv("ERP_PASSWORD")
@@ -218,6 +218,10 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
     if mode == "evening":
         from_date_str = from_override if from_override else now_ist.strftime("%Y-%m-%d")
         to_date_str = to_override if to_override else now_ist.strftime("%Y-%m-%d")
+    elif mode == "daily_evening_report":
+        yesterday = now_ist - timedelta(days=1)
+        from_date_str = from_override if from_override else yesterday.strftime("%Y-%m-%d")
+        to_date_str = to_override if to_override else now_ist.strftime("%Y-%m-%d")
     else:
         yesterday = now_ist - timedelta(days=1)
         from_date_str = from_override if from_override else (yesterday - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -293,8 +297,8 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
             download.save_as(despatch_file_path)
             print("Despatch report saved to:", despatch_file_path)
             
-            # 2. Download LR Report (Only required in morning mode)
-            if mode == "morning":
+            # 2. Download LR Report (Only required in morning and daily_evening_report mode)
+            if mode in ("morning", "daily_evening_report"):
                 lr_url = "https://eff.aadhocc.in/eff_2021/main/lr/"
                 print(f"Navigating to LR page: {lr_url}...")
                 page.goto(lr_url)
@@ -323,7 +327,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 download_lr.save_as(lr_file_path)
                 print("LR raw report saved to:", lr_file_path)
                 
-            return lr_file_path if mode == "morning" else None, despatch_file_path, from_date_str, to_date_str
+            return lr_file_path if mode in ("morning", "daily_evening_report") else None, despatch_file_path, from_date_str, to_date_str
             
         except Exception as e:
             print("Error downloading from ERP:", e)
@@ -567,6 +571,324 @@ def calculate_aging_metrics(lrs, reference_date):
     max_age_count = sum(1 for x in agings if x == max_age)
     unique_pts = len(set(f"{x['consignee'].lower()}||{x['destination'].lower()}" for x in lrs))
     return max_age, max_age_count, unique_pts
+
+def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yesterday_str, today_str):
+    print(f"Running Daily Evening Flow: {yesterday_str} 8:00 PM to {today_str} 8:00 PM")
+    
+    # 1. Load Despatch Report
+    df_desp = load_df(despatch_file)
+    if df_desp.empty:
+        print("Error: Despatch report is empty.")
+        sys.exit(1)
+        
+    df_desp.columns = [str(c).strip().upper() for c in df_desp.columns]
+    
+    # Required columns
+    lr_col_desp = next((c for c in df_desp.columns if c in ['LR NO', 'LRNO', 'LR_NUMBER', 'LR_NO']), None)
+    sup_col_desp = next((c for c in df_desp.columns if c in ['LD SUPERVISOR', 'SUPERVISOR', 'LD_SUPERVISOR']), None)
+    driver_col_desp = next((c for c in df_desp.columns if c in ['DELIVERY DRIVER', 'DRIVER', 'DRIVER_NAME']), None)
+    desp_no_col_desp = next((c for c in df_desp.columns if c in ['DESPATCH NO', 'DISPATCH NO', 'DESPATCH_NO']), None)
+    date_col_desp = next((c for c in df_desp.columns if c in ['DP DATE', 'DESPATCH DATE', 'DISPATCH DATE']), None)
+    time_col_desp = next((c for c in df_desp.columns if c in ['DP TIME', 'DESPATCH TIME', 'DISPATCH TIME']), None)
+    
+    # Date time boundaries
+    start_dt = datetime.strptime(f"{yesterday_str} 20:00:00", "%Y-%m-%d %H:%M:%S")
+    end_dt = datetime.strptime(f"{today_str} 20:00:00", "%Y-%m-%d %H:%M:%S")
+    
+    # Filter Despatch Data
+    filtered_despatches = {} # Map from LR No -> Despatch Info
+    for _, r in df_desp.iterrows():
+        lr = clean_val(r[lr_col_desp])
+        if not lr: continue
+        
+        # Combine date and time
+        d_val = clean_val(r[date_col_desp])
+        t_val = clean_val(r[time_col_desp])
+        
+        # Try to parse DP Date and DP Time
+        dt_obj = parse_date(f"{d_val} {t_val}") if t_val else parse_date(d_val)
+        
+        if dt_obj and start_dt <= dt_obj <= end_dt:
+            # Valid despatch in time window
+            filtered_despatches[lr] = {
+                "lr_no": lr,
+                "supervisor": clean_val(r[sup_col_desp]) if sup_col_desp else "",
+                "driver": clean_val(r[driver_col_desp]) if driver_col_desp else "",
+                "despatch_no": clean_val(r[desp_no_col_desp]) if desp_no_col_desp else "",
+                "dp_date": dt_obj
+            }
+            
+    print(f"Filtered {len(filtered_despatches)} LRs dispatched between {start_dt} and {end_dt}")
+    
+    # 3. Load LR Report
+    df_lr = load_df(lr_file)
+    if df_lr.empty:
+        print("Error: LR raw report is empty.")
+        sys.exit(1)
+        
+    df_lr.columns = [str(c).strip().upper() for c in df_lr.columns]
+    
+    lr_col = next((c for c in df_lr.columns if c in ['LR NO', 'LRNO', 'LR_NUMBER', 'LR_NO']), None)
+    date_col = next((c for c in df_lr.columns if c in ['DATE', 'LR DATE', 'LR_DATE']), None)
+    del_time_col = next((c for c in df_lr.columns if c in ['DELIVERY TIME', 'DELIVERY_TIME', 'DELIVERED_DATE']), None)
+    consignor_col = next((c for c in df_lr.columns if c in ['CONSIGNOR', 'CONSIGNOR_NAME']), None)
+    consignee_col = next((c for c in df_lr.columns if c in ['CONSIGNEE', 'CONSIGNEE_NAME']), None)
+    dest_col = next((c for c in df_lr.columns if c in ['DESTINATION', 'PLACE', 'AREA']), None)
+    status_col = next((c for c in df_lr.columns if c in ['LR STATUS', 'LRSTATUS', 'STATUS']), None)
+    box_col = next((c for c in df_lr.columns if c in ['BOX QTY', 'BOXQTY', 'BOXES', 'QUANTITY']), None)
+    
+    # Build LR map from LR report
+    lr_rows_map = {clean_val(r[lr_col]): r for _, r in df_lr.iterrows() if clean_val(r[lr_col])}
+    
+    branch_stats = {}
+    unmapped_supervisors = set()
+    
+    # Lists for spreadsheet generation
+    despatch_snapshot_rows = []
+    open_lrs_rows = []
+    
+    # Track overall metrics
+    overall_stats = {
+        "delivered_count": 0, "returned_count": 0, "open_count": 0,
+        "delivered_max_age": 0, "delivered_max_age_count": 0,
+        "returned_max_age": 0, "returned_max_age_count": 0,
+        "open_max_age": 0, "open_max_age_count": 0
+    }
+    
+    # Used for aggregating WhatsApp driver breakdown
+    driver_breakdowns = {}
+    
+    for lr_no, snap in filtered_despatches.items():
+        row = lr_rows_map.get(lr_no)
+        
+        consignor = clean_val(row[consignor_col]) if row is not None else ""
+        if consignor.upper().startswith('EFF'):
+            continue
+            
+        consignee = clean_val(row[consignee_col]) if row is not None else ""
+        destination = clean_val(row[dest_col]) if row is not None else ""
+        box_qty = int(float(row[box_col])) if (row is not None and pd.notna(row[box_col])) else 0
+        lr_date = clean_val(row[date_col]) if row is not None else ""
+        del_time = clean_val(row[del_time_col]) if row is not None else ""
+        
+        raw_status = clean_val(row[status_col], "Open") if row is not None else "Open"
+        status_map = {
+            'Despatched': 'On transit',
+            'Open': 'Not Despatched',
+            'Delivered': 'Delivery Process completed.',
+            'Despatched from Branch': 'Cancelled LR'
+        }
+        mapped_status = status_map.get(raw_status, "Not Despatched")
+        if "cancelled" in raw_status.lower() or mapped_status == 'Cancelled LR':
+            mapped_status = 'Cancelled LR'
+            
+        supervisor = snap.get("supervisor", "")
+        driver = snap.get("driver", "")
+        despatch_no = snap.get("despatch_no", "")
+        dp_date_str = snap.get("dp_date").strftime("%Y-%m-%d %H:%M:%S")
+        
+        norm_sup = normalize_name(supervisor)
+        branch = supervisor_map.get(norm_sup, "N/A") if supervisor else resolve_branch_name(destination, supervisor, supervisor_map)
+        
+        if supervisor and branch == "N/A":
+            unmapped_supervisors.add(supervisor)
+            
+        lr_date_obj = parse_date(lr_date)
+        # Calculate aging relative to today_str 8PM
+        aging = (end_dt - lr_date_obj).days if lr_date_obj else 0
+        if aging < 0: aging = 0
+            
+        lr_item = {
+            "lr_no": lr_no,
+            "consignee": consignee,
+            "destination": destination,
+            "box_qty": box_qty,
+            "lr_date": lr_date,
+            "delivery_time": del_time,
+            "status": mapped_status,
+            "driver": driver,
+            "despatch_no": despatch_no,
+            "aging": aging
+        }
+        
+        is_delivered = (mapped_status == 'Delivery Process completed.')
+        
+        if branch not in branch_stats:
+            branch_stats[branch] = {
+                "delivered_lrs": [], "returned_lrs": [], "open_lrs": [], "dispatches": {}
+            }
+            
+        b_group = branch_stats[branch]
+        
+        if is_delivered:
+            b_group["delivered_lrs"].append(lr_item)
+            overall_stats["delivered_count"] += 1
+        elif mapped_status == 'On transit':
+            b_group["returned_lrs"].append(lr_item)
+            overall_stats["returned_count"] += 1
+            open_lrs_rows.append({
+                "Branch": branch, "Despatch No": despatch_no, "Despatch Time": dp_date_str,
+                "Driver": driver, "LR No": lr_no, "Consignee": consignee,
+                "Destination": destination, "Current Status": "Returned (On transit)", "Aging (Days)": aging
+            })
+        else:
+            b_group["open_lrs"].append(lr_item)
+            overall_stats["open_count"] += 1
+            open_lrs_rows.append({
+                "Branch": branch, "Despatch No": despatch_no, "Despatch Time": dp_date_str,
+                "Driver": driver, "LR No": lr_no, "Consignee": consignee,
+                "Destination": destination, "Current Status": mapped_status, "Aging (Days)": aging
+            })
+            
+        disp_key = (driver, despatch_no)
+        if disp_key not in b_group["dispatches"]:
+            b_group["dispatches"][disp_key] = {"delivered_lrs": [], "returned_lrs": []}
+            
+        disp_group = b_group["dispatches"][disp_key]
+        if is_delivered:
+            disp_group["delivered_lrs"].append(lr_item)
+        elif mapped_status == 'On transit':
+            disp_group["returned_lrs"].append(lr_item)
+            
+        if driver and despatch_no:
+            d_key = f"{branch}|{driver}|{despatch_no}"
+            if d_key not in driver_breakdowns:
+                driver_breakdowns[d_key] = {"delivered": [], "returned": [], "points": set()}
+            if is_delivered:
+                driver_breakdowns[d_key]["delivered"].append(lr_item)
+            elif mapped_status == 'On transit':
+                driver_breakdowns[d_key]["returned"].append(lr_item)
+            # Both delivered and returned counts as points
+            if is_delivered or mapped_status == 'On transit':
+                driver_breakdowns[d_key]["points"].add(f"{consignee.lower()}||{destination.lower()}")
+            
+        despatch_snapshot_rows.append({
+            "Branch": branch,
+            "Despatch No": despatch_no,
+            "Despatch Time": dp_date_str,
+            "Driver Name": driver,
+            "Supervisor Name": supervisor,
+            "LR No": lr_no,
+            "Consignee": consignee,
+            "Destination": destination,
+            "Box Qty": box_qty,
+            "Current Status": mapped_status,
+            "Delivery Time": del_time if is_delivered else "-"
+        })
+        
+    # Process branch summary for Excel and WhatsApp
+    wb = Workbook()
+    
+    # 1. Summary Sheet
+    ws_sum = wb.active
+    ws_sum.title = "Daily Summary"
+    ws_sum.append(["BRANCH", "DELIVERED", "DESPATCHED (RETURNED)", "OPEN"])
+    
+    whatsapp_msg = f"📊 *DAILY DESPATCH & DELIVERY SUMMARY ({yesterday_str} 8PM - {today_str} 8PM)*\n"
+    
+    all_delivered_lrs = []
+    all_returned_lrs = []
+    all_open_lrs = []
+    
+    for branch, stats in branch_stats.items():
+        del_count = len(stats["delivered_lrs"])
+        ret_count = len(stats["returned_lrs"])
+        opn_count = len(stats["open_lrs"])
+        ws_sum.append([branch, del_count, ret_count, opn_count])
+        
+        all_delivered_lrs.extend(stats["delivered_lrs"])
+        all_returned_lrs.extend(stats["returned_lrs"])
+        all_open_lrs.extend(stats["open_lrs"])
+        
+    ws_sum.append(["GRAND TOTAL", overall_stats["delivered_count"], overall_stats["returned_count"], overall_stats["open_count"]])
+    apply_styles(ws_sum, ws_sum.max_row, ws_sum.max_column, sheet_type="summary")
+    
+    # Adjust column widths
+    ws_sum.column_dimensions["A"].width = 25
+    ws_sum.column_dimensions["B"].width = 15
+    ws_sum.column_dimensions["C"].width = 25
+    ws_sum.column_dimensions["D"].width = 15
+    
+    # WhatsApp detailed breakdown per branch
+    for branch in sorted(branch_stats.keys()):
+        stats = branch_stats[branch]
+        whatsapp_msg += f"\n🏢 *{branch}*\n"
+        
+        # Group by driver within branch
+        for (driver, desp_no), dstats in stats["dispatches"].items():
+            del_count = len(dstats["delivered_lrs"])
+            ret_count = len(dstats["returned_lrs"])
+            total_lrs = del_count + ret_count
+            if total_lrs == 0:
+                continue
+                
+            d_key = f"{branch}|{driver}|{desp_no}"
+            pts = len(driver_breakdowns.get(d_key, {}).get("points", set()))
+            
+            times = [parse_date(x["delivery_time"]) for x in dstats["delivered_lrs"] if x["delivery_time"] and parse_date(x["delivery_time"])]
+            t_str = ""
+            if times:
+                first_t = min(times).strftime("%I:%M %p")
+                last_t = max(times).strftime("%I:%M %p")
+                t_str = f", 1st: {first_t}, Last: {last_t}"
+                
+            whatsapp_msg += (f"  🚚 {driver} (Desp: {desp_no})\n"
+                             f"     Total LRs: {total_lrs}, Points: {pts}{t_str}\n"
+                             f"     Delivered: {del_count}, Returned: {ret_count}\n")
+                             
+    # Max Aging logic for Dashboard
+    overall_stats["delivered_max_age"], overall_stats["delivered_max_age_count"], _ = calculate_aging_metrics(all_delivered_lrs, None)
+    overall_stats["returned_max_age"], overall_stats["returned_max_age_count"], _ = calculate_aging_metrics(all_returned_lrs, None)
+    overall_stats["open_max_age"], overall_stats["open_max_age_count"], _ = calculate_aging_metrics(all_open_lrs, None)
+    
+    whatsapp_msg += f"\n*OVERALL STATUS*\n"
+    whatsapp_msg += f"✅ Delivered: {overall_stats['delivered_count']}\n"
+    whatsapp_msg += f"⚠️ Returned: {overall_stats['returned_count']}\n"
+    whatsapp_msg += f"⏳ Open: {overall_stats['open_count']}\n"
+    
+    # 2. Despatch Snapshot Sheet
+    ws_snap = wb.create_sheet("Despatch Snapshot")
+    headers = ["Branch", "Despatch No", "Despatch Time", "Driver Name", "Supervisor Name", "LR No", "Consignee", "Destination", "Box Qty", "Current Status", "Delivery Time"]
+    ws_snap.append(headers)
+    for r in despatch_snapshot_rows:
+        ws_snap.append([r[h] for h in headers])
+    apply_styles(ws_snap, ws_snap.max_row, ws_snap.max_column, enable_filter=True)
+    
+    # 3. Open/Returned LRs Sheet
+    ws_open = wb.create_sheet("Open LRs")
+    headers_open = ["Branch", "Despatch No", "Despatch Time", "Driver", "LR No", "Consignee", "Destination", "Current Status", "Aging (Days)"]
+    ws_open.append(headers_open)
+    for r in open_lrs_rows:
+        ws_open.append([r[h] for h in headers_open])
+    apply_styles(ws_open, ws_open.max_row, ws_open.max_column, enable_filter=True)
+    
+    # 4. Despatch Summary Sheet
+    ws_ds = wb.create_sheet("Despatch Summary")
+    headers_ds = ["Branch", "Driver", "Despatch No", "Total LRs", "Delivery Points", "Delivered", "Despatched (Returned)", "1st Delivery", "Last Delivery"]
+    ws_ds.append(headers_ds)
+    for b_d_d, d_info in driver_breakdowns.items():
+        pts = len(d_info["points"])
+        del_lrs = d_info["delivered"]
+        ret_lrs = d_info["returned"]
+        total_lrs = len(del_lrs) + len(ret_lrs)
+        b, dr, dn = b_d_d.split("|")
+        
+        times = [parse_date(x["delivery_time"]) for x in del_lrs if x["delivery_time"] and parse_date(x["delivery_time"])]
+        f_time = min(times).strftime("%I:%M %p") if times else "-"
+        l_time = max(times).strftime("%I:%M %p") if times else "-"
+        
+        ws_ds.append([b, dr, dn, total_lrs, pts, len(del_lrs), len(ret_lrs), f_time, l_time])
+    apply_styles(ws_ds, ws_ds.max_row, ws_ds.max_column, enable_filter=True)
+    
+    processed_file_path = os.path.join(DOWNLOAD_DIR, f"Daily_Evening_Report_{today_str}.xlsx")
+    wb.save(processed_file_path)
+    print(f"Processed Excel report saved to: {processed_file_path}")
+    
+    dashboard_image_path = generate_pillow_dashboard(overall_stats, today_str)
+    
+    send_whatsapp_message(whatsapp_msg)
+    
+    return processed_file_path, dashboard_image_path, unmapped_supervisors
 
 def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
     print(f"Running Morning Flow: Analyzing deliveries for date {yesterday_str}...")
@@ -844,6 +1166,7 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
     
     # Branch and Driver Wise detail
     branch_summary_excel_rows = []
+    despatch_summary_rows = []
     
     for b in sorted(branch_stats.keys()):
         if b == "N/A" and not branch_stats[b]["delivered_lrs"] and not branch_stats[b]["returned_lrs"] and not branch_stats[b]["open_lrs"]:
@@ -876,22 +1199,39 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
         # Driver/Despatch details
         drv_idx = 1
         for (driver, desp_no), disp in sorted(b_group["dispatches"].items()):
-            drv_del_max_age, drv_del_max_age_count, drv_del_pts = calculate_aging_metrics(disp["delivered_lrs"], yesterday_dt)
-            drv_ret_max_age, drv_ret_max_age_count, drv_ret_pts = calculate_aging_metrics(disp["returned_lrs"], yesterday_dt)
+            all_lrs_in_desp = disp["delivered_lrs"] + disp["returned_lrs"]
+            total_lrs = len(all_lrs_in_desp)
+            total_pts = len(set(f"{x['consignee'].lower()}||{x['destination'].lower()}" for x in all_lrs_in_desp))
             
-            # Parse delivery times
+            # Parse delivery times (from delivered only)
             del_times_dt = [parse_date(x["delivery_time"]) for x in disp["delivered_lrs"] if parse_date(x["delivery_time"])]
             if del_times_dt:
-                min_time = min(del_times_dt).strftime("%I:%M%p")
-                max_time = max(del_times_dt).strftime("%I:%M%p")
+                min_time = min(del_times_dt).strftime("%I:%M %p")
+                max_time = max(del_times_dt).strftime("%I:%M %p")
             else:
                 min_time = "-"
                 max_time = "-"
                 
-            wa_msg += f"{drv_idx}) Driver: {driver if driver else 'N/A'} :-Despatch# {desp_no}.\n"
-            wa_msg += f"🟢 Delivered: {len(disp['delivered_lrs'])} LRs, (max Aging {drv_del_max_age}Day {drv_del_max_age_count}nos),Total Delivery {drv_del_pts}Nos. 1st delivery Time {min_time},\n"
-            wa_msg += f"🔴 Returned: {len(disp['returned_lrs'])} LRs (max Aging {drv_ret_max_age}Day {drv_ret_max_age_count}nos),Total Delivery {drv_ret_pts}Nos. Last delivery Time {max_time},\n"
+            delivered_count = len(disp["delivered_lrs"])
+            returned_count = len(disp["returned_lrs"])
+                
+            wa_msg += f"{drv_idx}) Driver: {driver if driver else 'N/A'} | Despatch: {desp_no}\n"
+            wa_msg += f"   📦 Total LRs: {total_lrs} | Points: {total_pts}\n"
+            wa_msg += f"   🟢 Delivered: {delivered_count} | 🔴 Despatched (Returned): {returned_count}\n"
+            wa_msg += f"   ⏱️ 1st Delivery: {min_time} | Last Delivery: {max_time}\n"
             drv_idx += 1
+            
+            despatch_summary_rows.append({
+                "Branch": b,
+                "Driver Name": driver,
+                "Despatch No": desp_no,
+                "Total LRs": total_lrs,
+                "Total Delivery Points": total_pts,
+                "Delivered Count": delivered_count,
+                "Despatched (Returned) Count": returned_count,
+                "1st Delivery Time": min_time,
+                "Last Delivery Time": max_time
+            })
             
         wa_msg += "\n"
         
@@ -921,6 +1261,12 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
         df_open_lrs = pd.DataFrame(columns=["Branch", "LR No", "LR Date", "Consignor", "Consignee", "Destination", "Box Qty", "Current Status", "LR Age (Days)"])
     df_open_lrs.to_excel(writer, sheet_name="3. Open LRs", index=False)
     
+    # Sheet 4: Despatch Summary
+    df_despatch_summary = pd.DataFrame(despatch_summary_rows)
+    if df_despatch_summary.empty:
+        df_despatch_summary = pd.DataFrame(columns=["Branch", "Driver Name", "Despatch No", "Total LRs", "Total Delivery Points", "Delivered Count", "Despatched (Returned) Count", "1st Delivery Time", "Last Delivery Time"])
+    df_despatch_summary.to_excel(writer, sheet_name="4. Despatch Summary", index=False)
+    
     writer.close()
     
     # Format and Style Workbook
@@ -928,6 +1274,7 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
     apply_styles(wb["1. Daily Summary"], len(df_branch_summary) + 1, len(df_branch_summary.columns), enable_filter=True)
     apply_styles(wb["2. Despatch Snapshot"], len(df_despatch_snap) + 1, len(df_despatch_snap.columns), enable_filter=True)
     apply_styles(wb["3. Open LRs"], len(df_open_lrs) + 1, len(df_open_lrs.columns), enable_filter=True)
+    apply_styles(wb["4. Despatch Summary"], len(df_despatch_summary) + 1, len(df_despatch_summary.columns), enable_filter=True)
     wb.save(processed_file)
     
     # 6. Generate Pillow Dashboard Image
@@ -969,7 +1316,8 @@ def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_
         <p><b>Included sheets in Interactive_Delivery_Report.xlsx:</b><br>
         1. Daily Summary (Overall & Branch summaries)<br>
         2. Despatch Snapshot (Yesterday's LRs and their final morning status)<br>
-        3. Open LRs (List of undelivered LRs as of yesterday morning 7:00 AM)</p>
+        3. Open LRs (List of undelivered LRs as of yesterday morning 7:00 AM)<br>
+        4. Despatch Summary (Driver-wise delivery points, times, and returns)</p>
         <p>Also attached are the raw downloaded ERP reports for your reference.</p>
         <p>Best Regards,<br>
         <b>ERP Daily Automation Engine</b> ⚡</p>
@@ -1040,7 +1388,7 @@ def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_
 # 9. Main orchestrator
 def main():
     parser = argparse.ArgumentParser(description="ERP Dispatch & Delivery Performance Report")
-    parser.add_argument("--mode", choices=["evening", "morning"], required=True, help="Run mode (evening or morning)")
+    parser.add_argument("--mode", choices=["evening", "morning", "daily_evening_report"], required=True, help="Run mode (evening, morning, or daily_evening_report)")
     parser.add_argument("--from-date", help="Override from date (YYYY-MM-DD)")
     parser.add_argument("--to-date", help="Override to date (YYYY-MM-DD)")
     args = parser.parse_args()
@@ -1055,6 +1403,28 @@ def main():
         lr_file, despatch_file, from_date, to_date = download_erp_reports(mode="evening", from_override=args.from_date, to_override=args.to_date)
         run_evening_flow(despatch_file, supervisor_map)
         print("Evening flow execution completed successfully.")
+        
+    elif args.mode == "daily_evening_report":
+        # Download both reports
+        lr_file, despatch_file, from_date, to_date = download_erp_reports(mode="daily_evening_report", from_override=args.from_date, to_override=args.to_date)
+        
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        now_ist = datetime.now(ist_tz)
+        today_str = now_ist.strftime("%Y-%m-%d")
+        yesterday_str = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        if args.from_date:
+            yesterday_str = args.from_date
+        if args.to_date:
+            today_str = args.to_date
+            
+        processed_file, dashboard_image_path, unmapped_supervisors = run_daily_evening_report_flow(
+            lr_file, despatch_file, supervisor_map, yesterday_str, today_str
+        )
+        
+        # Email report
+        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors)
+        print("Daily Evening report flow execution completed successfully.")
         
     elif args.mode == "morning":
         # Download both reports

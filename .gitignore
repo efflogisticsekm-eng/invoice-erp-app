@@ -28,9 +28,9 @@ walkthrough.md
 Project_Documentation.txt
 Consignee_Master.csv
 
-# Ignore local helper scripts except erp_automation
+# Ignore local helper scripts except ERP_Daily_Report_Automation
 helper_scripts/*
-!helper_scripts/erp_automation/
+!helper_scripts/ERP_Daily_Report_Automation/
 
 # Ignore local test and scratch files in consignee-app
 INDIA/consignee-app/test_*.js
