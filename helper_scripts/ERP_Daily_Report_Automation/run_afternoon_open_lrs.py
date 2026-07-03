@@ -169,29 +169,45 @@ def run_afternoon_open_lrs_flow(lr_file_path):
         return None
         
     initial_open_lrs = []
+    whole_lr_data = []
     
-    # Find Open LRs
+    # Find Open LRs and Collect Whole Data
+    from datetime import datetime
     for r in lr_records:
         status = clean_val(r.get(status_col, ""))
+        lr_no = clean_val(r.get(lr_no_col, ""))
+        if not lr_no: continue
+        
+        lr_date_val = clean_val(r.get(date_col, ""))
+        dt_obj = parse_date(lr_date_val)
+        
+        del_date_val = clean_val(r.get(del_col, "")) if del_col else ""
+        del_dt_obj = parse_date(del_date_val)
+        
+        # Calculate aging for this LR
+        if status in ["delivered", "delivery process completed.", "delivery process completed"]:
+            end_dt = del_dt_obj if del_dt_obj else datetime.now()
+        else:
+            end_dt = datetime.now()
+            
+        age = calculate_delay(dt_obj, end_dt, holidays) if dt_obj else 0
+        
+        lr_dict = {
+            "LR No": lr_no,
+            "LR Date": lr_date_val,
+            "Consignor": clean_val(r.get(consignor_col, "")),
+            "Consignee": clean_val(r.get(consignee_col, "")),
+            "Destination": clean_val(r.get(dest_col, "")),
+            "Box Qty": clean_val(r.get(qty_col, "")),
+            "Current Status": status,
+            "Delivery Date": del_date_val,
+            "LR Age (Days)": age
+        }
+        
+        whole_lr_data.append(lr_dict)
+        
         if status not in ["delivered", "cancelled", "despatched from branch", "despatch", "delivery process completed.", "delivery process completed", "on transit"] and status != "":
-            lr_no = clean_val(r.get(lr_no_col, ""))
-            if not lr_no: continue
-            
-            lr_date_val = clean_val(r.get(date_col, ""))
-            dt_obj = parse_date(lr_date_val)
-            age = calculate_delay(dt_obj, datetime.now(), holidays) if dt_obj else 0
-            
-            initial_open_lrs.append({
-                "LR No": lr_no,
-                "LR Date": lr_date_val,
-                "Consignor": clean_val(r.get(consignor_col, "")),
-                "Consignee": clean_val(r.get(consignee_col, "")),
-                "Destination": clean_val(r.get(dest_col, "")),
-                "Box Qty": clean_val(r.get(qty_col, "")),
-                "Current Status": status,
-                "Delivery Date": clean_val(r.get(del_col, "")) if del_col else "",
-                "LR Age (Days)": age
-            })
+            initial_open_lrs.append(lr_dict)
             
     print(f"Found {len(initial_open_lrs)} Open LRs from Excel. Verifying in UI...")
     
@@ -226,19 +242,25 @@ def run_afternoon_open_lrs_flow(lr_file_path):
     df_summary = pd.DataFrame(branch_summary)
     if df_summary.empty:
         df_summary = pd.DataFrame(columns=["Branch", "Total Open LRs", "Max Age (Days)"])
-    df_summary.to_excel(writer, sheet_name="1. Branch Summary", index=False)
+    df_summary.to_excel(writer, sheet_name="1. LR open Details Branch wise", index=False)
     
     df_details = pd.DataFrame(verified_open_lrs)
     if df_details.empty:
         df_details = pd.DataFrame(columns=["LR No", "LR Date", "Consignor", "Consignee", "Destination", "Box Qty", "Current Status", "Delivery Date", "LR Age (Days)"])
-    df_details.to_excel(writer, sheet_name="2. Open LRs Details", index=False)
+    df_details.to_excel(writer, sheet_name="2. LR open Details", index=False)
+    
+    df_whole = pd.DataFrame(whole_lr_data)
+    if df_whole.empty:
+        df_whole = pd.DataFrame(columns=["LR No", "LR Date", "Consignor", "Consignee", "Destination", "Box Qty", "Current Status", "Delivery Date", "LR Age (Days)"])
+    df_whole.to_excel(writer, sheet_name="3. Whole LR Data", index=False)
     
     writer.close()
     
     # Style
     wb = load_workbook(report_file)
-    apply_styles(wb["1. Branch Summary"], len(df_summary)+1, len(df_summary.columns))
-    apply_styles(wb["2. Open LRs Details"], len(df_details)+1, len(df_details.columns))
+    apply_styles(wb["1. LR open Details Branch wise"], len(df_summary)+1, len(df_summary.columns))
+    apply_styles(wb["2. LR open Details"], len(df_details)+1, len(df_details.columns))
+    apply_styles(wb["3. Whole LR Data"], len(df_whole)+1, len(df_whole.columns))
     wb.save(report_file)
     
     # Email it
