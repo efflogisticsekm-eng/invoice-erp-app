@@ -602,8 +602,8 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
         if not lr: continue
         
         # Combine date and time
-        d_val = clean_val(r[date_col_desp])
-        t_val = clean_val(r[time_col_desp])
+        d_val = clean_val(r[date_col_desp]) if date_col_desp else ""
+        t_val = clean_val(r[time_col_desp]) if time_col_desp else ""
         
         # Try to parse DP Date and DP Time
         dt_obj = parse_date(f"{d_val} {t_val}") if t_val else parse_date(d_val)
