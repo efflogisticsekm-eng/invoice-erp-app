@@ -150,6 +150,7 @@ def run_afternoon_open_lrs_flow(lr_file_path):
     consignee_col = None
     dest_col = None
     qty_col = None
+    del_col = None
     
     if lr_records:
         for k in lr_records[0].keys():
@@ -161,6 +162,7 @@ def run_afternoon_open_lrs_flow(lr_file_path):
             elif "consignee" in k_lower: consignee_col = k
             elif "destination" in k_lower: dest_col = k
             elif "qty" in k_lower or "box" in k_lower: qty_col = k
+            elif "delivered on" in k_lower or "delivery date" in k_lower: del_col = k
             
     if not lr_no_col or not status_col:
         print("Could not find LR No or Status column.")
@@ -187,6 +189,7 @@ def run_afternoon_open_lrs_flow(lr_file_path):
                 "Destination": clean_val(r.get(dest_col, "")),
                 "Box Qty": clean_val(r.get(qty_col, "")),
                 "Current Status": status,
+                "Delivery Date": clean_val(r.get(del_col, "")) if del_col else "",
                 "LR Age (Days)": age
             })
             
@@ -227,7 +230,7 @@ def run_afternoon_open_lrs_flow(lr_file_path):
     
     df_details = pd.DataFrame(verified_open_lrs)
     if df_details.empty:
-        df_details = pd.DataFrame(columns=["LR No", "LR Date", "Consignor", "Consignee", "Destination", "Box Qty", "Current Status", "LR Age (Days)"])
+        df_details = pd.DataFrame(columns=["LR No", "LR Date", "Consignor", "Consignee", "Destination", "Box Qty", "Current Status", "Delivery Date", "LR Age (Days)"])
     df_details.to_excel(writer, sheet_name="2. Open LRs Details", index=False)
     
     writer.close()
