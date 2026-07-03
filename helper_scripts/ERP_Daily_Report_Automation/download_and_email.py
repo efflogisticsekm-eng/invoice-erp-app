@@ -777,7 +777,7 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
         })
         
     # Process branch summary for Excel and WhatsApp
-    wb = Workbook()
+    wb = openpyxl.Workbook()
     
     # 1. Summary Sheet
     ws_sum = wb.active
