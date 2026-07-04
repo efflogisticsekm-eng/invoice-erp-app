@@ -321,7 +321,13 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                         print(f"Failed to navigate and load table: {e}")
                         
                     try:
-                        page.select_option("select[name$='_length']", "100", timeout=3000)
+                        page.evaluate('''() => {
+                            let select = document.querySelector('select[name$="_length"]');
+                            if (select) {
+                                select.value = '100';
+                                select.dispatchEvent(new Event('change'));
+                            }
+                        }''')
                         page.wait_for_timeout(2000)
                     except Exception:
                         pass
@@ -362,13 +368,20 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                         elif data:
                             ui_times.update(data)
                             
-                        next_btn = page.locator(".paginate_button.next:not(.disabled)")
-                        if next_btn.count() > 0 and next_btn.is_visible():
-                            next_btn.click()
+                        has_next = page.evaluate('''() => {
+                            let nextBtn = document.querySelector('.paginate_button.next, li.next, [id$="_next"]');
+                            if (nextBtn && !nextBtn.classList.contains('disabled') && !nextBtn.parentElement.classList.contains('disabled')) {
+                                let link = nextBtn.querySelector('a') || nextBtn;
+                                link.click();
+                                return true;
+                            }
+                            return false;
+                        }''')
+                        
+                        if has_next:
                             page.wait_for_timeout(2000)
                         else:
                             break
-                            
                     import json
                     import tempfile
                     ui_times_file = os.path.join(tempfile.gettempdir(), "ui_despatch_times.json")
