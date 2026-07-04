@@ -334,8 +334,9 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     max_pages = 50
                     for i in range(max_pages):
                         data = page.evaluate('''() => {
-                            const table = document.querySelector("table");
-                            if (!table) return {error: "No table found"};
+                            const tables = Array.from(document.querySelectorAll("table"));
+                            const table = tables.find(t => t.innerText.toLowerCase().includes("dp no"));
+                            if (!table) return {error: "No table with 'dp no' found"};
                             const headers = Array.from(table.querySelectorAll("th")).map(th => th.innerText.trim().toLowerCase());
                             const dpIdx = headers.findIndex(h => h.includes("dp no"));
                             const timeIdx = headers.findIndex(h => h.includes("dp time"));
