@@ -313,20 +313,33 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     ui_times = {}
                     
                     try:
+                        ui_url = f"https://eff.aadhocc.in/eff_2021/main/effdespatch?despatch_number=&location_id=&lr_number=&from_date={from_date_str}&to_date={to_date_str}&delivery_staff_search="
+                        print(f"Navigating to: {ui_url}")
+                        page.goto(ui_url, timeout=30000)
+                        page.wait_for_selector("table tbody tr td", timeout=10000)
+                    except Exception as e:
+                        print(f"Failed to navigate and load table: {e}")
+                        
+                    try:
                         page.select_option("select[name$='_length']", "100", timeout=3000)
                         page.wait_for_timeout(2000)
                     except Exception:
                         pass
                         
-                    max_pages = 20
+                    try:
+                        page.wait_for_selector("table tbody tr td", timeout=10000)
+                    except Exception as e:
+                        print(f"Table didn't load in time: {e}")
+                        
+                    max_pages = 50
                     for i in range(max_pages):
                         data = page.evaluate('''() => {
                             const table = document.querySelector("table");
-                            if (!table) return {};
+                            if (!table) return {error: "No table found"};
                             const headers = Array.from(table.querySelectorAll("th")).map(th => th.innerText.trim().toLowerCase());
-                            const dpIdx = headers.indexOf("dp no");
-                            const timeIdx = headers.indexOf("dp time");
-                            if (dpIdx === -1 || timeIdx === -1) return {};
+                            const dpIdx = headers.findIndex(h => h.includes("dp no"));
+                            const timeIdx = headers.findIndex(h => h.includes("dp time"));
+                            if (dpIdx === -1 || timeIdx === -1) return {error: "Headers not found", headers: headers};
                             
                             const result = {};
                             const rows = Array.from(table.querySelectorAll("tbody tr"));
@@ -340,13 +353,18 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                             });
                             return result;
                         }''')
-                        if data:
+                        if data and "error" in data:
+                            print(f"UI extraction error on page {i}: {data['error']}")
+                            if "headers" in data:
+                                print(f"Found headers: {data['headers']}")
+                            break
+                        elif data:
                             ui_times.update(data)
                             
                         next_btn = page.locator(".paginate_button.next:not(.disabled)")
                         if next_btn.count() > 0 and next_btn.is_visible():
                             next_btn.click()
-                            page.wait_for_timeout(1000)
+                            page.wait_for_timeout(2000)
                         else:
                             break
                             
