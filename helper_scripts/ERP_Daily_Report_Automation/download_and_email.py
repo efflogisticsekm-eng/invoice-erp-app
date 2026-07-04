@@ -411,21 +411,17 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                             ui_times.update(data)
                             
                         has_next = page.evaluate('''() => {
-                            let nextBtn = document.querySelector('.paginate_button.next, li.next, [id$="_next"]');
-                            if (!nextBtn) {
-                                // Fallback to XPath for "Next" or ">>"
-                                let xpath = "//a[contains(translate(text(), 'NEXT', 'next'), 'next') or contains(text(), '>>')] | //button[contains(translate(text(), 'NEXT', 'next'), 'next') or contains(text(), '>>')]";
-                                nextBtn = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                            }
-                            
-                            if (nextBtn) {
-                                // Check if disabled
-                                if (nextBtn.classList.contains('disabled') || nextBtn.parentElement.classList.contains('disabled') || nextBtn.getAttribute('disabled') !== null) {
-                                    return false;
+                            let links = document.querySelectorAll('a');
+                            for (let a of links) {
+                                if (a.innerText.trim() === '>' || a.innerText.trim() === 'Next') {
+                                    // Check if it's disabled or active
+                                    let li = a.closest('li');
+                                    if (li && (li.classList.contains('disabled') || li.classList.contains('active'))) {
+                                        return false;
+                                    }
+                                    a.click();
+                                    return true;
                                 }
-                                let link = nextBtn.tagName.toLowerCase() === 'a' || nextBtn.tagName.toLowerCase() === 'button' ? nextBtn : (nextBtn.querySelector('a') || nextBtn.querySelector('button') || nextBtn);
-                                link.click();
-                                return true;
                             }
                             return false;
                         }''')
