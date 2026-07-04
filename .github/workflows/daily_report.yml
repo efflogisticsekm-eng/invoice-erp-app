@@ -79,9 +79,9 @@ jobs:
           fi
         fi
 
-    - name: Upload Error Screenshot
-      if: failure()
+    - name: Upload Debug Screenshots
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: error-screenshot
-        path: /home/runner/Downloads/erp_temp_downloads/
+        name: debug-screenshots
+        path: /home/runner/Downloads/erp_temp_downloads/*.png

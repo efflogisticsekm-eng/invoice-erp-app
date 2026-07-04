@@ -350,21 +350,33 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                         
                     try:
                         page.evaluate('''() => {
-                            let select = document.querySelector('select[name$="_length"]');
-                            if (select) {
-                                let opts = Array.from(select.options).map(o => o.value);
-                                let val = opts.includes("-1") ? "-1" : (opts.includes("100") ? "100" : opts[opts.length - 1]);
-                                select.value = val;
-                                if (typeof $ !== "undefined") {
-                                    $(select).val(val).trigger('change');
-                                } else {
-                                    select.dispatchEvent(new Event("change"));
+                            if (typeof $ !== 'undefined' && $.fn.dataTable) {
+                                let dt = $('table').DataTable();
+                                if (dt) {
+                                    dt.page.len(-1).draw();
+                                }
+                            } else {
+                                let select = document.querySelector('select[name$="_length"]');
+                                if (select) {
+                                    let opts = Array.from(select.options).map(o => o.value);
+                                    let val = opts.includes("-1") ? "-1" : (opts.includes("100") ? "100" : opts[opts.length - 1]);
+                                    select.value = val;
+                                    if (typeof $ !== "undefined") $(select).val(val).trigger('change');
+                                    else select.dispatchEvent(new Event("change"));
                                 }
                             }
                         }''')
                         page.wait_for_timeout(3000)
                     except Exception as e:
                         print(f"Could not change page length: {e}")
+                        
+                    # SAVE SCREENSHOT FOR DEBUGGING
+                    try:
+                        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+                        page.screenshot(path=os.path.join(DOWNLOAD_DIR, f"debug_table_page_{p_idx}.png"), full_page=True)
+                        print(f"Saved debug screenshot to {os.path.join(DOWNLOAD_DIR, f'debug_table_page_{p_idx}.png')}")
+                    except Exception as e:
+                        print(f"Failed to save screenshot: {e}")
                         
                     max_pages = 50
                     for i in range(max_pages):
