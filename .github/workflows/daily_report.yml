@@ -18,6 +18,10 @@ on:
           - morning
           - evening
           - afternoon_open_lrs
+      date:
+        description: 'Optional date (YYYY-MM-DD) to run report for a specific day (e.g. 2026-07-03)'
+        required: false
+        type: string
 
 jobs:
   run-daily-report:
@@ -53,7 +57,14 @@ jobs:
       run: |
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
           echo "Running manually triggered workflow in ${{ github.event.inputs.mode }} mode..."
-          python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode ${{ github.event.inputs.mode }}
+          
+          DATE_ARG=""
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            DATE_ARG="--date ${{ github.event.inputs.date }}"
+            echo "Using historical date: ${{ github.event.inputs.date }}"
+          fi
+          
+          python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode ${{ github.event.inputs.mode }} $DATE_ARG
         else
           # Check current UTC hour to decide which cron triggered this
           CURRENT_HOUR=$(date -u +"%H")

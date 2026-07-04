@@ -143,7 +143,15 @@ def parse_date(val):
             return None
         return pdt.to_pydatetime()
     except Exception:
-        return None
+        try:
+            # Fallback for "17:00 PM" issue
+            val_str = val_str.replace(" PM", "").replace(" AM", "")
+            pdt = pd.to_datetime(val_str, dayfirst=True)
+            if pd.isna(pdt) or pdt is pd.NaT:
+                return None
+            return pdt.to_pydatetime()
+        except Exception:
+            return None
 
 # Fetch supervisor mappings from Supabase via REST
 def fetch_supervisor_mappings():
@@ -299,6 +307,57 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 download = download_info.value
                 download.save_as(despatch_file_path)
                 print("Despatch raw report saved to:", despatch_file_path)
+                
+                print("Extracting Despatch Times from Web UI...")
+                try:
+                    ui_times = {}
+                    
+                    try:
+                        page.select_option("select[name$='_length']", "100", timeout=3000)
+                        page.wait_for_timeout(2000)
+                    except Exception:
+                        pass
+                        
+                    max_pages = 20
+                    for i in range(max_pages):
+                        data = page.evaluate('''() => {
+                            const table = document.querySelector("table");
+                            if (!table) return {};
+                            const headers = Array.from(table.querySelectorAll("th")).map(th => th.innerText.trim().toLowerCase());
+                            const dpIdx = headers.indexOf("dp no");
+                            const timeIdx = headers.indexOf("dp time");
+                            if (dpIdx === -1 || timeIdx === -1) return {};
+                            
+                            const result = {};
+                            const rows = Array.from(table.querySelectorAll("tbody tr"));
+                            rows.forEach(tr => {
+                                const cells = Array.from(tr.querySelectorAll("td"));
+                                if (cells.length > Math.max(dpIdx, timeIdx)) {
+                                    const dp = cells[dpIdx].innerText.trim();
+                                    const time = cells[timeIdx].innerText.trim();
+                                    if (dp && time) result[dp] = time;
+                                }
+                            });
+                            return result;
+                        }''')
+                        if data:
+                            ui_times.update(data)
+                            
+                        next_btn = page.locator(".paginate_button.next:not(.disabled)")
+                        if next_btn.count() > 0 and next_btn.is_visible():
+                            next_btn.click()
+                            page.wait_for_timeout(1000)
+                        else:
+                            break
+                            
+                    import json
+                    import tempfile
+                    ui_times_file = os.path.join(tempfile.gettempdir(), "ui_despatch_times.json")
+                    with open(ui_times_file, "w") as f:
+                        json.dump(ui_times, f)
+                    print(f"Extracted {len(ui_times)} despatch times from UI.")
+                except Exception as e:
+                    print("Error extracting UI times:", e)
             
             # 2. Download LR Report
             if mode in ("morning", "daily_evening_report", "afternoon_open_lrs"):
@@ -599,25 +658,59 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
     end_dt = datetime.strptime(f"{today_str} 20:00:00", "%Y-%m-%d %H:%M:%S")
     
     # Filter Despatch Data
+    import json
+    import tempfile
+    ui_times = {}
+    ui_times_file = os.path.join(tempfile.gettempdir(), "ui_despatch_times.json")
+    if os.path.exists(ui_times_file):
+        try:
+            with open(ui_times_file, "r") as f:
+                ui_times = json.load(f)
+        except Exception:
+            pass
+            
+    # Extract supervisor and driver from despatch to avoid empty values on some LRs
+    desp_meta = {}
+    for _, r in df_desp.iterrows():
+        dp_no = clean_val(r[desp_no_col_desp]) if desp_no_col_desp else ""
+        if dp_no:
+            sup = clean_val(r[sup_col_desp]) if sup_col_desp else ""
+            drv = clean_val(r[driver_col_desp]) if driver_col_desp else ""
+            if dp_no not in desp_meta:
+                desp_meta[dp_no] = {"supervisor": sup, "driver": drv}
+            else:
+                if sup: desp_meta[dp_no]["supervisor"] = sup
+                if drv: desp_meta[dp_no]["driver"] = drv
+
     filtered_despatches = {} # Map from LR No -> Despatch Info
     for _, r in df_desp.iterrows():
         lr = clean_val(r[lr_col_desp])
         if not lr: continue
         
+        dp_no = clean_val(r[desp_no_col_desp]) if desp_no_col_desp else ""
+        
         # Combine date and time
         d_val = clean_val(r[date_col_desp]) if date_col_desp else ""
         t_val = clean_val(r[time_col_desp]) if time_col_desp else ""
         
+        if dp_no and dp_no in ui_times:
+            t_val = ui_times[dp_no]
+        
         # Try to parse DP Date and DP Time
         dt_obj = parse_date(f"{d_val} {t_val}") if t_val else parse_date(d_val)
+        
+        if dt_obj:
+            if "AM" not in t_val.upper() and "PM" not in t_val.upper():
+                if dt_obj.date() == start_dt.date() and dt_obj.hour < 12 and dt_obj.hour >= 1:
+                    dt_obj = dt_obj + timedelta(hours=12)
         
         if dt_obj and start_dt <= dt_obj <= end_dt:
             # Valid despatch in time window
             filtered_despatches[lr] = {
                 "lr_no": lr,
-                "supervisor": clean_val(r[sup_col_desp]) if sup_col_desp else "",
-                "driver": clean_val(r[driver_col_desp]) if driver_col_desp else "",
-                "despatch_no": clean_val(r[desp_no_col_desp]) if desp_no_col_desp else "",
+                "supervisor": desp_meta.get(dp_no, {}).get("supervisor") or (clean_val(r[sup_col_desp]) if sup_col_desp else ""),
+                "driver": desp_meta.get(dp_no, {}).get("driver") or (clean_val(r[driver_col_desp]) if driver_col_desp else ""),
+                "despatch_no": dp_no,
                 "dp_date": dt_obj
             }
             
@@ -1209,8 +1302,8 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
             # Parse delivery times (from delivered only)
             del_times_dt = [parse_date(x["delivery_time"]) for x in disp["delivered_lrs"] if parse_date(x["delivery_time"])]
             if del_times_dt:
-                min_time = min(del_times_dt).strftime("%I:%M %p")
-                max_time = max(del_times_dt).strftime("%I:%M %p")
+                min_time = min(del_times_dt).strftime("%d/%m %I:%M %p")
+                max_time = max(del_times_dt).strftime("%d/%m %I:%M %p")
             else:
                 min_time = "-"
                 max_time = "-"
