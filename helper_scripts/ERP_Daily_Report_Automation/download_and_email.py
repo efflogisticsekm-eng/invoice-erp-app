@@ -373,8 +373,8 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     # SAVE SCREENSHOT FOR DEBUGGING
                     try:
                         os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-                        page.screenshot(path=os.path.join(DOWNLOAD_DIR, f"debug_table_page_{p_idx}.png"), full_page=True)
-                        print(f"Saved debug screenshot to {os.path.join(DOWNLOAD_DIR, f'debug_table_page_{p_idx}.png')}")
+                        page.screenshot(path=os.path.join(DOWNLOAD_DIR, "debug_table_page_before_loop.png"), full_page=True)
+                        print(f"Saved debug screenshot to {os.path.join(DOWNLOAD_DIR, 'debug_table_page_before_loop.png')}")
                     except Exception as e:
                         print(f"Failed to save screenshot: {e}")
                         
