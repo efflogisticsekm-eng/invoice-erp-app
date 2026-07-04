@@ -823,6 +823,7 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
             "status": mapped_status,
             "driver": driver,
             "despatch_no": despatch_no,
+            "despatch_time": dp_date_str,
             "aging": aging
         }
         
