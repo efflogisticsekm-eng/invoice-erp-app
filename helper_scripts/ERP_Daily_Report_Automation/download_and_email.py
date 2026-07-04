@@ -353,10 +353,13 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                             let select = document.querySelector('select[name$="_length"]');
                             if (select) {
                                 let opts = Array.from(select.options).map(o => o.value);
-                                if (opts.includes("-1")) select.value = "-1";
-                                else if (opts.includes("100")) select.value = "100";
-                                else select.value = opts[opts.length - 1];
-                                select.dispatchEvent(new Event("change"));
+                                let val = opts.includes("-1") ? "-1" : (opts.includes("100") ? "100" : opts[opts.length - 1]);
+                                select.value = val;
+                                if (typeof $ !== "undefined") {
+                                    $(select).val(val).trigger('change');
+                                } else {
+                                    select.dispatchEvent(new Event("change"));
+                                }
                             }
                         }''')
                         page.wait_for_timeout(3000)
@@ -397,8 +400,18 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                             
                         has_next = page.evaluate('''() => {
                             let nextBtn = document.querySelector('.paginate_button.next, li.next, [id$="_next"]');
-                            if (nextBtn && !nextBtn.classList.contains('disabled') && !nextBtn.parentElement.classList.contains('disabled')) {
-                                let link = nextBtn.querySelector('a') || nextBtn;
+                            if (!nextBtn) {
+                                // Fallback to XPath for "Next" or ">>"
+                                let xpath = "//a[contains(translate(text(), 'NEXT', 'next'), 'next') or contains(text(), '>>')] | //button[contains(translate(text(), 'NEXT', 'next'), 'next') or contains(text(), '>>')]";
+                                nextBtn = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                            }
+                            
+                            if (nextBtn) {
+                                // Check if disabled
+                                if (nextBtn.classList.contains('disabled') || nextBtn.parentElement.classList.contains('disabled') || nextBtn.getAttribute('disabled') !== null) {
+                                    return false;
+                                }
+                                let link = nextBtn.tagName.toLowerCase() === 'a' || nextBtn.tagName.toLowerCase() === 'button' ? nextBtn : (nextBtn.querySelector('a') || nextBtn.querySelector('button') || nextBtn);
                                 link.click();
                                 return true;
                             }
@@ -406,7 +419,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                         }''')
                         
                         if has_next:
-                            page.wait_for_timeout(2000)
+                            page.wait_for_timeout(3000)
                         else:
                             break
                     import json
