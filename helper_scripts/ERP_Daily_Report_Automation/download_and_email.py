@@ -1118,6 +1118,7 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
             "status": mapped_status,
             "driver": driver,
             "despatch_no": despatch_no,
+            "despatch_time": snap.get("despatch_date", ""),
             "aging": 0
         }
         
@@ -1336,10 +1337,13 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
             wa_msg += f"   ⏱️ 1st Delivery: {min_time} | Last Delivery: {max_time}\n"
             drv_idx += 1
             
+            desp_time = all_lrs_in_desp[0].get("despatch_time", "") if all_lrs_in_desp else ""
+            
             despatch_summary_rows.append({
                 "Branch": b,
                 "Driver Name": driver,
                 "Despatch No": desp_no,
+                "Despatch Time": desp_time,
                 "Total LRs": total_lrs,
                 "Total Delivery Points": total_pts,
                 "Delivered Count": delivered_count,
@@ -1379,7 +1383,7 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
     # Sheet 4: Despatch Summary
     df_despatch_summary = pd.DataFrame(despatch_summary_rows)
     if df_despatch_summary.empty:
-        df_despatch_summary = pd.DataFrame(columns=["Branch", "Driver Name", "Despatch No", "Total LRs", "Total Delivery Points", "Delivered Count", "Despatched (Returned) Count", "1st Delivery Time", "Last Delivery Time"])
+        df_despatch_summary = pd.DataFrame(columns=["Branch", "Driver Name", "Despatch No", "Despatch Time", "Total LRs", "Total Delivery Points", "Delivered Count", "Despatched (Returned) Count", "1st Delivery Time", "Last Delivery Time"])
     df_despatch_summary.to_excel(writer, sheet_name="4. Despatch Summary", index=False)
     
     writer.close()
