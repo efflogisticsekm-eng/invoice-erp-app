@@ -980,7 +980,7 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
     
     # 4. Despatch Summary Sheet
     ws_ds = wb.create_sheet("Despatch Summary")
-    headers_ds = ["Branch", "Driver", "Despatch No", "Total LRs", "Delivery Points", "Delivered", "Despatched (Returned)", "1st Delivery", "Last Delivery"]
+    headers_ds = ["Branch", "Driver", "Despatch No", "Despatch Time", "Total LRs", "Delivery Points", "Delivered", "Despatched (Returned)", "1st Delivery", "Last Delivery"]
     ws_ds.append(headers_ds)
     for b_d_d, d_info in driver_breakdowns.items():
         pts = len(d_info["points"])
@@ -993,7 +993,14 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
         f_time = min(times).strftime("%I:%M %p") if times else "-"
         l_time = max(times).strftime("%I:%M %p") if times else "-"
         
-        ws_ds.append([b, dr, dn, total_lrs, pts, len(del_lrs), len(ret_lrs), f_time, l_time])
+        # Extract despatch time from the items
+        desp_time = ""
+        if del_lrs:
+            desp_time = del_lrs[0].get("despatch_time", "")
+        elif ret_lrs:
+            desp_time = ret_lrs[0].get("despatch_time", "")
+            
+        ws_ds.append([b, dr, dn, desp_time, total_lrs, pts, len(del_lrs), len(ret_lrs), f_time, l_time])
     apply_styles(ws_ds, ws_ds.max_row, ws_ds.max_column, enable_filter=True)
     
     processed_file_path = os.path.join(DOWNLOAD_DIR, f"Daily_Evening_Report_{today_str}.xlsx")
