@@ -151,6 +151,7 @@ export default function PayrollProcessor() {
             openTime: row[8] !== undefined ? String(row[8]).trim() : "",
             kmRun: row[11] !== undefined ? Number(row[11]) : 0,
             otAfter5: row[16] !== undefined ? Number(row[16]) : 0,
+            mrngOt: row[29] !== undefined ? Number(row[29]) : 0,
             driverR: row[17] ? String(row[17]).trim() : "",
             driverS: row[18] ? String(row[18]).trim() : "",
             driverT: row[19] ? String(row[19]).trim() : "",
@@ -439,6 +440,7 @@ export default function PayrollProcessor() {
       openTime: '',
       kmRun: 0,
       otAfter5: 0,
+      mrngOt: 0,
       driverR: '',
       driverS: '',
       driverT: ''
@@ -772,6 +774,7 @@ export default function PayrollProcessor() {
                         <th className="p-3.5 text-center">Open Time</th>
                         <th className="p-3.5 text-right">KM Run</th>
                         <th className="p-3.5 text-right">OT Col Q</th>
+                        <th className="p-3.5 text-right">Mrng OT (Min)</th>
                         <th className="p-3.5">Driver R (Main)</th>
                         <th className="p-3.5">Driver S</th>
                         <th className="p-3.5">Driver T</th>
@@ -833,6 +836,14 @@ export default function PayrollProcessor() {
                                     className="bg-slate-900 text-white p-1.5 border border-slate-700 rounded w-16 text-right text-xs"
                                   />
                                 </td>
+                                <td className="p-2 text-right">
+                                  <input
+                                    type="number"
+                                    value={editForm.mrngOt || 0}
+                                    onChange={(e) => setEditForm({ ...editForm, mrngOt: Number(e.target.value) })}
+                                    className="bg-slate-900 text-white p-1.5 border border-slate-700 rounded w-16 text-right text-xs"
+                                  />
+                                </td>
                                 <td className="p-2">
                                   <input
                                     type="text"
@@ -870,6 +881,7 @@ export default function PayrollProcessor() {
                                 <td className="p-3.5 text-center font-mono">{trip.openTime || '-'}</td>
                                 <td className="p-3.5 text-right font-mono font-semibold">{trip.kmRun}</td>
                                 <td className="p-3.5 text-right font-mono">{trip.otAfter5 || '-'}</td>
+                                <td className="p-3.5 text-right font-mono">{trip.mrngOt || '-'}</td>
                                 <td className="p-3.5 font-semibold">{trip.driverR || '-'}</td>
                                 <td className="p-3.5 text-slate-400">{trip.driverS || '-'}</td>
                                 <td className="p-3.5 text-slate-400">{trip.driverT || '-'}</td>

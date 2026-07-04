@@ -99,10 +99,16 @@ export function calculatePayroll({ trips, advances, drivers, sections, deduction
   const wdRate = {};       // sr_code -> main rate
   let wdAddlKMRate = 7.6;  // default rate per km (usually comes from Section Master)
   
+  const wdPlusHR = {};     // sr_code -> total OT hours
+  const wdHRRate = {};     // sr_code -> hourly rate
+
   let wdPlusKM8 = 0;   // Excess KM for 8HR car depts (SR 9009148)
   let wdPlusKM24 = 0;  // Excess KM for 24HR car depts (SR 9014950)
   let wdLessKM8 = 0;
   let wdLessKM24 = 0;
+
+  // Track department level totals for Month-Level Net calculation
+  const deptStats = {}; // dept -> { trips: 0, totalKM: 0, targetKM: 0, srCode: "" }
 
   // Process all trips
   trips.forEach(trip => {
@@ -141,24 +147,35 @@ export function calculatePayroll({ trips, advances, drivers, sections, deduction
         // Increment trip count
         wdQty[srCode] = (wdQty[srCode] || 0) + 1;
 
-        // KM shortfall/excess calculations
-        if (kmRun > 0 && targetKM > 0) {
-          if (kmRun < targetKM) {
-            const lessVal = targetKM - kmRun;
-            wdLessKM[srCode] = (wdLessKM[srCode] || 0) + lessVal;
-            if (srCode === "9009148") wdLessKM8 += lessVal;
-            if (srCode === "9014950") wdLessKM24 += lessVal;
-          } else if (kmRun > targetKM) {
-            const plusVal = kmRun - targetKM;
-            wdPlusKM[srCode] = (wdPlusKM[srCode] || 0) + plusVal;
-            if (srCode === "9009148") wdPlusKM8 += plusVal;
-            if (srCode === "9014950") wdPlusKM24 += plusVal;
+        // Accumulate for Month-Level Net Calculation
+        if (targetKM > 0) {
+          if (!deptStats[deptUsed]) {
+            deptStats[deptUsed] = {
+              trips: 0,
+              totalKM: 0,
+              targetKM: targetKM,
+              srCode: srCode
+            };
           }
+          deptStats[deptUsed].trips += 1;
+          deptStats[deptUsed].totalKM += kmRun;
         }
 
         // Additional KM Rate
         if (section.addl_rate) {
           wdAddlKMRate = Number(section.addl_rate);
+        }
+
+        // Accumulate vehicle OT / additional hours
+        const addlHrSr = String(section.addl_hr_sr || "").trim();
+        const addlHrRate = Number(section.addl_hr_rate || 0);
+        const otHrs = Number(trip.otAfter5 || 0) + (Number(trip.mrngOt || 0) / 60);
+
+        if (addlHrSr && addlHrSr !== "0") {
+          wdPlusHR[addlHrSr] = (wdPlusHR[addlHrSr] || 0) + otHrs;
+          if (addlHrRate > 0) {
+            wdHRRate[addlHrSr] = addlHrRate;
+          }
         }
       }
     }
@@ -185,6 +202,26 @@ export function calculatePayroll({ trips, advances, drivers, sections, deduction
         driverHolShifts[code] = (driverHolShifts[code] || 0) + 1;
       }
     });
+  });
+
+  // Calculate Month-Level Net Excess / Shortfall per department
+  Object.keys(deptStats).forEach(dept => {
+    const stats = deptStats[dept];
+    const { trips, totalKM, targetKM, srCode } = stats;
+    const obligation = targetKM * trips;
+    const excess = Math.max(0, totalKM - obligation);
+    const shortfall = Math.max(0, obligation - totalKM);
+
+    if (excess > 0) {
+      wdPlusKM[srCode] = (wdPlusKM[srCode] || 0) + excess;
+      if (srCode === "9009148") wdPlusKM8 += excess;
+      if (srCode === "9014950") wdPlusKM24 += excess;
+    }
+    if (shortfall > 0) {
+      wdLessKM[srCode] = (wdLessKM[srCode] || 0) + shortfall;
+      if (srCode === "9009148") wdLessKM8 += shortfall;
+      if (srCode === "9014950") wdLessKM24 += shortfall;
+    }
   });
 
   // 3. Compile Salary Final Results
@@ -353,18 +390,15 @@ export function calculatePayroll({ trips, advances, drivers, sections, deduction
     { srCode: "9009242", desc: "CARRIER ADDITIONAL RUNNING KMS" },
     { srCode: "9009282", desc: "50 SEATER BUS" },
     { srCode: "9009285", desc: "50 SEATER BUS ADDL RUNNING KMS" },
-    { srCode: "9009156", desc: "CAR ADDITIONAL SHIFT HOURS 8 HRS" },
-    { srCode: "9014954", desc: "CAR ADDITIONAL SHIFT HOURS 24 HRS" },
-    { srCode: "9009200", desc: "MUV ADDITIONAL HOURS" },
-    { srCode: "9009268", desc: "NON A/C BUS ADDITIONAL HOURS" },
-    { srCode: "9009246", desc: "CARRIER ADDITIONAL HOURS" },
-    { srCode: "9009289", desc: "50 SEATER BUS ADDITIONAL HOURS" }
+    { srCode: "9009151", desc: "CAR ADDITIONAL SHIFT HOURS" },
+    { srCode: "9009195", desc: "MUV ADDITIONAL HOURS" },
+    { srCode: "9009263", desc: "NON A/C BUS ADDITIONAL HOURS" }
   ];
 
   wdRowsDefinition.forEach(rowDef => {
     const { srCode, desc } = rowDef;
     const isAddlKms = desc.includes("ADDL") || desc.includes("ADDITIONAL RUNNING KMS");
-    const isAddlHrs = desc.includes("ADDITIONAL HOURS") || desc.includes("ADDL SHIFT HOURS");
+    const isAddlHrs = desc.includes("HOURS") || desc.includes("ADDL-HR") || desc.includes("ADDL-HRS") || desc.includes("ADDL HRS");
     
     let qty = 0;
     let lessKM = 0;
@@ -394,10 +428,10 @@ export function calculatePayroll({ trips, advances, drivers, sections, deduction
       amount = qty * rate;
       netAmount = amount;
     } else if (isAddlHrs) {
-      qty = 0;
-      rate = 0;
-      amount = 0;
-      netAmount = 0;
+      qty = wdPlusHR[srCode] || 0;
+      rate = wdHRRate[srCode] || 0;
+      amount = qty * rate;
+      netAmount = amount;
     } else {
       qty = wdQty[srCode] || 0;
       lessKM = wdLessKM[srCode] || 0;

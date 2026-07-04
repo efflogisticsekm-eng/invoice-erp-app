@@ -60,8 +60,10 @@ jobs:
           
           DATE_ARG=""
           if [ -n "${{ github.event.inputs.date }}" ]; then
-            DATE_ARG="--date ${{ github.event.inputs.date }}"
-            echo "Using historical date: ${{ github.event.inputs.date }}"
+            TODAY="${{ github.event.inputs.date }}"
+            YESTERDAY=$(date -d "$TODAY - 1 day" +%Y-%m-%d)
+            DATE_ARG="--from-date $YESTERDAY --to-date $TODAY"
+            echo "Using historical dates: $YESTERDAY to $TODAY"
           fi
           
           python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode ${{ github.event.inputs.mode }} $DATE_ARG
