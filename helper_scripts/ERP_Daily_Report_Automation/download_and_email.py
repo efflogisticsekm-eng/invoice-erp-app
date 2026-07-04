@@ -124,6 +124,17 @@ def parse_date(val):
         return None
     val_str = val_str.strip()
     
+    # Fix invalid ERP times like '22:55 PM' or '14:30 AM'
+    import re
+    m = re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)\s*([AP]M)', val_str, re.IGNORECASE)
+    if m:
+        time_part = m.group(1)
+        ampm = m.group(2)
+        hour = int(time_part.split(':')[0])
+        if hour > 12:
+            # It's a 24-hour time with an AM/PM suffix. Strip the suffix.
+            val_str = val_str.replace(ampm, '').strip()
+
     formats = (
         '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %I:%M:%S %p', '%Y-%m-%d %H:%M', '%Y-%m-%d %I:%M %p', '%Y-%m-%d',
         '%d-%m-%Y %H:%M:%S', '%d-%m-%Y %I:%M:%S %p', '%d-%m-%Y %H:%M', '%d-%m-%Y %I:%M %p', '%d-%m-%Y',
@@ -337,6 +348,21 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     except Exception as e:
                         print(f"Table didn't load in time: {e}")
                         
+                    try:
+                        page.evaluate('''() => {
+                            let select = document.querySelector('select[name$="_length"]');
+                            if (select) {
+                                let opts = Array.from(select.options).map(o => o.value);
+                                if (opts.includes("-1")) select.value = "-1";
+                                else if (opts.includes("100")) select.value = "100";
+                                else select.value = opts[opts.length - 1];
+                                select.dispatchEvent(new Event("change"));
+                            }
+                        }''')
+                        page.wait_for_timeout(3000)
+                    except Exception as e:
+                        print(f"Could not change page length: {e}")
+                        
                     max_pages = 50
                     for i in range(max_pages):
                         data = page.evaluate('''() => {
@@ -353,7 +379,8 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                             rows.forEach(tr => {
                                 const cells = Array.from(tr.querySelectorAll("td"));
                                 if (cells.length > Math.max(dpIdx, timeIdx)) {
-                                    const dp = cells[dpIdx].innerText.trim();
+                                    let dp = cells[dpIdx].innerText.trim();
+                                    dp = dp.replace(/\s+/g, ""); // Remove all whitespace/newlines
                                     const time = cells[timeIdx].innerText.trim();
                                     if (dp && time) result[dp] = time;
                                 }
