@@ -18,11 +18,22 @@ on:
           - morning
           - evening
           - afternoon_open_lrs
-      date:
-        description: 'Optional date (YYYY-MM-DD) to run report for a specific day (e.g. 2026-07-03)'
+      from_date:
+        description: 'Optional start date (YYYY-MM-DD)'
         required: false
         type: string
-
+      to_date:
+        description: 'Optional end date (YYYY-MM-DD)'
+        required: false
+        type: string
+      from_time:
+        description: 'Optional start time (HH:MM:SS), defaults to 20:00:00 for evening report'
+        required: false
+        type: string
+      to_time:
+        description: 'Optional end time (HH:MM:SS), defaults to 20:00:00 for evening report'
+        required: false
+        type: string
 jobs:
   run-daily-report:
     runs-on: ubuntu-latest
@@ -59,13 +70,20 @@ jobs:
           echo "Running manually triggered workflow in ${{ github.event.inputs.mode }} mode..."
           
           DATE_ARG=""
-          if [ -n "${{ github.event.inputs.date }}" ]; then
-            TODAY="${{ github.event.inputs.date }}"
-            YESTERDAY=$(date -d "$TODAY - 1 day" +%Y-%m-%d)
-            DATE_ARG="--from-date $YESTERDAY --to-date $TODAY"
-            echo "Using historical dates: $YESTERDAY to $TODAY"
+          if [ -n "${{ github.event.inputs.from_date }}" ]; then
+            DATE_ARG="$DATE_ARG --from-date ${{ github.event.inputs.from_date }}"
+          fi
+          if [ -n "${{ github.event.inputs.to_date }}" ]; then
+            DATE_ARG="$DATE_ARG --to-date ${{ github.event.inputs.to_date }}"
+          fi
+          if [ -n "${{ github.event.inputs.from_time }}" ]; then
+            DATE_ARG="$DATE_ARG --from-time ${{ github.event.inputs.from_time }}"
+          fi
+          if [ -n "${{ github.event.inputs.to_time }}" ]; then
+            DATE_ARG="$DATE_ARG --to-time ${{ github.event.inputs.to_time }}"
           fi
           
+          echo "Using args: $DATE_ARG"
           python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode ${{ github.event.inputs.mode }} $DATE_ARG
         else
           # Check current UTC hour to decide which cron triggered this

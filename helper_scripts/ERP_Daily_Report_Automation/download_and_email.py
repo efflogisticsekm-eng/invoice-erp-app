@@ -717,8 +717,10 @@ def calculate_aging_metrics(lrs, reference_date):
     unique_pts = len(set(f"{x['consignee'].lower()}||{x['destination'].lower()}" for x in lrs))
     return max_age, max_age_count, unique_pts
 
-def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yesterday_str, today_str):
-    print(f"Running Daily Evening Flow: {yesterday_str} 8:00 PM to {today_str} 8:00 PM")
+def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yesterday_str, today_str, start_time_override=None, end_time_override=None):
+    start_time = start_time_override if start_time_override else "20:00:00"
+    end_time = end_time_override if end_time_override else "20:00:00"
+    print(f"Running Daily Evening Flow: {yesterday_str} {start_time} to {today_str} {end_time}")
     
     # 1. Load Despatch Report
     df_desp = load_df(despatch_file)
@@ -737,8 +739,8 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
     time_col_desp = next((c for c in df_desp.columns if c in ['DP TIME', 'DESPATCH TIME', 'DISPATCH TIME']), None)
     
     # Date time boundaries
-    start_dt = datetime.strptime(f"{yesterday_str} 20:00:00", "%Y-%m-%d %H:%M:%S")
-    end_dt = datetime.strptime(f"{today_str} 20:00:00", "%Y-%m-%d %H:%M:%S")
+    start_dt = datetime.strptime(f"{yesterday_str} {start_time}", "%Y-%m-%d %H:%M:%S")
+    end_dt = datetime.strptime(f"{today_str} {end_time}", "%Y-%m-%d %H:%M:%S")
     
     # Filter Despatch Data
     import json
@@ -1595,6 +1597,8 @@ def main():
     parser.add_argument("--mode", choices=["evening", "morning", "daily_evening_report", "afternoon_open_lrs"], required=True, help="Run mode")
     parser.add_argument("--from-date", help="Override from date (YYYY-MM-DD)")
     parser.add_argument("--to-date", help="Override to date (YYYY-MM-DD)")
+    parser.add_argument("--from-time", help="Override from time (HH:MM:SS)")
+    parser.add_argument("--to-time", help="Override to time (HH:MM:SS)")
     args = parser.parse_args()
     
     print(f"[{datetime.now()}] Starting daily report automation runner in mode: {args.mode}")
@@ -1622,8 +1626,11 @@ def main():
         if args.to_date:
             today_str = args.to_date
             
+        start_time_override = getattr(args, 'from_time', None)
+        end_time_override = getattr(args, 'to_time', None)
+            
         processed_file, dashboard_image_path, unmapped_supervisors = run_daily_evening_report_flow(
-            lr_file, despatch_file, supervisor_map, yesterday_str, today_str
+            lr_file, despatch_file, supervisor_map, yesterday_str, today_str, start_time_override, end_time_override
         )
         
         # Email report
