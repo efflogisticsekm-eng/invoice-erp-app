@@ -447,7 +447,10 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 page.wait_for_load_state("load")
                 
                 # Convert dates to DD-MM-YYYY for input fields
-                from_dt = datetime.strptime(from_date_str, "%Y-%m-%d")
+                if mode in ("daily_evening_report", "afternoon_open_lrs"):
+                    from_dt = datetime.strptime(from_date_str, "%Y-%m-%d") - timedelta(days=60)
+                else:
+                    from_dt = datetime.strptime(from_date_str, "%Y-%m-%d")
                 to_dt = datetime.strptime(to_date_str, "%Y-%m-%d")
                 from_date_lr = from_dt.strftime("%d-%m-%Y")
                 to_date_lr = to_dt.strftime("%d-%m-%Y")
@@ -919,25 +922,30 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
             
         disp_key = (driver, despatch_no)
         if disp_key not in b_group["dispatches"]:
-            b_group["dispatches"][disp_key] = {"delivered_lrs": [], "returned_lrs": []}
+            b_group["dispatches"][disp_key] = {"delivered_lrs": [], "returned_lrs": [], "open_lrs": []}
             
         disp_group = b_group["dispatches"][disp_key]
         if is_delivered:
             disp_group["delivered_lrs"].append(lr_item)
         elif mapped_status == 'On transit':
             disp_group["returned_lrs"].append(lr_item)
+        else:
+            disp_group["open_lrs"].append(lr_item)
             
         if driver and despatch_no:
             d_key = f"{branch}|{driver}|{despatch_no}"
             if d_key not in driver_breakdowns:
-                driver_breakdowns[d_key] = {"delivered": [], "returned": [], "points": set()}
+                driver_breakdowns[d_key] = {"delivered": [], "returned": [], "open": [], "points": set()}
             if is_delivered:
                 driver_breakdowns[d_key]["delivered"].append(lr_item)
             elif mapped_status == 'On transit':
                 driver_breakdowns[d_key]["returned"].append(lr_item)
-            # Both delivered and returned counts as points
-            if is_delivered or mapped_status == 'On transit':
-                driver_breakdowns[d_key]["points"].add(f"{consignee.lower()}||{destination.lower()}")
+            else:
+                driver_breakdowns[d_key]["open"].append(lr_item)
+            
+            # Count unique points for all LRs in the despatch, or just delivered/returned?
+            # Let's count for all LRs given to the driver in this despatch.
+            driver_breakdowns[d_key]["points"].add(f"{consignee.lower()}||{destination.lower()}")
             
         despatch_snapshot_rows.append({
             "Branch": branch,
@@ -995,7 +1003,8 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
         for (driver, desp_no), dstats in stats["dispatches"].items():
             del_count = len(dstats["delivered_lrs"])
             ret_count = len(dstats["returned_lrs"])
-            total_lrs = del_count + ret_count
+            open_count = len(dstats.get("open_lrs", []))
+            total_lrs = del_count + ret_count + open_count
             if total_lrs == 0:
                 continue
                 
@@ -1047,7 +1056,8 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
         pts = len(d_info["points"])
         del_lrs = d_info["delivered"]
         ret_lrs = d_info["returned"]
-        total_lrs = len(del_lrs) + len(ret_lrs)
+        open_lrs = d_info.get("open", [])
+        total_lrs = len(del_lrs) + len(ret_lrs) + len(open_lrs)
         b, dr, dn = b_d_d.split("|")
         
         times = [parse_date(x["delivery_time"]) for x in del_lrs if x["delivery_time"] and parse_date(x["delivery_time"])]
@@ -1060,6 +1070,8 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
             desp_time = del_lrs[0].get("despatch_time", "")
         elif ret_lrs:
             desp_time = ret_lrs[0].get("despatch_time", "")
+        elif open_lrs:
+            desp_time = open_lrs[0].get("despatch_time", "")
             
         ws_ds.append([b, dr, dn, desp_time, total_lrs, pts, len(del_lrs), len(ret_lrs), f_time, l_time])
     apply_styles(ws_ds, ws_ds.max_row, ws_ds.max_column, enable_filter=True)
@@ -1384,7 +1396,7 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
         # Driver/Despatch details
         drv_idx = 1
         for (driver, desp_no), disp in sorted(b_group["dispatches"].items()):
-            all_lrs_in_desp = disp["delivered_lrs"] + disp["returned_lrs"]
+            all_lrs_in_desp = disp["delivered_lrs"] + disp["returned_lrs"] + disp.get("open_lrs", [])
             total_lrs = len(all_lrs_in_desp)
             total_pts = len(set(f"{x['consignee'].lower()}||{x['destination'].lower()}" for x in all_lrs_in_desp))
             
@@ -1399,10 +1411,14 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
                 
             delivered_count = len(disp["delivered_lrs"])
             returned_count = len(disp["returned_lrs"])
+            open_count = len(disp.get("open_lrs", []))
                 
             wa_msg += f"{drv_idx}) Driver: {driver if driver else 'N/A'} | Despatch: {desp_no}\n"
             wa_msg += f"   📦 Total LRs: {total_lrs} | Points: {total_pts}\n"
-            wa_msg += f"   🟢 Delivered: {delivered_count} | 🔴 Despatched (Returned): {returned_count}\n"
+            wa_msg += f"   🟢 Delivered: {delivered_count} | 🔴 Despatched (Returned): {returned_count}"
+            if open_count > 0:
+                wa_msg += f" | ⏳ Open: {open_count}"
+            wa_msg += "\n"
             wa_msg += f"   ⏱️ 1st Delivery: {min_time} | Last Delivery: {max_time}\n"
             drv_idx += 1
             
