@@ -311,18 +311,27 @@ export default function PayrollProcessor() {
             
             // Map column indexes for required fields using the cleaned headers
             const codeIdx = mHeaders.findIndex(h => h && h.includes("code"));
-            const nameIdx = mHeaders.findIndex(h => h && h.includes("name"));
-            const shiftsIdx = mHeaders.findIndex(h => h && (h.includes("shifts") || h.includes("worked")));
+            const nameIdx = mHeaders.findIndex(h => h && (h.includes("name") || h.includes("employee")));
+            const shiftsIdx = mHeaders.findIndex(h => h && (h.includes("shifts worked") || h.includes("no of duties") || h.includes("duties") || (h.includes("shifts") && !h.includes("holiday"))));
             const salaryIdx = mHeaders.findIndex(h => h && h.includes("salary earned"));
             const leaveWagesIdx = mHeaders.findIndex(h => h && h.includes("addl salary"));
             const otEarningsIdx = mHeaders.findIndex(h => h && h.includes("ot earnings"));
-            const totalSalaryIdx = mHeaders.findIndex(h => h && h.includes("total salary"));
+            const totalSalaryIdx = mHeaders.findIndex(h => h && (h.includes("gross salary") || h.includes("total salary") || h.includes("salary earned")));
+            
+            // ESI & PF
             const esiPfIdx = mHeaders.findIndex(h => h && (h.includes("esi & pf") || (h.includes("esi") && h.includes("pf"))));
-            const advIdx = mHeaders.findIndex(h => h && (h.includes("advance deduction") || (h.includes("advance") && h.includes("deduct"))));
-            const unionIdx = mHeaders.findIndex(h => h && (h.includes("union deduction") || (h.includes("union") && h.includes("deduct"))));
-            const deductAddlIdx = mHeaders.findIndex(h => h && (h.includes("deduct (addnl)") || (h.includes("deduct") && h.includes("addnl"))));
+            const esiIdx = mHeaders.findIndex(h => h && h === "esi");
+            const pfIdx = mHeaders.findIndex(h => h && h === "pf");
+            
+            // Advance
+            const advIdx = mHeaders.findIndex(h => h && (h.includes("advance deduction") || h === "advance"));
+            
+            // Union and other deductions
+            const unionIdx = mHeaders.findIndex(h => h && (h.includes("union deduction") || h === "union"));
+            const deductAddlIdx = mHeaders.findIndex(h => h && (h.includes("deduct (addnl)") || h.includes("other dedu") || h.includes("other")));
+            
             const totalDedIdx = mHeaders.findIndex(h => h && h.includes("total deduction"));
-            const netIdx = mHeaders.findIndex(h => h && h.includes("net salary"));
+            const netIdx = mHeaders.findIndex(h => h && (h.includes("net salary") || h.includes("net pay") || h.includes("netpay")));
 
 
             const extractDriverCode = (val) => {
@@ -342,14 +351,29 @@ export default function PayrollProcessor() {
               const row = manualJson[r];
               if (row) {
                 let rawCode = "";
-                if (codeIdx !== -1 && row[codeIdx]) {
+                if (codeIdx !== -1 && row[codeIdx] !== undefined && row[codeIdx] !== null) {
                   rawCode = String(row[codeIdx]).trim();
-                } else if (nameIdx !== -1 && row[nameIdx]) {
+                } else if (nameIdx !== -1 && row[nameIdx] !== undefined && row[nameIdx] !== null) {
                   rawCode = String(row[nameIdx]).trim();
                 }
 
                 const code = extractDriverCode(rawCode);
                 if (code) {
+                  // Resolve ESI/PF
+                  let parsedEsiPf = 0;
+                  if (esiPfIdx !== -1) {
+                    parsedEsiPf = Number(row[esiPfIdx] || 0);
+                  } else {
+                    const esiVal = esiIdx !== -1 ? Number(row[esiIdx] || 0) : 0;
+                    const pfVal = pfIdx !== -1 ? Number(row[pfIdx] || 0) : 0;
+                    parsedEsiPf = esiVal + pfVal;
+                  }
+
+                  // Resolve Union/Other Deductions
+                  const unionVal = unionIdx !== -1 ? Number(row[unionIdx] || 0) : 0;
+                  const otherVal = deductAddlIdx !== -1 ? Number(row[deductAddlIdx] || 0) : 0;
+                  const parsedUnion = unionVal + otherVal;
+
                   parsedManual[code] = {
                     code,
                     name: nameIdx !== -1 ? String(row[nameIdx] || "").trim() : "",
@@ -358,9 +382,9 @@ export default function PayrollProcessor() {
                     leaveWages: leaveWagesIdx !== -1 ? Number(row[leaveWagesIdx] || 0) : 0,
                     otEarnings: otEarningsIdx !== -1 ? Number(row[otEarningsIdx] || 0) : 0,
                     totalSalary: totalSalaryIdx !== -1 ? Number(row[totalSalaryIdx] || 0) : 0,
-                    esiPf: esiPfIdx !== -1 ? Number(row[esiPfIdx] || 0) : 0,
+                    esiPf: parsedEsiPf,
                     advance: advIdx !== -1 ? Number(row[advIdx] || 0) : 0,
-                    union: unionIdx !== -1 ? Number(row[unionIdx] || 0) : 0,
+                    union: parsedUnion,
                     deductAddl: deductAddlIdx !== -1 ? Number(row[deductAddlIdx] || 0) : 0,
                     totalDeduction: totalDedIdx !== -1 ? Number(row[totalDedIdx] || 0) : 0,
                     netSalary: netIdx !== -1 ? Number(row[netIdx] || 0) : 0,
