@@ -102,11 +102,11 @@ export default function PayrollProcessor() {
         
         // 1. Detect Sheets
         const sheetNames = workbook.SheetNames;
-        const tripSheetName = sheetNames.find(n => n.toLowerCase().includes('trip'));
-        const driverSheetName = sheetNames.find(n => n.toLowerCase().includes('driver'));
-        const sectionSheetName = sheetNames.find(n => n.toLowerCase().includes('section'));
-        const deductionSheetName = sheetNames.find(n => n.toLowerCase().includes('deduction'));
-        const advanceSheetName = sheetNames.find(n => n.toLowerCase().includes('advance'));
+        const tripSheetName = sheetNames.find(n => n && n.toLowerCase().includes('trip'));
+        const driverSheetName = sheetNames.find(n => n && n.toLowerCase().includes('driver'));
+        const sectionSheetName = sheetNames.find(n => n && n.toLowerCase().includes('section'));
+        const deductionSheetName = sheetNames.find(n => n && n.toLowerCase().includes('deduction'));
+        const advanceSheetName = sheetNames.find(n => n && n.toLowerCase().includes('advance'));
 
         if (!tripSheetName) {
           throw new Error("Could not find a 'Trip Sheet' in the uploaded Excel file.");
@@ -300,29 +300,30 @@ export default function PayrollProcessor() {
         }
 
         // 5. Parse Manual Work Sheet (if present)
-        const manualSheetName = sheetNames.find(n => n.toLowerCase().includes('manual') || n.toLowerCase().includes('work'));
+        const manualSheetName = sheetNames.find(n => n && (n.toLowerCase().includes('manual') || n.toLowerCase().includes('work')));
         if (manualSheetName) {
           const manualWorksheet = workbook.Sheets[manualSheetName];
           const manualJson = XLSX.utils.sheet_to_json(manualWorksheet, { header: 1 });
           const parsedManual = {};
           
           if (manualJson.length > 1) {
-            const mHeaders = (manualJson[0] || []).map(h => String(h || "").trim().toLowerCase().replace(/\s+/g, ' '));
+            const mHeaders = (manualJson[0] || []).map(h => h !== undefined && h !== null ? String(h).trim().toLowerCase().replace(/\s+/g, ' ') : "");
             
             // Map column indexes for required fields using the cleaned headers
-            const codeIdx = mHeaders.findIndex(h => h.includes("code"));
-            const nameIdx = mHeaders.findIndex(h => h.includes("name"));
-            const shiftsIdx = mHeaders.findIndex(h => h.includes("shifts") || h.includes("worked"));
-            const salaryIdx = mHeaders.findIndex(h => h.includes("salary earned"));
-            const leaveWagesIdx = mHeaders.findIndex(h => h.includes("addl salary"));
-            const otEarningsIdx = mHeaders.findIndex(h => h.includes("ot earnings"));
-            const totalSalaryIdx = mHeaders.findIndex(h => h.includes("total salary"));
-            const esiPfIdx = mHeaders.findIndex(h => h.includes("esi & pf") || (h.includes("esi") && h.includes("pf")));
-            const advIdx = mHeaders.findIndex(h => h.includes("advance deduction") || (h.includes("advance") && h.includes("deduct")));
-            const unionIdx = mHeaders.findIndex(h => h.includes("union deduction") || (h.includes("union") && h.includes("deduct")));
-            const deductAddlIdx = mHeaders.findIndex(h => h.includes("deduct (addnl)") || (h.includes("deduct") && h.includes("addnl")));
-            const totalDedIdx = mHeaders.findIndex(h => h.includes("total deduction"));
-            const netIdx = mHeaders.findIndex(h => h.includes("net salary"));
+            const codeIdx = mHeaders.findIndex(h => h && h.includes("code"));
+            const nameIdx = mHeaders.findIndex(h => h && h.includes("name"));
+            const shiftsIdx = mHeaders.findIndex(h => h && (h.includes("shifts") || h.includes("worked")));
+            const salaryIdx = mHeaders.findIndex(h => h && h.includes("salary earned"));
+            const leaveWagesIdx = mHeaders.findIndex(h => h && h.includes("addl salary"));
+            const otEarningsIdx = mHeaders.findIndex(h => h && h.includes("ot earnings"));
+            const totalSalaryIdx = mHeaders.findIndex(h => h && h.includes("total salary"));
+            const esiPfIdx = mHeaders.findIndex(h => h && (h.includes("esi & pf") || (h.includes("esi") && h.includes("pf"))));
+            const advIdx = mHeaders.findIndex(h => h && (h.includes("advance deduction") || (h.includes("advance") && h.includes("deduct"))));
+            const unionIdx = mHeaders.findIndex(h => h && (h.includes("union deduction") || (h.includes("union") && h.includes("deduct"))));
+            const deductAddlIdx = mHeaders.findIndex(h => h && (h.includes("deduct (addnl)") || (h.includes("deduct") && h.includes("addnl"))));
+            const totalDedIdx = mHeaders.findIndex(h => h && h.includes("total deduction"));
+            const netIdx = mHeaders.findIndex(h => h && h.includes("net salary"));
+
 
             for (let r = 1; r < manualJson.length; r++) {
               const row = manualJson[r];
