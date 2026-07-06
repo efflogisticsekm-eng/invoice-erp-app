@@ -401,6 +401,9 @@ export default function PayrollProcessor() {
 
         // Trigger Sync dialog/action if Master data was present in upload
         if (foundDrivers.length > 0 || foundSections.length > 0 || foundDeductions.length > 0) {
+          if (foundDrivers.length > 0) setDrivers(foundDrivers);
+          if (foundSections.length > 0) setSections(foundSections);
+          if (foundDeductions.length > 0) setDeductions(foundDeductions);
           syncUploadedMasters(foundDrivers, foundSections, foundDeductions);
         }
 
@@ -500,14 +503,31 @@ export default function PayrollProcessor() {
       let messageStr = "Payroll calculated successfully! View results below.";
       if (manualWorkData) {
         let diffCount = 0;
+        let nameMismatchCount = 0;
         res.salaryFinal.forEach(r => {
           const m = manualWorkData[r.driverCode];
-          if (m && m.netSalary !== undefined && Math.abs(r.netSalary - m.netSalary) > 0.01) {
-            diffCount++;
+          if (m) {
+            if (m.netSalary !== undefined && Math.abs(r.netSalary - m.netSalary) > 0.01) {
+              diffCount++;
+            }
+            const mCleanName = m.name ? m.name.split('*')[0].trim().toLowerCase().replace(/\s+/g, '') : "";
+            const sCleanName = r.actualName ? r.actualName.toLowerCase().replace(/\s+/g, '') : "";
+            if (mCleanName && sCleanName && mCleanName !== sCleanName) {
+              nameMismatchCount++;
+            }
           }
         });
+
+        let warningParts = [];
+        if (nameMismatchCount > 0) {
+          warningParts.push(`${nameMismatchCount} ഡ്രൈവർമാരുടെ പേര് മാച്ച് ആകുന്നില്ല (പഴയ കോഡിൽ പുതിയ ആൾ)`);
+        }
         if (diffCount > 0) {
-          messageStr += ` (മാനുവൽ വർക്കുമായി താരതമ്യം ചെയ്തതിൽ ${diffCount} ഡ്രൈവർമാരുടെ നെറ്റ് സാലറിയിൽ വ്യത്യാസങ്ങൾ കണ്ടെത്തിയിട്ടുണ്ട്. ഡൗൺലോഡ് ചെയ്യുന്ന ഫയലിൽ 'Comparison' ഷീറ്റ് പരിശോധിക്കുക.)`;
+          warningParts.push(`${diffCount} ഡ്രൈവർമാരുടെ നെറ്റ് സാലറിയിൽ വ്യത്യാസമുണ്ട്`);
+        }
+
+        if (warningParts.length > 0) {
+          messageStr += ` (താരതമ്യം ചെയ്തതിൽ ${warningParts.join(' കൂടാതെ ')}. ഡൗൺലോഡ് ചെയ്യുന്ന ഫയലിൽ 'Comparison' ഷീറ്റ് പരിശോധിക്കുക.)`;
         } else {
           messageStr += " (മാനുവൽ വർക്കുമായി താരതമ്യം ചെയ്തതിൽ വ്യത്യാസങ്ങൾ ഒന്നും തന്നെ കണ്ടെത്തിയിട്ടില്ല.)";
         }
@@ -659,7 +679,7 @@ export default function PayrollProcessor() {
       // 4. COMPARISON SHEET (if manual data was loaded)
       if (manualWorkData) {
         const compHeaders = [
-          "Code", "Driver Name", 
+          "Code", "Manual Driver Name", "Calc Driver Name", "Name Match?",
           "Manual Shifts", "Calc Shifts", "Shifts Diff",
           "Manual Gross", "Calc Gross", "Gross Diff",
           "Manual ESI/PF", "Calc ESI/PF", "ESI/PF Diff",
@@ -691,8 +711,15 @@ export default function PayrollProcessor() {
           const diffUnion = Number((sUnion - mUnion).toFixed(2));
           const diffNet = Number((sNet - mNet).toFixed(2));
 
+          const mCleanName = m.name ? m.name.split('*')[0].trim() : "";
+          const sCleanName = r.actualName || "";
+          
+          const mCompare = mCleanName.toLowerCase().replace(/\s+/g, '');
+          const sCompare = sCleanName.toLowerCase().replace(/\s+/g, '');
+          const nameMatch = mCompare && sCompare ? (mCompare === sCompare ? "Yes" : "MISMATCH (പേര് മാറിയിട്ടുണ്ട്!)") : "Yes";
+
           return [
-            r.driverCode, r.actualName,
+            r.driverCode, mCleanName || "(Not Found)", sCleanName, nameMatch,
             mShifts, sShifts, diffShifts,
             mGross, sGross, diffGross,
             mEsiPf, sEsiPf, diffEsiPf,
@@ -705,7 +732,7 @@ export default function PayrollProcessor() {
         // Totals row
         const compTotals = Array(compHeaders.length).fill(0);
         compTotals[0] = "TOTAL";
-        for (let c = 2; c < compHeaders.length; c++) {
+        for (let c = 4; c < compHeaders.length; c++) {
           compTotals[c] = Number(compRows.reduce((sum, row) => sum + (Number(row[c]) || 0), 0).toFixed(2));
         }
 
@@ -713,10 +740,20 @@ export default function PayrollProcessor() {
         const wsComp = XLSX.utils.aoa_to_sheet(compData);
         applyExcelStyles(wsComp, compHeaders.length, compRows.length, headerStyle, totalStyle);
 
-        // Highlight cells with non-zero differences in red
+        // Highlight cells with non-zero differences and name mismatches in red
         const range = XLSX.utils.decode_range(wsComp['!ref']);
         for (let R = 1; R <= compRows.length; R++) {
-          const diffCols = [4, 7, 10, 13, 16, 19];
+          // Highlight Name Match column if MISMATCH
+          const nameMatchCellRef = XLSX.utils.encode_cell({ r: R, c: 3 });
+          const nameMatchCell = wsComp[nameMatchCellRef];
+          if (nameMatchCell && nameMatchCell.v && String(nameMatchCell.v).includes("MISMATCH")) {
+            if (!nameMatchCell.s) nameMatchCell.s = {};
+            nameMatchCell.s.font = { color: { rgb: "E11D48" }, bold: true };
+            nameMatchCell.s.fill = { fgColor: { rgb: "FFE4E6" } };
+          }
+
+          // Highlight difference columns: 6, 9, 12, 15, 18, 21
+          const diffCols = [6, 9, 12, 15, 18, 21];
           diffCols.forEach(C => {
             const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
             const cell = wsComp[cellRef];
