@@ -24,6 +24,7 @@ export default function PayrollProcessor() {
 
   // Calculation Results
   const [results, setResults] = useState(null); // { salaryFinal, bankTransfer, workDone }
+  const [manualWorkData, setManualWorkData] = useState(null);
 
   // Trip grid filter and pagination
   const [searchTerm, setSearchTerm] = useState('');
@@ -298,6 +299,59 @@ export default function PayrollProcessor() {
           }
         }
 
+        // 5. Parse Manual Work Sheet (if present)
+        const manualSheetName = sheetNames.find(n => n.toLowerCase().includes('manual') || n.toLowerCase().includes('work'));
+        if (manualSheetName) {
+          const manualWorksheet = workbook.Sheets[manualSheetName];
+          const manualJson = XLSX.utils.sheet_to_json(manualWorksheet, { header: 1 });
+          const parsedManual = {};
+          
+          if (manualJson.length > 1) {
+            const mHeaders = (manualJson[0] || []).map(h => String(h || "").trim().toLowerCase().replace(/\s+/g, ' '));
+            
+            // Map column indexes for required fields using the cleaned headers
+            const codeIdx = mHeaders.findIndex(h => h.includes("code"));
+            const nameIdx = mHeaders.findIndex(h => h.includes("name"));
+            const shiftsIdx = mHeaders.findIndex(h => h.includes("shifts") || h.includes("worked"));
+            const salaryIdx = mHeaders.findIndex(h => h.includes("salary earned"));
+            const leaveWagesIdx = mHeaders.findIndex(h => h.includes("addl salary"));
+            const otEarningsIdx = mHeaders.findIndex(h => h.includes("ot earnings"));
+            const totalSalaryIdx = mHeaders.findIndex(h => h.includes("total salary"));
+            const esiPfIdx = mHeaders.findIndex(h => h.includes("esi & pf") || (h.includes("esi") && h.includes("pf")));
+            const advIdx = mHeaders.findIndex(h => h.includes("advance deduction") || (h.includes("advance") && h.includes("deduct")));
+            const unionIdx = mHeaders.findIndex(h => h.includes("union deduction") || (h.includes("union") && h.includes("deduct")));
+            const deductAddlIdx = mHeaders.findIndex(h => h.includes("deduct (addnl)") || (h.includes("deduct") && h.includes("addnl")));
+            const totalDedIdx = mHeaders.findIndex(h => h.includes("total deduction"));
+            const netIdx = mHeaders.findIndex(h => h.includes("net salary"));
+
+            for (let r = 1; r < manualJson.length; r++) {
+              const row = manualJson[r];
+              if (row && row[codeIdx]) {
+                const code = String(row[codeIdx]).trim();
+                parsedManual[code] = {
+                  code,
+                  name: nameIdx !== -1 ? String(row[nameIdx] || "").trim() : "",
+                  shifts: shiftsIdx !== -1 ? Number(row[shiftsIdx] || 0) : 0,
+                  salaryEarned: salaryIdx !== -1 ? Number(row[salaryIdx] || 0) : 0,
+                  leaveWages: leaveWagesIdx !== -1 ? Number(row[leaveWagesIdx] || 0) : 0,
+                  otEarnings: otEarningsIdx !== -1 ? Number(row[otEarningsIdx] || 0) : 0,
+                  totalSalary: totalSalaryIdx !== -1 ? Number(row[totalSalaryIdx] || 0) : 0,
+                  esiPf: esiPfIdx !== -1 ? Number(row[esiPfIdx] || 0) : 0,
+                  advance: advIdx !== -1 ? Number(row[advIdx] || 0) : 0,
+                  union: unionIdx !== -1 ? Number(row[unionIdx] || 0) : 0,
+                  deductAddl: deductAddlIdx !== -1 ? Number(row[deductAddlIdx] || 0) : 0,
+                  totalDeduction: totalDedIdx !== -1 ? Number(row[totalDedIdx] || 0) : 0,
+                  netSalary: netIdx !== -1 ? Number(row[netIdx] || 0) : 0,
+                };
+              }
+            }
+            setManualWorkData(parsedManual);
+          }
+        } else {
+          setManualWorkData(null);
+        }
+
+
         // Trigger Sync dialog/action if Master data was present in upload
         if (foundDrivers.length > 0 || foundSections.length > 0 || foundDeductions.length > 0) {
           syncUploadedMasters(foundDrivers, foundSections, foundDeductions);
@@ -395,8 +449,25 @@ export default function PayrollProcessor() {
       });
       setResults(res);
       setActiveTab('RESULTS');
-      setMessage("Payroll calculated successfully! View results below.");
+      
+      let messageStr = "Payroll calculated successfully! View results below.";
+      if (manualWorkData) {
+        let diffCount = 0;
+        res.salaryFinal.forEach(r => {
+          const m = manualWorkData[r.driverCode];
+          if (m && m.netSalary !== undefined && Math.abs(r.netSalary - m.netSalary) > 0.01) {
+            diffCount++;
+          }
+        });
+        if (diffCount > 0) {
+          messageStr += ` (മാനുവൽ വർക്കുമായി താരതമ്യം ചെയ്തതിൽ ${diffCount} ഡ്രൈവർമാരുടെ നെറ്റ് സാലറിയിൽ വ്യത്യാസങ്ങൾ കണ്ടെത്തിയിട്ടുണ്ട്. ഡൗൺലോഡ് ചെയ്യുന്ന ഫയലിൽ 'Comparison' ഷീറ്റ് പരിശോധിക്കുക.)`;
+        } else {
+          messageStr += " (മാനുവൽ വർക്കുമായി താരതമ്യം ചെയ്തതിൽ വ്യത്യാസങ്ങൾ ഒന്നും തന്നെ കണ്ടെത്തിയിട്ടില്ല.)";
+        }
+      }
+      setMessage(messageStr);
     } catch (err) {
+
       console.error(err);
       setError("Calculation failed: " + err.message);
     } finally {
@@ -538,8 +609,84 @@ export default function PayrollProcessor() {
       applyExcelStyles(wsWD, wdHeaders.length, wdRows.length, headerStyle, totalStyle);
       XLSX.utils.book_append_sheet(wb, wsWD, "Work Done");
 
+      // 4. COMPARISON SHEET (if manual data was loaded)
+      if (manualWorkData) {
+        const compHeaders = [
+          "Code", "Driver Name", 
+          "Manual Shifts", "Calc Shifts", "Shifts Diff",
+          "Manual Gross", "Calc Gross", "Gross Diff",
+          "Manual ESI/PF", "Calc ESI/PF", "ESI/PF Diff",
+          "Manual Advance", "Calc Advance", "Advance Diff",
+          "Manual Other Ded", "Calc Other Ded", "Other Ded Diff",
+          "Manual Net", "Calc Net", "Net Diff"
+        ];
+
+        const compRows = results.salaryFinal.map(r => {
+          const m = manualWorkData[r.driverCode] || {};
+          const mShifts = m.shifts !== undefined ? m.shifts : 0;
+          const mGross = m.totalSalary !== undefined ? m.totalSalary : 0;
+          const mEsiPf = m.esiPf !== undefined ? m.esiPf : 0;
+          const mAdv = m.advance !== undefined ? m.advance : 0;
+          const mUnion = m.union !== undefined ? m.union : 0;
+          const mNet = m.netSalary !== undefined ? m.netSalary : 0;
+
+          const sShifts = r.daysQty;
+          const sGross = r.grossSalary;
+          const sEsiPf = r.esiEpfTotalDeduction;
+          const sAdv = r.currentAdvance;
+          const sUnion = r.otherDeduction;
+          const sNet = r.netSalary;
+
+          const diffShifts = Number((sShifts - mShifts).toFixed(2));
+          const diffGross = Number((sGross - mGross).toFixed(2));
+          const diffEsiPf = Number((sEsiPf - mEsiPf).toFixed(2));
+          const diffAdv = Number((sAdv - mAdv).toFixed(2));
+          const diffUnion = Number((sUnion - mUnion).toFixed(2));
+          const diffNet = Number((sNet - mNet).toFixed(2));
+
+          return [
+            r.driverCode, r.actualName,
+            mShifts, sShifts, diffShifts,
+            mGross, sGross, diffGross,
+            mEsiPf, sEsiPf, diffEsiPf,
+            mAdv, sAdv, diffAdv,
+            mUnion, sUnion, diffUnion,
+            mNet, sNet, diffNet
+          ];
+        });
+
+        // Totals row
+        const compTotals = Array(compHeaders.length).fill(0);
+        compTotals[0] = "TOTAL";
+        for (let c = 2; c < compHeaders.length; c++) {
+          compTotals[c] = Number(compRows.reduce((sum, row) => sum + (Number(row[c]) || 0), 0).toFixed(2));
+        }
+
+        const compData = [compHeaders, ...compRows, compTotals];
+        const wsComp = XLSX.utils.aoa_to_sheet(compData);
+        applyExcelStyles(wsComp, compHeaders.length, compRows.length, headerStyle, totalStyle);
+
+        // Highlight cells with non-zero differences in red
+        const range = XLSX.utils.decode_range(wsComp['!ref']);
+        for (let R = 1; R <= compRows.length; R++) {
+          const diffCols = [4, 7, 10, 13, 16, 19];
+          diffCols.forEach(C => {
+            const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+            const cell = wsComp[cellRef];
+            if (cell && cell.v !== 0 && cell.v !== "0") {
+              if (!cell.s) cell.s = {};
+              cell.s.font = { color: { rgb: "E11D48" }, bold: true };
+              cell.s.fill = { fgColor: { rgb: "FFE4E6" } };
+            }
+          });
+        }
+
+        XLSX.utils.book_append_sheet(wb, wsComp, "Comparison");
+      }
+
       // Write and trigger download
       XLSX.writeFile(wb, `Payroll_Statement_${monthYear.replace(/\s+/g, '_')}.xlsx`);
+
       setMessage("Excel downloaded successfully.");
     } catch (err) {
       console.error(err);
