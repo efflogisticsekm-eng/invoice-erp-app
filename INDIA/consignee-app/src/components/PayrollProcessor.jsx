@@ -325,25 +325,47 @@ export default function PayrollProcessor() {
             const netIdx = mHeaders.findIndex(h => h && h.includes("net salary"));
 
 
+            const extractDriverCode = (val) => {
+              if (!val) return "";
+              const s = String(val).trim();
+              const start = s.indexOf('*');
+              if (start !== -1) {
+                const end = s.indexOf('*', start + 1);
+                if (end !== -1) {
+                  return s.substring(start + 1, end).trim();
+                }
+              }
+              return s;
+            };
+
             for (let r = 1; r < manualJson.length; r++) {
               const row = manualJson[r];
-              if (row && row[codeIdx]) {
-                const code = String(row[codeIdx]).trim();
-                parsedManual[code] = {
-                  code,
-                  name: nameIdx !== -1 ? String(row[nameIdx] || "").trim() : "",
-                  shifts: shiftsIdx !== -1 ? Number(row[shiftsIdx] || 0) : 0,
-                  salaryEarned: salaryIdx !== -1 ? Number(row[salaryIdx] || 0) : 0,
-                  leaveWages: leaveWagesIdx !== -1 ? Number(row[leaveWagesIdx] || 0) : 0,
-                  otEarnings: otEarningsIdx !== -1 ? Number(row[otEarningsIdx] || 0) : 0,
-                  totalSalary: totalSalaryIdx !== -1 ? Number(row[totalSalaryIdx] || 0) : 0,
-                  esiPf: esiPfIdx !== -1 ? Number(row[esiPfIdx] || 0) : 0,
-                  advance: advIdx !== -1 ? Number(row[advIdx] || 0) : 0,
-                  union: unionIdx !== -1 ? Number(row[unionIdx] || 0) : 0,
-                  deductAddl: deductAddlIdx !== -1 ? Number(row[deductAddlIdx] || 0) : 0,
-                  totalDeduction: totalDedIdx !== -1 ? Number(row[totalDedIdx] || 0) : 0,
-                  netSalary: netIdx !== -1 ? Number(row[netIdx] || 0) : 0,
-                };
+              if (row) {
+                let rawCode = "";
+                if (codeIdx !== -1 && row[codeIdx]) {
+                  rawCode = String(row[codeIdx]).trim();
+                } else if (nameIdx !== -1 && row[nameIdx]) {
+                  rawCode = String(row[nameIdx]).trim();
+                }
+
+                const code = extractDriverCode(rawCode);
+                if (code) {
+                  parsedManual[code] = {
+                    code,
+                    name: nameIdx !== -1 ? String(row[nameIdx] || "").trim() : "",
+                    shifts: shiftsIdx !== -1 ? Number(row[shiftsIdx] || 0) : 0,
+                    salaryEarned: salaryIdx !== -1 ? Number(row[salaryIdx] || 0) : 0,
+                    leaveWages: leaveWagesIdx !== -1 ? Number(row[leaveWagesIdx] || 0) : 0,
+                    otEarnings: otEarningsIdx !== -1 ? Number(row[otEarningsIdx] || 0) : 0,
+                    totalSalary: totalSalaryIdx !== -1 ? Number(row[totalSalaryIdx] || 0) : 0,
+                    esiPf: esiPfIdx !== -1 ? Number(row[esiPfIdx] || 0) : 0,
+                    advance: advIdx !== -1 ? Number(row[advIdx] || 0) : 0,
+                    union: unionIdx !== -1 ? Number(row[unionIdx] || 0) : 0,
+                    deductAddl: deductAddlIdx !== -1 ? Number(row[deductAddlIdx] || 0) : 0,
+                    totalDeduction: totalDedIdx !== -1 ? Number(row[totalDedIdx] || 0) : 0,
+                    netSalary: netIdx !== -1 ? Number(row[netIdx] || 0) : 0,
+                  };
+                }
               }
             }
             setManualWorkData(parsedManual);
