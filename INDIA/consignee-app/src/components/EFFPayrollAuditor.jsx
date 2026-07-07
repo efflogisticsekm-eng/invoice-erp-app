@@ -265,7 +265,7 @@ export default function EFFPayrollAuditor({ onBack }) {
           grossSalary: grossSalarySheet,
           grossSalaryAfterLop: grossSalaryAfterLopSheet,
           pt,
-          totalDeductionsSheet,
+          totalDeductionsSheet: totalDeductionSheet,
           netSalarySheet,
           correctedNetSalary,
           correctDeductions,
