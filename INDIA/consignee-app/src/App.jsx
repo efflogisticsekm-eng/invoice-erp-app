@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Upload, Loader2, CheckCircle, ChevronRight, Download, LogIn, Truck, FileText, User, BarChart, Box, Layers, Database, FileSpreadsheet } from 'lucide-react';
+import { Camera, Upload, Loader2, CheckCircle, ChevronRight, Download, LogIn, Truck, FileText, User, BarChart, Box, Layers, Database, FileSpreadsheet, Coins } from 'lucide-react';
 import axios from 'axios';
 import DeliveryDashboard from './components/DeliveryDashboard';
 import VolumeCalculator from './components/VolumeCalculator';
 import PayrollProcessor from './components/PayrollProcessor';
 import DatabaseExplorer from './components/DatabaseExplorer';
 import FreightCalculator from './components/FreightCalculator';
+import IncentiveCalculator from './components/IncentiveCalculator';
 
 function App() {
   const [mode, setMode] = useState('HOME'); // 'HOME', 'LR_CREATION', 'POD_SCAN', 'LR_DASHBOARD', 'VOLUME_CALC'
@@ -348,6 +349,20 @@ function App() {
               </div>
               <ChevronRight className="text-violet-300 group-hover:text-violet-600 transition" />
             </button>
+
+            <button 
+              onClick={() => handleSecuredNavigation('INCENTIVE_CALC')}
+              className="w-full bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-200 hover:border-amber-500 text-slate-700 py-4 px-4 rounded-xl font-semibold flex items-center justify-between transition group"
+            >
+              <div className="flex items-center space-x-3">
+                <Coins className="text-amber-650" />
+                <span className="text-left">
+                  <span className="block text-amber-700 font-bold">Staff Incentive Calculator</span>
+                  <span className="block text-xs text-amber-450 font-normal">Calculate dynamic incentives based on LR freight</span>
+                </span>
+              </div>
+              <ChevronRight className="text-amber-300 group-hover:text-amber-600 transition" />
+            </button>
           </div>
         </div>
         {renderPinModal()}
@@ -412,6 +427,7 @@ function App() {
              mode === 'PAYROLL' ? 'Passenger Contract Payroll' :
              mode === 'DATABASE_EXPLORER' ? 'Database Explorer' :
              mode === 'FREIGHT_AUDIT' ? 'Freight Billing Auditor' :
+             mode === 'INCENTIVE_CALC' ? 'Staff Incentive Calculator' :
              'Analytics Dashboard'}
           </h1>
           {user && <p className="text-xs text-blue-100 mt-0.5">Welcome, {user.name}</p>}
@@ -428,7 +444,7 @@ function App() {
         </div>
       </header>
 
-      <main className={`mx-auto p-4 mt-4 space-y-6 ${(mode === 'LR_DASHBOARD' || mode === 'PAYROLL' || mode === 'DATABASE_EXPLORER' || mode === 'FREIGHT_AUDIT') ? 'max-w-[98%]' : 'max-w-md'}`}>
+      <main className={`mx-auto p-4 mt-4 space-y-6 ${(mode === 'LR_DASHBOARD' || mode === 'PAYROLL' || mode === 'DATABASE_EXPLORER' || mode === 'FREIGHT_AUDIT' || mode === 'INCENTIVE_CALC') ? 'max-w-[98%]' : 'max-w-md'}`}>
         {mode === 'DATABASE_EXPLORER' && (
           <DatabaseExplorer />
         )}
@@ -437,6 +453,9 @@ function App() {
         )}
         {mode === 'FREIGHT_AUDIT' && (
           <FreightCalculator onBack={() => { setMode('HOME'); }} />
+        )}
+        {mode === 'INCENTIVE_CALC' && (
+          <IncentiveCalculator onBack={() => { setMode('HOME'); }} />
         )}
         {mode === 'LR_DASHBOARD' && (
           <DeliveryDashboard />
