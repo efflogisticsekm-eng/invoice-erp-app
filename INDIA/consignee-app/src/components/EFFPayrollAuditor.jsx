@@ -102,15 +102,31 @@ export default function EFFPayrollAuditor({ onBack }) {
       }
 
       const namesMay = new Set();
+      const maySalaries = {};
       if (sheetMay) {
         const wsMay = wb.Sheets[sheetMay];
         const jsonMay = XLSX.utils.sheet_to_json(wsMay, { header: 1 });
-        // May headers are row 4 (index 3). Data row 5 (index 4)
+        
+        // Find indexes dynamically for Name, Gross Basic, Gross Salary
+        const mayHeaders = jsonMay[3] || [];
+        const mNameIdx = 2; // Default Col 3
+        const mBasicIdx = 13; // Default Col 14
+        const mGrossIdx = 19; // Default Col 20
+        
         for (let r = 4; r < jsonMay.length; r++) {
           const row = jsonMay[r];
-          if (row && row[0] && row[2]) { // Sl No and Name (Col 3, index 2)
-            if (!String(row[0]).startsWith('Total') && !String(row[2]).startsWith('Total')) {
-              namesMay.add(String(row[2]).trim().toUpperCase());
+          if (row && row[0] && row[mNameIdx]) { // Sl No and Name
+            const nameClean = String(row[mNameIdx]).trim().toUpperCase();
+            if (!String(row[0]).startsWith('Total') && !nameClean.startsWith('Total')) {
+              namesMay.add(nameClean);
+              const cleanNum = (val) => {
+                if (val === undefined || val === null || String(val).trim() === '' || String(val).trim() === '-') return 0;
+                return Number(String(val).replace(/,/g, '').trim()) || 0;
+              };
+              maySalaries[nameClean] = {
+                basic: cleanNum(row[mBasicIdx]),
+                gross: cleanNum(row[mGrossIdx])
+              };
             }
           }
         }
@@ -262,6 +278,7 @@ export default function EFFPayrollAuditor({ onBack }) {
           salaryType,
           workingDays,
           daysPresent,
+          grossBasic,
           grossSalary: grossSalarySheet,
           grossSalaryAfterLop: grossSalaryAfterLopSheet,
           pt,
@@ -309,6 +326,31 @@ export default function EFFPayrollAuditor({ onBack }) {
         }
       }
 
+      // 4. Compare Salary Rates (May -> June)
+      const salaryChanges = [];
+      juneRows.forEach(juneEmp => {
+        const nameUpper = juneEmp.name;
+        if (maySalaries[nameUpper]) {
+          const mayData = maySalaries[nameUpper];
+          const basicDiff = juneEmp.grossBasic - mayData.basic;
+          const grossDiff = juneEmp.grossSalary - mayData.gross;
+          
+          if (Math.abs(basicDiff) > 1.0 || Math.abs(grossDiff) > 1.0) {
+            salaryChanges.push({
+              name: juneEmp.name,
+              branch: juneEmp.branch,
+              designation: juneEmp.designation,
+              mayBasic: mayData.basic,
+              juneBasic: juneEmp.grossBasic,
+              basicDiff,
+              mayGross: mayData.gross,
+              juneGross: juneEmp.grossSalary,
+              grossDiff
+            });
+          }
+        }
+      });
+
       setAuditResults({
         totalEmployees: juneRows.length,
         mathErrors,
@@ -316,6 +358,7 @@ export default function EFFPayrollAuditor({ onBack }) {
         basicMismatches,
         addedEmployees,
         missingEmployees,
+        salaryChanges,
         totalPtOmittedAmount,
         totalMathErrorsAmount,
         totalOverpayment: totalPtOmittedAmount + totalMathErrorsAmount + 102.06, // adding rounding diffs
@@ -618,6 +661,7 @@ export default function EFFPayrollAuditor({ onBack }) {
               { id: 'MATH_ERRORS', label: 'Net Math Errors', count: auditResults.mathErrors.length, color: 'text-purple-400 bg-purple-500/10 border-purple-500/20' },
               { id: 'PT_OMISSIONS', label: 'Omitted PT', count: auditResults.ptOmissions.length, color: 'text-amber-500 bg-amber-500/10 border-amber-500/20' },
               { id: 'BASIC_MISMATCH', label: 'Basic Mismatches', count: auditResults.basicMismatches.length, color: 'text-blue-400 bg-blue-500/10 border-blue-500/20' },
+              { id: 'SALARY_CHANGES', label: 'Salary Changes', count: auditResults.salaryChanges.length, color: 'text-rose-400 bg-rose-500/10 border-rose-500/20' },
               { id: 'ROSTER_SHIFTS', label: 'Roster Shifts', count: auditResults.addedEmployees.length + auditResults.missingEmployees.length }
             ].map(tab => (
               <button
@@ -821,6 +865,58 @@ export default function EFFPayrollAuditor({ onBack }) {
                           <td className="p-4 text-right font-mono font-bold text-red-400">₹{row.sheetBasicDa.toLocaleString('en-IN')}</td>
                           <td className="p-4 text-right font-mono text-emerald-400 font-bold">₹{row.expectedBasicDa.toLocaleString('en-IN')}</td>
                           <td className="p-4 text-right font-mono font-bold text-red-500 bg-red-500/5">+₹{row.diff.toLocaleString('en-IN')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'SALARY_CHANGES' && (
+              <div className="p-6 space-y-4 animate-fade-in">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-bold text-white">Month-over-Month Salary Rate Changes</h4>
+                  <p className="text-xs text-slate-400">
+                    Employees whose Gross Basic or Gross Salary changed in June 2026 compared to May 2026.
+                  </p>
+                </div>
+
+                <div className="overflow-x-auto border border-slate-800 rounded-xl">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-800 bg-slate-950 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        <th className="p-4">Name</th>
+                        <th className="p-4">Branch / Designation</th>
+                        <th className="p-4 text-right">May Basic</th>
+                        <th className="p-4 text-right">June Basic</th>
+                        <th className="p-4 text-right font-bold">Basic Diff</th>
+                        <th className="p-4 text-right">May Gross</th>
+                        <th className="p-4 text-right">June Gross</th>
+                        <th className="p-4 text-right font-bold">Gross Diff</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800 text-xs font-semibold text-slate-350">
+                      {auditResults.salaryChanges.filter(row => 
+                        row.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        row.branch.toLowerCase().includes(searchTerm.toLowerCase())
+                      ).map(row => (
+                        <tr key={row.name} className="hover:bg-slate-850/30 transition">
+                          <td className="p-4 font-bold text-white">{row.name}</td>
+                          <td className="p-4 text-slate-400">
+                            <span className="block">{row.designation}</span>
+                            <span className="block text-[10px] text-slate-500">{row.branch}</span>
+                          </td>
+                          <td className="p-4 text-right font-mono">₹{row.mayBasic.toLocaleString('en-IN')}</td>
+                          <td className="p-4 text-right font-mono">₹{row.juneBasic.toLocaleString('en-IN')}</td>
+                          <td className={`p-4 text-right font-mono font-bold ${row.basicDiff > 0 ? 'text-emerald-400' : row.basicDiff < 0 ? 'text-red-400' : 'text-slate-450'}`}>
+                            {row.basicDiff !== 0 ? `${row.basicDiff > 0 ? '+' : ''}₹${row.basicDiff.toLocaleString('en-IN')}` : '-'}
+                          </td>
+                          <td className="p-4 text-right font-mono">₹{row.mayGross.toLocaleString('en-IN')}</td>
+                          <td className="p-4 text-right font-mono">₹{row.juneGross.toLocaleString('en-IN')}</td>
+                          <td className={`p-4 text-right font-mono font-bold ${row.grossDiff > 0 ? 'text-emerald-400' : row.grossDiff < 0 ? 'text-red-400' : 'text-slate-450'}`}>
+                            {row.grossDiff !== 0 ? `${row.grossDiff > 0 ? '+' : ''}₹${row.grossDiff.toLocaleString('en-IN')}` : '-'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
