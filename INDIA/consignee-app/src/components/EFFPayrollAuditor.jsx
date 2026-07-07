@@ -243,8 +243,8 @@ export default function EFFPayrollAuditor({ onBack }) {
         }
 
         // C. Net Salary math error check
-        // Correct Net Salary: Gross Salary After LOP - Corrected Deductions (or sheet deductions if PT omission is separate)
-        const expectedNetFromSheetDed = grossSalaryAfterLopSheet - totalDeductionSheet;
+        // Correct Net Salary: Gross Salary After LOP + Other Allowance (Col AC) - Corrected Deductions (or sheet deductions if PT omission is separate)
+        const expectedNetFromSheetDed = grossSalaryAfterLopSheet + otherAllowanceCol29 - totalDeductionSheet;
         const netMathError = Math.abs(netSalarySheet - expectedNetFromSheetDed) > 1.0;
         if (netMathError) {
           const diff = netSalarySheet - expectedNetFromSheetDed;
@@ -263,8 +263,8 @@ export default function EFFPayrollAuditor({ onBack }) {
           }
         }
 
-        // Calculated corrected Net Salary
-        const correctedNetSalary = grossSalaryAfterLopSheet - (ptOmitted ? correctDeductions : totalDeductionSheet);
+        // Calculated corrected Net Salary (preserving Column 29 Other Allowance)
+        const correctedNetSalary = grossSalaryAfterLopSheet + otherAllowanceCol29 - (ptOmitted ? correctDeductions : totalDeductionSheet);
         const individualOverpayment = (netSalarySheet - correctedNetSalary);
         if (individualOverpayment > 0) {
           totalOverpayment += individualOverpayment;
@@ -650,7 +650,7 @@ export default function EFFPayrollAuditor({ onBack }) {
               <span>Critical Findings for June-26 working:</span>
             </div>
             <p>
-              The Professional Tax (PT) column has been populated but completely omitted from the <code>Total Deduction</code> cell formulas in June. Furthermore, four employees had critical Net Salary arithmetic slip-ups, resulting in an excess payout of <strong>₹27,423.06</strong>.
+              The Professional Tax (PT) column has been populated but completely omitted from the <code>Total Deduction</code> cell formulas in June. {auditResults.mathErrors.length > 0 ? `Furthermore, ${auditResults.mathErrors.length} employees had critical Net Salary arithmetic slip-ups.` : ''} This results in a statutory omission and overpayment of <strong>₹{auditResults.totalOverpayment.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>.
             </p>
           </div>
 
