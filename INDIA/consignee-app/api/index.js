@@ -5,6 +5,8 @@ import cors from 'cors';
 import { DocumentAnalysisClient, AzureKeyCredential } from "@azure/ai-form-recognizer";
 import { createClient } from '@supabase/supabase-js';
 import pg from 'pg';
+import fs from 'fs';
+import path from 'path';
 
 const { Client } = pg;
 
@@ -1852,6 +1854,49 @@ app.post('/api/explorer/delete/:table', express.json(), async (req, res) => {
   }
 });
 
+// GET endpoint to load the EFF Salary Payroll Excel file directly from the workspace (local testing)
+app.get('/api/payroll/load-eff-workspace', async (req, res) => {
+  try {
+    const fileName = 'EFF Salary Payroll FY 2026-2027.xlsx';
+    
+    // Look in various possible paths
+    const possiblePaths = [
+      path.join(process.cwd(), fileName),
+      path.join(process.cwd(), '..', fileName),
+      path.join(process.cwd(), '..', '..', fileName),
+      path.join('/Users/anwar/Desktop/Antigravity-Related', fileName)
+    ];
+    
+    let filePath = null;
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        filePath = p;
+        break;
+      }
+    }
+    
+    if (!filePath) {
+      return res.status(404).json({
+        error: `Could not find '${fileName}' in any of the search paths.`,
+        searchedPaths: possiblePaths
+      });
+    }
+    
+    console.log(`Found EFF Salary Payroll file at: ${filePath}`);
+    const fileBuffer = fs.readFileSync(filePath);
+    const base64Data = fileBuffer.toString('base64');
+    
+    return res.json({
+      status: 'success',
+      fileName: fileName,
+      filePath: filePath,
+      fileData: base64Data
+    });
+  } catch (err) {
+    console.error('Failed to load EFF Salary Payroll file:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 // Export the app for Vercel Serverless Functions
 export const config = {
