@@ -2,9 +2,9 @@
 
 /* Custom theme variables for Tailwind v4 */
 @theme {
-  --color-primary: #2563EB;
+  --color-primary: #5B2482;
   --color-secondary: #F8FAFC;
-  --color-accent: #10B981;
+  --color-accent: #00A3E0;
   --color-slate-350: #9fb3cb;
   --color-slate-750: #1e293b;
   --color-slate-755: #1b2537;

@@ -2,13 +2,63 @@ import React, { useState, useEffect } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx-js-style';
 import * as XLSXReader from 'xlsx';
-import { Upload, FileText, AlertTriangle, Clock, Settings, X, Plus, BarChart2, Download, MapPin, Search, Filter, ChevronDown, ChevronUp, Check, Truck, Award, TrendingUp } from 'lucide-react';
+import { Upload, FileText, AlertTriangle, Clock, Settings, X, Plus, BarChart2, Download, MapPin, Search, Filter, ChevronDown, ChevronUp, Check, Truck, Award, TrendingUp, DollarSign } from 'lucide-react';
+import { exportToPPT } from '../utils/pptExporter';
 
 const STATUS_MAP = {
   'Despatched': 'On transit',
   'Open': 'Not Despatched',
   'Delivered': 'Delivery Process completed.',
   'Despatched from Branch': 'Cancelled LR'
+};
+
+export const cleanLrNumber = (lr) => {
+  if (lr === undefined || lr === null) return "";
+  let s = String(lr).trim();
+  if (s.endsWith(".0")) {
+    s = s.slice(0, -2);
+  }
+  return s;
+};
+
+const parseSheetToJSON = (ws, headerKeywords) => {
+  const rows = XLSXReader.utils.sheet_to_json(ws, { header: 1, defval: "" });
+  if (rows.length === 0) return [];
+  
+  // Find the header row
+  let headerIndex = -1;
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const row = rows[i];
+    if (Array.isArray(row) && row.some(cell => {
+      if (!cell) return false;
+      const str = String(cell).toUpperCase().replace(/[\s_-]/g, '');
+      return headerKeywords.some(keyword => str.includes(keyword) || keyword.includes(str));
+    })) {
+      headerIndex = i;
+      break;
+    }
+  }
+  
+  if (headerIndex === -1) {
+    headerIndex = 0;
+  }
+  
+  const headers = (rows[headerIndex] || []).map(h => String(h || '').trim());
+  const dataRows = [];
+  
+  for (let i = headerIndex + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    const obj = {};
+    headers.forEach((h, colIdx) => {
+      if (h) {
+        obj[h] = row[colIdx] !== undefined ? row[colIdx] : "";
+      }
+    });
+    dataRows.push(obj);
+  }
+  
+  return dataRows;
 };
 
 const adjustExcelDate = (d) => {
@@ -631,41 +681,15 @@ export default function DeliveryDashboard() {
   }, [despatchRawRows, selectedBranch, despatchStartDateFilter, despatchEndDateFilter, despatchLrStartDateFilter, despatchLrEndDateFilter, despatchGdmFilter, supervisorMap]);
 
   const branchLeaderboardData = React.useMemo(() => {
+    if (!filteredDashboard) return [];
+    
     const branches = {};
+    const branchPodSummaryMap = data?.summary?.branchPodSummaryMap || {};
     
-    const startLimit = despatchStartDateFilter ? parseLocalInputDate(despatchStartDateFilter) : null;
-    const endLimit = despatchEndDateFilter ? parseLocalInputDate(despatchEndDateFilter) : null;
-
-    if (startLimit) startLimit.setHours(0, 0, 0, 0);
-    if (endLimit) endLimit.setHours(23, 59, 59, 999);
-
-    const lrStartLimit = despatchLrStartDateFilter ? parseLocalInputDate(despatchLrStartDateFilter) : null;
-    const lrEndLimit = despatchLrEndDateFilter ? parseLocalInputDate(despatchLrEndDateFilter) : null;
-
-    if (lrStartLimit) lrStartLimit.setHours(0, 0, 0, 0);
-    if (lrEndLimit) lrEndLimit.setHours(23, 59, 59, 999);
-
-    let rows = despatchRawRows;
-    if (startLimit || endLimit || lrStartLimit || lrEndLimit) {
-      rows = rows.filter(r => {
-        if (startLimit || endLimit) {
-          const d = parseDate(r.despatchDate);
-          if (!d) return false;
-          if (startLimit && d < startLimit) return false;
-          if (endLimit && d > endLimit) return false;
-        }
-        if (lrStartLimit || lrEndLimit) {
-          const lrd = parseDate(r.lrDate);
-          if (!lrd) return false;
-          if (lrStartLimit && lrd < lrStartLimit) return false;
-          if (lrEndLimit && lrd > lrEndLimit) return false;
-        }
-        return true;
-      });
-    }
+    const rows = filteredDashboard.all;
     
-    rows.forEach(row => {
-      const b = row.supervisor ? (supervisorMap[row.supervisor] || 'N/A') : 'N/A';
+    rows.forEach(item => {
+      const b = item.branch || 'without despatched delivery';
       if (!branches[b]) {
         branches[b] = {
           name: b,
@@ -674,35 +698,76 @@ export default function DeliveryDashboard() {
           totalBoxes: 0,
           deliveryPoints: new Set(),
           totalDelayDays: 0,
-          delaysCount: 0
+          delaysCount: 0,
+          sndCount: 0,
+          delay2Count: 0,
+          delay3Count: 0,
+          delay4AboveCount: 0,
+          totalAmount: 0,
+          podCount: 0
         };
       }
       
       const g = branches[b];
       g.totalLrs++;
-      g.totalBoxes += row.boxQty || 0;
+      g.totalBoxes += item.boxQty || 0;
+      g.totalAmount += item.amount || 0;
       
-      const pKey = `${(row.consignee || '').trim().toLowerCase()}||${(row.destination || '').trim().toLowerCase()}`;
-      if (row.consignee || row.destination) {
+      const pKey = `${(item.consignee || '').trim().toLowerCase()}||${(item.area || '').trim().toLowerCase()}`;
+      if (item.consignee || item.area) {
         g.deliveryPoints.add(pKey);
       }
       
-      if (row.deliveryTime) {
+      if (item.status === 'Delivery Process completed.') {
         g.deliveredLrs++;
-        const delay = calculateDelay(row.despatchDate, row.deliveryTime, row.consignor, customHolidays, excludeSundays);
-        if (delay !== null) {
-          g.totalDelayDays += delay;
+        if (item.delay !== null) {
+          g.totalDelayDays += item.delay;
           g.delaysCount++;
+          if (item.delay <= 1) {
+            g.sndCount++;
+          } else if (item.delay === 2) {
+            g.delay2Count++;
+          } else if (item.delay === 3) {
+            g.delay3Count++;
+          } else {
+            g.delay4AboveCount++;
+          }
+        }
+        if (item.podReceived) {
+          g.podCount++;
         }
       }
     });
     
-    return Object.values(branches).map(b => {
+    const branchesList = Object.values(branches).map(b => {
       const avgDelay = b.delaysCount > 0 ? (b.totalDelayDays / b.delaysCount) : 0;
       const pointsCount = b.deliveryPoints.size;
       
-      // Performance score: (Delivered LRs * 10) + (Total Boxes * 1) + (Points * 20) - (Average Delay * 30)
-      const score = (b.deliveredLrs * 10) + (b.totalBoxes * 1) + (pointsCount * 20) - (avgDelay * 30);
+      let pendingCount = 0;
+      let finalPodCount = b.deliveredLrs;
+      const cleanBranchName = b.name.toUpperCase();
+      
+      if (branchPodSummaryMap[cleanBranchName] !== undefined) {
+        pendingCount = Number(branchPodSummaryMap[cleanBranchName] || 0);
+        finalPodCount = Math.max(0, b.deliveredLrs - pendingCount);
+      } else {
+        const hasPodMap = Object.keys(data?.summary?.podMap || {}).length > 0;
+        if (hasPodMap) {
+          finalPodCount = b.podCount;
+          pendingCount = Math.max(0, b.deliveredLrs - finalPodCount);
+        } else {
+          pendingCount = 0;
+          finalPodCount = b.deliveredLrs;
+        }
+      }
+      
+      const podRate = b.deliveredLrs > 0 ? (finalPodCount / b.deliveredLrs) * 100 : 0;
+      const sndRate = b.deliveredLrs > 0 ? (b.sndCount / b.deliveredLrs) * 100 : 0;
+      const delay2Rate = b.deliveredLrs > 0 ? (b.delay2Count / b.deliveredLrs) * 100 : 0;
+      const delay3Rate = b.deliveredLrs > 0 ? (b.delay3Count / b.deliveredLrs) * 100 : 0;
+      const delay4AboveRate = b.deliveredLrs > 0 ? (b.delay4AboveCount / b.deliveredLrs) * 100 : 0;
+      
+      const productivityRaw = (b.deliveredLrs * 1.0) + (pointsCount * 2.0) + (b.totalBoxes * 0.1);
       
       return {
         name: b.name,
@@ -712,50 +777,46 @@ export default function DeliveryDashboard() {
         deliveryPoints: pointsCount,
         avgDelay: b.delaysCount > 0 ? avgDelay.toFixed(1) : '-',
         rawAvgDelay: avgDelay,
-        score: Math.max(0, Math.round(score))
+        sndCount: b.sndCount,
+        sndRate: sndRate,
+        delay2Count: b.delay2Count,
+        delay2Rate: delay2Rate,
+        delay3Count: b.delay3Count,
+        delay3Rate: delay3Rate,
+        delay4AboveCount: b.delay4AboveCount,
+        delay4AboveRate: delay4AboveRate,
+        totalAmount: b.totalAmount,
+        podCount: finalPodCount,
+        pendingCount: pendingCount,
+        podRate: podRate,
+        productivityRaw: productivityRaw
       };
     });
-  }, [despatchRawRows, despatchStartDateFilter, despatchEndDateFilter, despatchLrStartDateFilter, despatchLrEndDateFilter, supervisorMap, customHolidays, excludeSundays]);
+    
+    const maxProductivity = Math.max(...branchesList.map(b => b.productivityRaw), 1);
+    
+    return branchesList.map(b => {
+      const baseScore = (b.sndRate * 0.25) + ((b.productivityRaw / maxProductivity) * 35);
+      const podScore = 40 - (b.pendingCount * 10);
+      const score = Math.max(0, Math.round(baseScore + podScore));
+      
+      return {
+        ...b,
+        score: score
+      };
+    });
+  }, [filteredDashboard, data]);
 
   const driverLeaderboardData = React.useMemo(() => {
+    if (!filteredDashboard) return [];
+    
     const drivers = {};
+    const rows = filteredDashboard.all;
     
-    const startLimit = despatchStartDateFilter ? parseLocalInputDate(despatchStartDateFilter) : null;
-    const endLimit = despatchEndDateFilter ? parseLocalInputDate(despatchEndDateFilter) : null;
-
-    if (startLimit) startLimit.setHours(0, 0, 0, 0);
-    if (endLimit) endLimit.setHours(23, 59, 59, 999);
-
-    const lrStartLimit = despatchLrStartDateFilter ? parseLocalInputDate(despatchLrStartDateFilter) : null;
-    const lrEndLimit = despatchLrEndDateFilter ? parseLocalInputDate(despatchLrEndDateFilter) : null;
-
-    if (lrStartLimit) lrStartLimit.setHours(0, 0, 0, 0);
-    if (lrEndLimit) lrEndLimit.setHours(23, 59, 59, 999);
-
-    let rows = despatchRawRows;
-    if (startLimit || endLimit || lrStartLimit || lrEndLimit) {
-      rows = rows.filter(r => {
-        if (startLimit || endLimit) {
-          const d = parseDate(r.despatchDate);
-          if (!d) return false;
-          if (startLimit && d < startLimit) return false;
-          if (endLimit && d > endLimit) return false;
-        }
-        if (lrStartLimit || lrEndLimit) {
-          const lrd = parseDate(r.lrDate);
-          if (!lrd) return false;
-          if (lrStartLimit && lrd < lrStartLimit) return false;
-          if (lrEndLimit && lrd > lrEndLimit) return false;
-        }
-        return true;
-      });
-    }
-    
-    rows.forEach(row => {
-      const dStr = (row.deliveryDriver || '').trim();
+    rows.forEach(item => {
+      const dStr = (item.deliveryDriver || '').trim();
       if (!dStr || dStr === '-') return;
       
-      // A row can have comma separated drivers
       const splitDrivers = dStr.split(',').map(s => s.trim()).filter(Boolean);
       
       splitDrivers.forEach(d => {
@@ -767,36 +828,47 @@ export default function DeliveryDashboard() {
             totalBoxes: 0,
             deliveryPoints: new Set(),
             totalDelayDays: 0,
-            delaysCount: 0
+            delaysCount: 0,
+            sndCount: 0,
+            podCount: 0
           };
         }
         
         const g = drivers[d];
         g.totalLrs++;
-        g.totalBoxes += row.boxQty || 0;
+        g.totalBoxes += item.boxQty || 0;
         
-        const pKey = `${(row.consignee || '').trim().toLowerCase()}||${(row.destination || '').trim().toLowerCase()}`;
-        if (row.consignee || row.destination) {
+        const pKey = `${(item.consignee || '').trim().toLowerCase()}||${(item.area || '').trim().toLowerCase()}`;
+        if (item.consignee || item.area) {
           g.deliveryPoints.add(pKey);
         }
         
-        if (row.deliveryTime) {
+        if (item.status === 'Delivery Process completed.') {
           g.deliveredLrs++;
-          const delay = calculateDelay(row.despatchDate, row.deliveryTime, row.consignor, customHolidays, excludeSundays);
-          if (delay !== null) {
-            g.totalDelayDays += delay;
+          if (item.delay !== null) {
+            g.totalDelayDays += item.delay;
             g.delaysCount++;
+            if (item.delay <= 1) {
+              g.sndCount++;
+            }
+          }
+          if (item.podReceived) {
+            g.podCount++;
           }
         }
       });
     });
     
-    return Object.values(drivers).map(d => {
+    const driversList = Object.values(drivers).map(d => {
       const avgDelay = d.delaysCount > 0 ? (d.totalDelayDays / d.delaysCount) : 0;
       const pointsCount = d.deliveryPoints.size;
       
-      // Performance score: (Delivered LRs * 10) + (Total Boxes * 1) + (Points * 20) - (Average Delay * 30)
-      const score = (d.deliveredLrs * 10) + (d.totalBoxes * 1) + (pointsCount * 20) - (avgDelay * 30);
+      const hasPodMap = Object.keys(data?.summary?.podMap || {}).length > 0;
+      const pendingCount = hasPodMap ? Math.max(0, d.deliveredLrs - d.podCount) : 0;
+      const podRate = d.deliveredLrs > 0 ? ((d.deliveredLrs - pendingCount) / d.deliveredLrs) * 100 : 0;
+      const sndRate = d.deliveredLrs > 0 ? (d.sndCount / d.deliveredLrs) * 100 : 0;
+      
+      const productivityRaw = (d.deliveredLrs * 1.0) + (pointsCount * 2.0) + (d.totalBoxes * 0.1);
       
       return {
         name: d.name,
@@ -806,10 +878,28 @@ export default function DeliveryDashboard() {
         deliveryPoints: pointsCount,
         avgDelay: d.delaysCount > 0 ? avgDelay.toFixed(1) : '-',
         rawAvgDelay: avgDelay,
-        score: Math.max(0, Math.round(score))
+        sndCount: d.sndCount,
+        sndRate: sndRate,
+        podCount: d.deliveredLrs - pendingCount,
+        pendingCount: pendingCount,
+        podRate: podRate,
+        productivityRaw: productivityRaw
       };
     });
-  }, [despatchRawRows, despatchStartDateFilter, despatchEndDateFilter, despatchLrStartDateFilter, despatchLrEndDateFilter, customHolidays, excludeSundays]);
+    
+    const maxProductivity = Math.max(...driversList.map(d => d.productivityRaw), 1);
+    
+    return driversList.map(d => {
+      const baseScore = (d.sndRate * 0.25) + ((d.productivityRaw / maxProductivity) * 35);
+      const podScore = 40 - (d.pendingCount * 10);
+      const score = Math.max(0, Math.round(baseScore + podScore));
+      
+      return {
+        ...d,
+        score: score
+      };
+    });
+  }, [filteredDashboard, data]);
 
   const sortedBranchLeaderboard = React.useMemo(() => {
     const data = [...branchLeaderboardData];
@@ -851,6 +941,42 @@ export default function DeliveryDashboard() {
     return data;
   }, [driverLeaderboardData, leaderboardSortBy]);
 
+  const freightAnalysisData = React.useMemo(() => {
+    if (!filteredDashboard) return { branches: [], consignors: [], destinations: [], totalFreight: 0 };
+    
+    const branchMap = {};
+    const consignorMap = {};
+    const destMap = {};
+    let totalFreight = 0;
+    
+    filteredDashboard.all.forEach(item => {
+      const fr = Number(item.freight || 0);
+      totalFreight += fr;
+      
+      const b = item.branch || 'without despatched delivery';
+      branchMap[b] = (branchMap[b] || 0) + fr;
+      
+      const c = item.consignor || 'N/A';
+      consignorMap[c] = (consignorMap[c] || 0) + fr;
+      
+      const d = item.area || 'N/A';
+      destMap[d] = (destMap[d] || 0) + fr;
+    });
+    
+    const sortAndFormat = (m) => {
+      return Object.entries(m)
+        .map(([name, amount]) => ({ name, amount }))
+        .sort((a, b) => b.amount - a.amount);
+    };
+    
+    return {
+      branches: sortAndFormat(branchMap),
+      consignors: sortAndFormat(consignorMap),
+      destinations: sortAndFormat(destMap),
+      totalFreight
+    };
+  }, [filteredDashboard]);
+
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -866,15 +992,16 @@ export default function DeliveryDashboard() {
       const keys = Object.keys(row);
       
       const findKey = (candidates, searchKeys = keys) => {
+        const cleanCandidates = candidates.map(c => c.toUpperCase().replace(/[^A-Z0-9]/g, ''));
         const exact = searchKeys.find(k => {
-          const cleanK = k.toUpperCase().replace(/[\s_-]/g, '');
-          return candidates.some(c => cleanK === c);
+          const cleanK = k.toUpperCase().replace(/[^A-Z0-9]/g, '');
+          return cleanCandidates.includes(cleanK);
         });
         if (exact) return exact;
 
         return searchKeys.find(k => {
-          const cleanK = k.toUpperCase().replace(/[\s_-]/g, '');
-          return candidates.some(c => cleanK.includes(c) || c.includes(cleanK));
+          const cleanK = k.toUpperCase().replace(/[^A-Z0-9]/g, '');
+          return cleanCandidates.some(c => cleanK.includes(c) || c.includes(cleanK));
         });
       };
       
@@ -899,9 +1026,11 @@ export default function DeliveryDashboard() {
       const statusKey = findKey(['LRSTATUS', 'STATUS', 'LR_STATUS']);
       const despatchNoKey = findKey(['DESPATCHNO', 'DESPATCHNUMBER', 'DESPATCH_NO', 'DESPATCH_NUMBER', 'DESPATCHNO.', 'DISPATCHNO', 'DISPATCHNO.', 'DESPATCH_NO.', 'TRIPSHEET', 'TRIPSHEETNO', 'TRIPSHEET_NO', 'TRIP_SHEET_NO', 'DESPATCH']);
       const despatchDateKey = findKey(['DESPATCHDATE', 'DESPATCH_DATE', 'DESPATCH_DT', 'DESPATCHDT', 'DISPATCHDATE', 'DISPATCH_DATE']);
+      const freightKey = findKey(['FRIGHTAMT', 'FREIGHTAMT', 'FREIGHTAMOUNT', 'FREIGHT', 'AMT', 'FRIGHT', 'FREIGHT_AMOUNT', 'FREIGHT_AMT', 'FREIGHTAMT.']);
+      const amountKey = findKey(['AMOUNT', 'INVOICEVALUE', 'INVOICE_VALUE', 'LRVALUE', 'NETAMOUNT', 'NET_AMOUNT', 'INV_AMT', 'INVAMT']);
 
       if (consignorKey) standardizedRow['CONSIGNOR'] = row[consignorKey] !== undefined && row[consignorKey] !== null ? String(row[consignorKey]).trim() : '';
-      if (lrNoKey) standardizedRow['LR NO'] = row[lrNoKey] !== undefined && row[lrNoKey] !== null ? String(row[lrNoKey]).trim() : '';
+      if (lrNoKey) standardizedRow['LR NO'] = cleanLrNumber(row[lrNoKey]);
       
       const lrNoVal = standardizedRow['LR NO'] || '';
 
@@ -959,10 +1088,24 @@ export default function DeliveryDashboard() {
         standardizedRow['LD SUPERVISOR'] = row[supervisorKey] !== undefined && row[supervisorKey] !== null ? String(row[supervisorKey]).trim() : '';
       }
 
+      if (freightKey) {
+        const val = row[freightKey];
+        standardizedRow['FREIGHT'] = val !== undefined && val !== null && !isNaN(Number(val)) ? Number(val) : 0;
+      } else {
+        standardizedRow['FREIGHT'] = 0;
+      }
+
+      if (amountKey) {
+        const val = row[amountKey];
+        standardizedRow['AMOUNT'] = val !== undefined && val !== null && !isNaN(Number(val)) ? Number(val) : 0;
+      } else {
+        standardizedRow['AMOUNT'] = 0;
+      }
+
       // Copy any other keys as-is just in case
       keys.forEach(k => {
         const cleanK = k.toUpperCase().replace(/[\s_-]/g, '');
-        if (!['CONSIGNOR', 'LRNO', 'DATE', 'DELIVERYTIME', 'CONSIGNEE', 'DESTINATION', 'LRSTATUS', 'DESPATCHNO', 'DESPATCHDATE', 'DISPATCHNO', 'DISPATCHDATE', 'LDSUPERVISOR', 'SUPERVISOR', 'LD_SUPERVISOR'].includes(cleanK)) {
+        if (!['CONSIGNOR', 'LRNO', 'DATE', 'DELIVERYTIME', 'CONSIGNEE', 'DESTINATION', 'LRSTATUS', 'DESPATCHNO', 'DESPATCHDATE', 'DISPATCHNO', 'DISPATCHDATE', 'LDSUPERVISOR', 'SUPERVISOR', 'LD_SUPERVISOR', 'FREIGHT', 'AMOUNT'].includes(cleanK)) {
           standardizedRow[k] = row[k];
         }
       });
@@ -988,24 +1131,25 @@ export default function DeliveryDashboard() {
           let rawDespatchRows = [];
           if (despatchSheetName) {
             const ws2 = wb.Sheets[despatchSheetName];
-            const ws2Data = XLSXReader.utils.sheet_to_json(ws2, { defval: "" });
+            const ws2Data = parseSheetToJSON(ws2, ['LR', 'DESPATCH', 'DRIVER', 'SUPERVISOR', 'BOX']);
             
             const standardizeDespatchRowKeys = (row) => {
               if (!row) return null;
               const keys = Object.keys(row);
               const findKey = (candidates) => {
+                const cleanCandidates = candidates.map(c => c.toUpperCase().replace(/[^A-Z0-9]/g, ''));
                 const exact = keys.find(k => {
-                  const cleanK = k.toUpperCase().replace(/[\s_-]/g, '');
-                  return candidates.some(c => cleanK === c);
+                  const cleanK = k.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                  return cleanCandidates.includes(cleanK);
                 });
                 if (exact) return exact;
                 return keys.find(k => {
-                  const cleanK = k.toUpperCase().replace(/[\s_-]/g, '');
-                  return candidates.some(c => cleanK.includes(c) || c.includes(cleanK));
+                  const cleanK = k.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                  return cleanCandidates.some(c => cleanK.includes(c) || c.includes(cleanK));
                 });
               };
               
-              const lrNoKey = findKey(['LRNO', 'LRNUMBER', 'LR', 'LRNO.', 'LR_NO']);
+              const lrNoKey = findKey(['LRNO', 'LRNUMBER', 'LR', 'LRNO.', 'LR_NO', 'DOCKET', 'DOCKETNO', 'GCNO', 'GC_NO', 'CNNO', 'CN_NO', 'CONNOTE', 'CONNOTENO', 'GCNO.', 'CNNO.']);
               const despatchNoKey = findKey(['DESPATCHNO', 'DESPATCHNUMBER', 'DESPATCH_NO', 'DESPATCH_NUMBER', 'DESPATCHNO.', 'DISPATCHNO', 'DISPATCHNO.', 'DESPATCH_NO.', 'TRIPSHEET', 'TRIPSHEETNO', 'TRIPSHEET_NO', 'TRIP_SHEET_NO', 'DESPATCH']);
               const despatchDateKey = findKey(['DESPATCHDATE', 'DESPATCH_DATE', 'DESPATCH_DT', 'DESPATCHDT', 'DISPATCHDATE', 'DISPATCH_DATE']);
               const deliveryTimeKey = findKey([
@@ -1018,10 +1162,10 @@ export default function DeliveryDashboard() {
               const consignorKey = findKey(['CONSIGNOR', 'CLIENT', 'CUSTOMER', 'CONSIGNORNAME', 'CONSIGNOR_NAME']);
               const consigneeKey = findKey(['CONSIGNEE', 'CONSIGNEENAME', 'RECIPENT', 'CONSIGNEE_NAME', 'CONSIGNEENAME.']);
               const destinationKey = findKey(['DESTINATION', 'AREA', 'PLACE', 'TO', 'DESTINATIONNAME']);
-              const deliveryDriverKey = findKey(['DELIVERYDRIVER', 'DELIVERY_DRIVER', 'DRIVER']);
+              const deliveryDriverKey = findKey(['DELIVERYDRIVER', 'DELIVERY_DRIVER', 'DRIVER', 'DRIVERNAME', 'DRIVER_NAME', 'VEHICLEDRIVER', 'DRIVERNAME.', 'DELIVERYDRIVERNAME', 'DELIVERY_DRIVER_NAME']);
               const boxQtyKey = findKey(['BOXQTY', 'BOXQUANTITY', 'BOX_QTY', 'BOX_QUANTITY', 'BOX']);
 
-              const lrNoVal = lrNoKey && row[lrNoKey] !== undefined && row[lrNoKey] !== null ? String(row[lrNoKey]).trim() : '';
+              const lrNoVal = lrNoKey ? cleanLrNumber(row[lrNoKey]) : '';
               const despatchNoVal = despatchNoKey && row[despatchNoKey] !== undefined && row[despatchNoKey] !== null ? String(row[despatchNoKey]).trim() : '';
               
               let despatchDateVal = '';
@@ -1078,14 +1222,16 @@ export default function DeliveryDashboard() {
             
             rawDespatchRows = ws2Data.map(standardizeDespatchRowKeys).filter(r => r && r.lrNo);
             
-            // Build the legacy maps for backward compatibility if needed
+            // Build the maps for backward compatibility and dashboard calculations
             rawDespatchRows.forEach(row => {
               despatchDetailsMap[row.lrNo] = {
                 despatchNo: row.despatchNo,
                 despatchDate: row.despatchDate,
                 deliveryTime: row.deliveryTime,
                 deliveryTimeRaw: row.deliveryTimeRaw,
-                supervisor: row.supervisor
+                supervisor: row.supervisor,
+                deliveryDriver: row.deliveryDriver,
+                boxQty: row.boxQty
               };
               if (row.supervisor) {
                 dMap[row.lrNo] = row.supervisor;
@@ -1097,7 +1243,7 @@ export default function DeliveryDashboard() {
           const supervisorSheetName = sheetNames.find(n => n.toLowerCase() === 'superwisor' || n.toLowerCase() === 'supervisor') || (sheetNames.length > 2 ? sheetNames[2] : null);
           if (supervisorSheetName) {
             const ws3 = wb.Sheets[supervisorSheetName];
-            const ws3Data = XLSXReader.utils.sheet_to_json(ws3, { defval: "" });
+            const ws3Data = parseSheetToJSON(ws3, ['SUPERVISOR', 'BRANCH']);
             ws3Data.forEach(row => {
               if (!row) return;
               const supervisorKey = Object.keys(row).find(k => k.toLowerCase().replace(/[\s_-]/g, '') === 'ldsupervisor' || k.toLowerCase().replace(/[\s_-]/g, '') === 'supervisor');
@@ -1113,11 +1259,75 @@ export default function DeliveryDashboard() {
             });
           }
 
+          // 2.5 Parse Sheet 4 (POD)
+          const podSheetName = sheetNames.find(n => n.toLowerCase() === 'pod');
+          let podMap = {};
+          let branchPodSummaryMap = {};
+          
+          if (podSheetName) {
+            const wsPod = wb.Sheets[podSheetName];
+            const wsPodData = parseSheetToJSON(wsPod, ['LR', 'BRANCH', 'POD', 'COUNT', 'RECEIVED']);
+            
+            if (wsPodData.length > 0) {
+              const sampleRow = wsPodData[0];
+              const sampleKeys = Object.keys(sampleRow);
+              
+              const findKey = (candidates, keysList = sampleKeys) => {
+                const cleanCandidates = candidates.map(c => c.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+                const exact = keysList.find(k => {
+                  const cleanK = k.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                  return cleanCandidates.includes(cleanK);
+                });
+                if (exact) return exact;
+                return keysList.find(k => {
+                  const cleanK = k.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                  return cleanCandidates.some(c => cleanK.includes(c) || c.includes(cleanK));
+                });
+              };
+              
+              const lrNoKey = findKey(['LRNO', 'LRNUMBER', 'LR', 'LRNO.', 'LR_NO', 'DOCKET', 'DOCKETNO', 'GCNO', 'GC_NO', 'CNNO', 'CN_NO', 'CONNOTE', 'CONNOTENO', 'GCNO.', 'CNNO.']);
+              const branchKey = findKey(['BRANCH', 'OFFICE', 'PLACE', 'BFRANCH', 'BBRANCH', 'BRANCHNAME', 'BRANCH_NAME']);
+              const countKey = findKey(['COUNT', 'POD', 'PODCOUNT', 'TOTAL', 'QTY', 'RECEIVED', 'LR\'S QTY', 'LRSQTY', 'LR_QTY', 'PENDING', 'PENDINGCOUNT']);
+              
+              if (lrNoKey) {
+                wsPodData.forEach(row => {
+                  const lr = cleanLrNumber(row[lrNoKey]);
+                  if (lr) {
+                    const podDateKey = findKey(['DATE', 'PODDATE', 'POD_DATE', 'RECEIVEDDATE', 'RECEIVED_DATE', 'DELIVERY_DATE']);
+                    let podDateVal = '';
+                    if (podDateKey) {
+                      let val = row[podDateKey];
+                      if (val instanceof Date) {
+                        val = adjustExcelDate(val);
+                        podDateVal = getDateStr(val);
+                      } else {
+                        podDateVal = val !== undefined && val !== null ? String(val).trim() : '';
+                      }
+                    }
+                    podMap[lr] = {
+                      lrNo: lr,
+                      podDate: podDateVal,
+                      status: 'Yes'
+                    };
+                  }
+                });
+              } else if (branchKey && countKey) {
+                wsPodData.forEach(row => {
+                  const branchName = String(row[branchKey] || '').trim().toUpperCase();
+                  const countVal = Number(row[countKey] || 0);
+                  if (branchName && !isNaN(countVal) && branchName !== 'TOTAL' && branchName !== 'GRAND TOTAL' && branchName !== 'GRANDTOTAL') {
+                    branchPodSummaryMap[branchName] = countVal;
+                  }
+                });
+              }
+            }
+          }
+
           // 3. Parse Sheet 1 (Main LR records) LAST so it can use the maps
           const mainSheetName = sheetNames.find(n => n.toLowerCase() === 'lr data' || n.toLowerCase() === 'whole lr nos') || (sheetNames.length > 0 ? sheetNames[0] : null);
           if (mainSheetName) {
             const ws1 = wb.Sheets[mainSheetName];
-            const rawLrData = XLSXReader.utils.sheet_to_json(ws1, { defval: "" });
+            const rawLrData = parseSheetToJSON(ws1, ['CONSIGNOR', 'LR', 'DATE', 'STATUS']);
             lrData = rawLrData.map(standardizeRowKeys).filter(r => r && r['CONSIGNOR']);
           }
           
@@ -1149,7 +1359,7 @@ export default function DeliveryDashboard() {
           setDespatchLrStartDateFilter('');
           setDespatchLrEndDateFilter('');
           setDespatchGdmFilter('');
-          processData(lrData, customHolidays, excludeSundays, dMap, sMap);
+          processData(lrData, customHolidays, excludeSundays, dMap, sMap, despatchDetailsMap, podMap, branchPodSummaryMap);
           setLoading(false);
         } catch (err) {
           console.error(err);
@@ -1178,7 +1388,7 @@ export default function DeliveryDashboard() {
           setDespatchLrStartDateFilter('');
           setDespatchLrEndDateFilter('');
           setDespatchGdmFilter('');
-          processData(standardizedCSV, customHolidays, excludeSundays, {}, {});
+          processData(standardizedCSV, customHolidays, excludeSundays, {}, {}, {}, {}, {});
           setLoading(false);
         },
         error: (error) => {
@@ -1190,7 +1400,7 @@ export default function DeliveryDashboard() {
     }
   };
 
-  const processData = (rows, holidays, excludeSun, dMap = {}, sMap = {}) => {
+  const processData = (rows, holidays, excludeSun, dMap = {}, sMap = {}, despatchDetailsMap = {}, podMap = {}, branchPodSummaryMap = {}) => {
     const processed = [];
     const cancelledList = [];
     
@@ -1211,9 +1421,34 @@ export default function DeliveryDashboard() {
       const rawStatus = row['LR STATUS'] !== undefined && row['LR STATUS'] !== null ? String(row['LR STATUS']).trim() : '';
       let mappedStatus = STATUS_MAP[rawStatus] || rawStatus;
       
-      const lrNo = String(row['LR NO'] || '').trim();
+      const lrNo = cleanLrNumber(row['LR NO']);
       const supervisor = row['LD SUPERVISOR'] || (lrNo ? (dMap[lrNo] || '') : '');
-      const branch = supervisor ? (sMap[supervisor] || '') : '';
+      const branchVal = supervisor ? (sMap[supervisor] || '') : '';
+      
+      let branch = branchVal;
+      if (!branch) {
+        const inDespatch = lrNo && (despatchDetailsMap[lrNo] || dMap[lrNo]);
+        if (inDespatch) {
+          branch = "branch missing";
+        } else {
+          branch = "without despatched delivery";
+        }
+      }
+
+      const despatchInfo = lrNo ? despatchDetailsMap[lrNo] : null;
+      let boxQty = 0;
+      if (despatchInfo) {
+        boxQty = despatchInfo.boxQty || 0;
+      } else {
+        const boxQtyKey = Object.keys(row).find(k => ['BOXQTY', 'BOXQUANTITY', 'BOX_QTY', 'BOX_QUANTITY', 'BOX'].includes(k.toUpperCase().replace(/[\s_-]/g, '')));
+        if (boxQtyKey) {
+          boxQty = Number(row[boxQtyKey] || 0);
+        }
+      }
+      
+      const deliveryDriver = despatchInfo ? (despatchInfo.deliveryDriver || '') : '';
+      const hasPod = lrNo && podMap[lrNo];
+      const podDate = hasPod ? (podMap[lrNo].podDate || '') : '';
 
       const item = {
         lrNo: lrNo,
@@ -1227,8 +1462,14 @@ export default function DeliveryDashboard() {
         area: row['DESTINATION'] !== undefined && row['DESTINATION'] !== null ? String(row['DESTINATION']).trim() : '',
         status: mappedStatus,
         delay: null,
-        supervisor: supervisor || 'N/A',
-        branch: branch || 'N/A'
+        supervisor: supervisor || (branch === 'branch missing' ? 'branch missing' : 'without despatched delivery'),
+        branch: branch,
+        boxQty: boxQty,
+        deliveryDriver: deliveryDriver,
+        freight: Number(row['FREIGHT'] || 0),
+        amount: Number(row['AMOUNT'] || 0),
+        podReceived: !!hasPod,
+        podDate: podDate
       };
 
       if (mappedStatus === 'Cancelled LR' || String(rawStatus).toLowerCase().includes('cancelled')) {
@@ -1283,7 +1524,10 @@ export default function DeliveryDashboard() {
         despatchedCount,
         cancelledCount: cancelledList.length,
         totalExcludedConsignors,
-        delayCounts
+        delayCounts,
+        despatchDetailsMap,
+        podMap,
+        branchPodSummaryMap
       }
     });
     setSelectedCategory(null);
@@ -1941,17 +2185,26 @@ export default function DeliveryDashboard() {
     <div className="space-y-6 pb-12 w-full max-w-full overflow-x-hidden">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 relative">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
-          <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            <Clock className="text-primary" /> Delivery Dashboard
+          <h2 className="text-xl font-bold text-slate-800 flex items-center gap-3">
+            <img src="/eff-logo.png" alt="EFF Logo" className="h-9 object-contain" />
+            <span className="border-l border-slate-200 pl-3">Delivery Dashboard</span>
           </h2>
           <div className="flex items-center gap-2 flex-wrap">
             {data && (
-              <button 
-                onClick={handleExportExcel}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center gap-2 text-sm px-4 py-2 rounded-full font-medium shadow-sm"
-              >
-                <Download size={16} /> Interactive Excel Export
-              </button>
+              <>
+                <button 
+                  onClick={() => exportToPPT(data, filteredDashboard, branchLeaderboardData, driverLeaderboardData)}
+                  className="bg-primary hover:bg-primary/95 text-white transition flex items-center gap-2 text-sm px-4 py-2 rounded-full font-medium shadow-sm cursor-pointer"
+                >
+                  <FileText size={16} /> Download Presentation (PPT)
+                </button>
+                <button 
+                  onClick={handleExportExcel}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center gap-2 text-sm px-4 py-2 rounded-full font-medium shadow-sm cursor-pointer"
+                >
+                  <Download size={16} /> Interactive Excel Export
+                </button>
+              </>
             )}
             <button 
               onClick={() => setShowConfig(!showConfig)}
@@ -2115,38 +2368,49 @@ export default function DeliveryDashboard() {
           )}
 
           {/* Tab Switcher */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6 bg-slate-50 p-2 rounded-2xl border border-slate-200 shadow-inner">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-6 bg-slate-50 p-2 rounded-2xl border border-slate-200 shadow-inner">
             <button
               onClick={() => setActiveTab('delayReport')}
               className={`py-3 px-4 font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 border-2 cursor-pointer shadow-sm ${
                 activeTab === 'delayReport' 
                   ? 'bg-primary border-primary text-white shadow-primary/20' 
-                  : 'bg-blue-50/40 border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800'
+                  : 'bg-purple-50/40 border-purple-200 text-purple-700 hover:bg-purple-50 hover:text-purple-800'
               }`}
             >
-              <Clock size={16} className={activeTab === 'delayReport' ? 'text-white' : 'text-blue-600'} /> 
+              <Clock size={16} className={activeTab === 'delayReport' ? 'text-white' : 'text-purple-600'} /> 
               LR Delivery Delay Report
             </button>
             <button
               onClick={() => setActiveTab('despatchReport')}
               className={`py-3 px-4 font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 border-2 cursor-pointer shadow-sm ${
                 activeTab === 'despatchReport' 
-                  ? 'bg-indigo-600 border-indigo-600 text-white shadow-indigo-600/20' 
-                  : 'bg-indigo-50/40 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:text-indigo-800'
+                  ? 'bg-primary border-primary text-white shadow-primary/20' 
+                  : 'bg-purple-50/40 border-purple-200 text-purple-700 hover:bg-purple-50 hover:text-purple-800'
               }`}
             >
-              <Truck size={16} className={activeTab === 'despatchReport' ? 'text-white' : 'text-indigo-600'} /> 
+              <Truck size={16} className={activeTab === 'despatchReport' ? 'text-white' : 'text-purple-600'} /> 
               Despatch Summary Report
+            </button>
+            <button
+              onClick={() => setActiveTab('freightAnalysis')}
+              className={`py-3 px-4 font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 border-2 cursor-pointer shadow-sm ${
+                activeTab === 'freightAnalysis' 
+                  ? 'bg-primary border-primary text-white shadow-primary/20' 
+                  : 'bg-purple-50/40 border-purple-200 text-purple-700 hover:bg-purple-50 hover:text-purple-800'
+              }`}
+            >
+              <DollarSign size={16} className={activeTab === 'freightAnalysis' ? 'text-white' : 'text-purple-605'} /> 
+              Freight Analysis
             </button>
             <button
               onClick={() => setActiveTab('performanceLeaderboard')}
               className={`py-3 px-4 font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 border-2 cursor-pointer shadow-sm ${
                 activeTab === 'performanceLeaderboard' 
-                  ? 'bg-amber-500 border-amber-500 text-white shadow-amber-500/20' 
-                  : 'bg-amber-50/40 border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800'
+                  ? 'bg-primary border-primary text-white shadow-primary/20' 
+                  : 'bg-purple-50/40 border-purple-200 text-purple-700 hover:bg-purple-50 hover:text-purple-800'
               }`}
             >
-              <Award size={16} className={activeTab === 'performanceLeaderboard' ? 'text-white' : 'text-amber-600'} /> 
+              <Award size={16} className={activeTab === 'performanceLeaderboard' ? 'text-white' : 'text-purple-600'} /> 
               Performance Leaderboard
             </button>
           </div>
@@ -2858,6 +3122,109 @@ export default function DeliveryDashboard() {
             </>
           )}
 
+          {activeTab === 'freightAnalysis' && (
+            <div className="space-y-6 animate-in fade-in duration-200 text-left">
+              {/* Total Freight Card */}
+              <div className="bg-gradient-to-r from-primary to-indigo-900 p-6 rounded-2xl text-white shadow-md">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <span className="text-xs uppercase tracking-wider font-bold opacity-80">Total Freight Amount (ആകെ ഫ്രൈറ്റ് തുക)</span>
+                    <h3 className="text-3xl font-black mt-1">₹{freightAnalysisData.totalFreight.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</h3>
+                  </div>
+                  <div className="p-3 bg-white/10 rounded-full text-white">
+                    <DollarSign size={32} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Three Grid Layout */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* 1. Branch-wise Freight */}
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                  <h4 className="font-bold text-slate-800 text-base mb-4 flex items-center gap-2">
+                    🏢 Branch Wise Freight
+                  </h4>
+                  <div className="space-y-4">
+                    {freightAnalysisData.branches.map((item, idx) => {
+                      const maxVal = freightAnalysisData.branches[0]?.amount || 1;
+                      const pct = Math.max(5, (item.amount / maxVal) * 100);
+                      return (
+                        <div key={idx} className="space-y-1">
+                          <div className="flex justify-between text-xs font-semibold">
+                            <span className="text-slate-700 font-bold">{item.name}</span>
+                            <span className="text-primary font-black">₹{item.amount.toLocaleString('en-IN')}</span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {freightAnalysisData.branches.length === 0 && (
+                      <p className="text-xs text-slate-400 italic text-center py-6">No data available</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. Consignor-wise Freight */}
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                  <h4 className="font-bold text-slate-800 text-base mb-4 flex items-center gap-2">
+                    👤 Consignor Wise Freight
+                  </h4>
+                  <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                    {freightAnalysisData.consignors.map((item, idx) => {
+                      const maxVal = freightAnalysisData.consignors[0]?.amount || 1;
+                      const pct = Math.max(5, (item.amount / maxVal) * 100);
+                      return (
+                        <div key={idx} className="space-y-1">
+                          <div className="flex justify-between text-xs font-semibold">
+                            <span className="text-slate-700 font-bold truncate max-w-[180px]">{item.name}</span>
+                            <span className="text-indigo-650 font-black">₹{item.amount.toLocaleString('en-IN')}</span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full bg-indigo-600" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {freightAnalysisData.consignors.length === 0 && (
+                      <p className="text-xs text-slate-400 italic text-center py-6">No data available</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. Destination-wise Freight */}
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                  <h4 className="font-bold text-slate-800 text-base mb-4 flex items-center gap-2">
+                    📍 Destination Wise Freight
+                  </h4>
+                  <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                    {freightAnalysisData.destinations.map((item, idx) => {
+                      const maxVal = freightAnalysisData.destinations[0]?.amount || 1;
+                      const pct = Math.max(5, (item.amount / maxVal) * 100);
+                      return (
+                        <div key={idx} className="space-y-1">
+                          <div className="flex justify-between text-xs font-semibold">
+                            <span className="text-slate-700 font-bold truncate max-w-[180px]">{item.name}</span>
+                            <span className="text-emerald-650 font-black">₹{item.amount.toLocaleString('en-IN')}</span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {freightAnalysisData.destinations.length === 0 && (
+                      <p className="text-xs text-slate-400 italic text-center py-6">No data available</p>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          )}
+
           {activeTab === 'performanceLeaderboard' && (
             <div className="space-y-6 animate-in fade-in duration-200 text-left">
               {/* Leaderboard Header Card */}
@@ -3123,9 +3490,15 @@ export default function DeliveryDashboard() {
                           <th className="px-4 py-3">Branch</th>
                           <th className="px-4 py-3 text-center">Score</th>
                           <th className="px-4 py-3 text-center">LRs</th>
+                          <th className="px-4 py-3 text-center">Same & Next Day</th>
+                          <th className="px-4 py-3 text-center">2nd Day</th>
+                          <th className="px-4 py-3 text-center">3rd Day</th>
+                          <th className="px-4 py-3 text-center">4th Day+</th>
+                          <th className="px-4 py-3 text-center">POD (Pending)</th>
                           <th className="px-4 py-3 text-center">Points</th>
                           <th className="px-4 py-3 text-center">Boxes</th>
-                          <th className="px-4 py-3 text-center">Avg Delay (Days)</th>
+                          <th className="px-4 py-3 text-center">Total Amount</th>
+                          <th className="px-4 py-3 text-center">Avg Delay</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -3142,8 +3515,21 @@ export default function DeliveryDashboard() {
                                 </span>
                               </td>
                               <td className="px-4 py-4 text-center font-semibold text-slate-700">{item.deliveredLrs}</td>
-                              <td className="px-4 py-4 text-center font-semibold text-emerald-600">{item.deliveryPoints}</td>
+                              <td className="px-4 py-4 text-center font-semibold text-sky-600">{item.sndCount} ({item.sndRate.toFixed(0)}%)</td>
+                              <td className="px-4 py-4 text-center font-semibold text-slate-650">{item.delay2Count} ({item.delay2Rate.toFixed(0)}%)</td>
+                              <td className="px-4 py-4 text-center font-semibold text-slate-650">{item.delay3Count} ({item.delay3Rate.toFixed(0)}%)</td>
+                              <td className="px-4 py-4 text-center font-semibold text-rose-600">{item.delay4AboveCount} ({item.delay4AboveRate.toFixed(0)}%)</td>
+                              <td className="px-4 py-4 text-center font-semibold">
+                                <span className={item.pendingCount > 0 ? 'text-rose-600 font-black' : 'text-emerald-600 font-bold'}>
+                                  {item.podCount} ({item.podRate.toFixed(0)}%)
+                                </span>
+                                {item.pendingCount > 0 && (
+                                  <span className="text-[10px] block text-rose-500 font-bold">({item.pendingCount} Pending)</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-4 text-center font-semibold text-slate-600">{item.deliveryPoints}</td>
                               <td className="px-4 py-4 text-center font-semibold text-indigo-650">{item.totalBoxes}</td>
+                              <td className="px-4 py-4 text-center font-black text-emerald-600">₹{item.totalAmount.toLocaleString('en-IN')}</td>
                               <td className="px-4 py-4 text-center font-black text-slate-700">
                                 {item.avgDelay !== '-' ? `${item.avgDelay} Days` : '-'}
                               </td>
@@ -3151,7 +3537,7 @@ export default function DeliveryDashboard() {
                           ))
                         ) : (
                           <tr>
-                            <td colSpan={7} className="px-4 py-16 text-center text-slate-450 font-medium">
+                            <td colSpan={13} className="px-4 py-16 text-center text-slate-450 font-medium">
                               No branch performance data available.
                             </td>
                           </tr>
@@ -3179,9 +3565,11 @@ export default function DeliveryDashboard() {
                           <th className="px-4 py-3">Driver</th>
                           <th className="px-4 py-3 text-center">Score</th>
                           <th className="px-4 py-3 text-center">LRs</th>
+                          <th className="px-4 py-3 text-center">Same & Next Day</th>
+                          <th className="px-4 py-3 text-center">POD (Pending)</th>
                           <th className="px-4 py-3 text-center">Points</th>
                           <th className="px-4 py-3 text-center">Boxes</th>
-                          <th className="px-4 py-3 text-center">Avg Delay (Days)</th>
+                          <th className="px-4 py-3 text-center">Avg Delay</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -3198,7 +3586,16 @@ export default function DeliveryDashboard() {
                                 </span>
                               </td>
                               <td className="px-4 py-4 text-center font-semibold text-slate-700">{item.deliveredLrs}</td>
-                              <td className="px-4 py-4 text-center font-semibold text-emerald-600">{item.deliveryPoints}</td>
+                              <td className="px-4 py-4 text-center font-semibold text-sky-600">{item.sndCount} ({item.sndRate.toFixed(0)}%)</td>
+                              <td className="px-4 py-4 text-center font-semibold">
+                                <span className={item.pendingCount > 0 ? 'text-rose-600 font-black' : 'text-emerald-600 font-bold'}>
+                                  {item.podCount} ({item.podRate.toFixed(0)}%)
+                                </span>
+                                {item.pendingCount > 0 && (
+                                  <span className="text-[10px] block text-rose-500 font-bold">({item.pendingCount} Pending)</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-4 text-center font-semibold text-slate-600">{item.deliveryPoints}</td>
                               <td className="px-4 py-4 text-center font-semibold text-indigo-650">{item.totalBoxes}</td>
                               <td className="px-4 py-4 text-center font-black text-slate-700">
                                 {item.avgDelay !== '-' ? `${item.avgDelay} Days` : '-'}
@@ -3207,7 +3604,7 @@ export default function DeliveryDashboard() {
                           ))
                         ) : (
                           <tr>
-                            <td colSpan={7} className="px-4 py-16 text-center text-slate-450 font-medium">
+                            <td colSpan={9} className="px-4 py-16 text-center text-slate-450 font-medium">
                               No driver performance data available.
                             </td>
                           </tr>
