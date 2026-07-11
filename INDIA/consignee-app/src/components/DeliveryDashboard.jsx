@@ -1538,7 +1538,16 @@ export default function DeliveryDashboard() {
 
   useEffect(() => {
     if (rawRows.length > 0) {
-      processData(rawRows, customHolidays, excludeSundays, despatchMap, supervisorMap);
+      processData(
+        rawRows, 
+        customHolidays, 
+        excludeSundays, 
+        despatchMap, 
+        supervisorMap, 
+        data?.summary?.despatchDetailsMap || {}, 
+        data?.summary?.podMap || {}, 
+        data?.summary?.branchPodSummaryMap || {}
+      );
     }
   }, [customHolidays, excludeSundays, despatchMap, supervisorMap]);
 

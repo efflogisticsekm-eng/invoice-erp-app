@@ -241,6 +241,23 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     const activeBranchLeaderboard = branchLeaderboard || [];
     const sortedLeaderboard = [...activeBranchLeaderboard].sort((a, b) => (b.score || 0) - (a.score || 0));
 
+    // Totals calculations
+    let totalTotalLrs = 0;
+    let totalDeliveredLrs = 0;
+    let totalSndCount = 0;
+    let totalDelay2Count = 0;
+    let totalDelay3Count = 0;
+    let totalDelay4AboveCount = 0;
+    let totalPodCount = 0;
+    let totalPendingCount = 0;
+    let totalTotalBoxes = 0;
+    let totalDeliveryPoints = 0;
+    let totalFreight = 0;
+    let totalAmount = 0;
+    let sumScores = 0;
+    let totalDelaysForAvg = 0;
+    let totalDeliveredLrsForAvg = 0;
+
     sortedLeaderboard.forEach((item, idx) => {
       const metrics = branchMetrics[item.name] || { freight: 0, amount: 0 };
       const rowBg = idx % 2 === 1 ? lightGrey : "FFFFFF";
@@ -251,6 +268,26 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       const delay4AboveRate = item.delay4AboveRate || 0;
       const podRate = item.podRate || 0;
       const pendingCount = item.pendingCount || 0;
+
+      // Accumulate totals
+      totalTotalLrs += item.totalLrs || 0;
+      totalDeliveredLrs += item.deliveredLrs || 0;
+      totalSndCount += item.sndCount || 0;
+      totalDelay2Count += item.delay2Count || 0;
+      totalDelay3Count += item.delay3Count || 0;
+      totalDelay4AboveCount += item.delay4AboveCount || 0;
+      totalPodCount += item.podCount || 0;
+      totalPendingCount += pendingCount;
+      totalTotalBoxes += item.totalBoxes || 0;
+      totalDeliveryPoints += item.deliveryPoints || 0;
+      totalFreight += metrics.freight || 0;
+      totalAmount += metrics.amount || 0;
+      sumScores += item.score || 0;
+
+      if (item.avgDelay !== "-" && !isNaN(Number(item.avgDelay))) {
+        totalDelaysForAvg += Number(item.avgDelay) * (item.deliveredLrs || 0);
+        totalDeliveredLrsForAvg += item.deliveredLrs || 0;
+      }
 
       branchTableRows.push([
         { text: item.name || "N/A", options: { ...slide1TableRowStyle, align: "left", bold: true, fill: { color: rowBg } } },
@@ -285,6 +322,46 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       ]);
     });
 
+    // Add TOTAL / AVERAGE row
+    const avgSndRate = totalDeliveredLrs > 0 ? (totalSndCount / totalDeliveredLrs) * 100 : 0;
+    const avgDelay2Rate = totalDeliveredLrs > 0 ? (totalDelay2Count / totalDeliveredLrs) * 100 : 0;
+    const avgDelay3Rate = totalDeliveredLrs > 0 ? (totalDelay3Count / totalDeliveredLrs) * 100 : 0;
+    const avgDelay4AboveRate = totalDeliveredLrs > 0 ? (totalDelay4AboveCount / totalDeliveredLrs) * 100 : 0;
+    const avgPodRate = totalDeliveredLrs > 0 ? (totalPodCount / totalDeliveredLrs) * 100 : 0;
+    const avgScore = sortedLeaderboard.length > 0 ? Math.round(sumScores / sortedLeaderboard.length) : 0;
+    const overallAvgDelay = totalDeliveredLrsForAvg > 0 ? (totalDelaysForAvg / totalDeliveredLrsForAvg).toFixed(1) : "-";
+
+    const slide1TotalRowStyle = {
+      fill: { color: "CBD5E1" },
+      fontSize: 8.0,
+      align: "center",
+      valign: "middle",
+      bold: true,
+      color: "000000"
+    };
+
+    branchTableRows.push([
+      { text: "TOTAL / AVERAGE", options: { ...slide1TotalRowStyle, align: "left" } },
+      { text: `${totalDeliveredLrs} / ${totalTotalLrs}`, options: slide1TotalRowStyle },
+      { text: `${totalSndCount} (${avgSndRate.toFixed(0)}%)`, options: { ...slide1TotalRowStyle, color: "0284C7" } },
+      { text: `${totalDelay2Count} (${avgDelay2Rate.toFixed(0)}%)`, options: slide1TotalRowStyle },
+      { text: `${totalDelay3Count} (${avgDelay3Rate.toFixed(0)}%)`, options: slide1TotalRowStyle },
+      { text: `${totalDelay4AboveCount} (${avgDelay4AboveRate.toFixed(0)}%)`, options: { ...slide1TotalRowStyle, color: "B91C1C" } },
+      { 
+        text: `${totalPodCount} (${avgPodRate.toFixed(0)}%)\n${totalPendingCount > 0 ? `(${totalPendingCount} Pending)` : ""}`, 
+        options: { 
+          ...slide1TotalRowStyle,
+          color: totalPendingCount > 0 ? "B91C1C" : "15803D"
+        } 
+      },
+      { text: totalTotalBoxes.toLocaleString(), options: slide1TotalRowStyle },
+      { text: totalDeliveryPoints.toLocaleString(), options: slide1TotalRowStyle },
+      { text: `₹${totalFreight.toLocaleString("en-IN")}`, options: slide1TotalRowStyle },
+      { text: `₹${totalAmount.toLocaleString("en-IN")}`, options: slide1TotalRowStyle },
+      { text: String(avgScore), options: slide1TotalRowStyle },
+      { text: overallAvgDelay !== "-" ? `${overallAvgDelay} Days` : "-", options: slide1TotalRowStyle }
+    ]);
+
     slide1.addTable(branchTableRows, {
       x: 0.5,
       y: 1.25,
@@ -302,12 +379,12 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
 
     const branchNames = sortedLeaderboard.map(b => b.name || "N/A");
     
-    // 1. 2nd Day Rate chart
+    // 1. 2nd Day Rate chart (decimals for % format)
     const delay2ChartData = [
       {
         name: "2nd Day Rate (%)",
         labels: branchNames,
-        values: sortedLeaderboard.map(b => Number((b.delay2Rate || 0).toFixed(0)))
+        values: sortedLeaderboard.map(b => (b.delay2Rate || 0) / 100)
       }
     ];
 
@@ -342,107 +419,183 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     ];
 
     if (branchNames.length > 0) {
-      // Top Left: 2nd Day Column Chart
+      // Top Left: 2nd Day Column Chart (formatted as %)
       slide2.addChart(pptx.ChartType.bar, delay2ChartData, {
         x: 0.5, y: 1.1, w: 5.8, h: 2.6, barDir: "col",
         showLegend: false, chartColors: [purple],
-        showValue: true, valueFontSize: 8.5, valueColor: "1E293B",
+        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "0%",
         title: "Branch-wise 2nd Day Delivery Rate (%)", titleFontSize: 11, titleColor: purple, titleBold: true
       });
 
-      // Top Right: Boxes Doughnut Chart
+      // Top Right: Boxes Doughnut Chart (formatted with commas)
       slide2.addChart(pptx.ChartType.doughnut, boxesChartData, {
         x: 7.0, y: 1.1, w: 5.8, h: 2.6,
         showLegend: true, legendPos: "r", legendFontSize: 8,
         chartColors: ["5B2482", "00A3E0", "10B981", "F59E0B", "EF4444", "6366F1", "EC4899"],
-        holeSize: 55, showValue: true, dataLabelFontSize: 8,
+        holeSize: 55, showValue: true, dataLabelFontSize: 8, valueFormat: "#,##0",
         title: "Branch-wise Boxes Delivered", titleFontSize: 11, titleColor: purple, titleBold: true
       });
 
-      // Bottom Left: Freight Doughnut Chart
+      // Bottom Left: Freight Doughnut Chart (formatted as Rupee Currency)
       slide2.addChart(pptx.ChartType.doughnut, freightChartData, {
         x: 0.5, y: 4.1, w: 5.8, h: 2.6,
         showLegend: true, legendPos: "r", legendFontSize: 8,
         chartColors: ["5B2482", "00A3E0", "10B981", "F59E0B", "EF4444", "6366F1", "EC4899"],
-        holeSize: 55, showValue: true, dataLabelFontSize: 8,
+        holeSize: 55, showValue: true, dataLabelFontSize: 8, valueFormat: "₹#,##0",
         title: "Branch-wise Freight Collected (₹)", titleFontSize: 11, titleColor: purple, titleBold: true
       });
 
-      // Bottom Right: Avg Delay Column Chart
+      // Bottom Right: Avg Delay Column Chart (formatted to 1 decimal place)
       slide2.addChart(pptx.ChartType.bar, avgDelayChartData, {
         x: 7.0, y: 4.1, w: 5.8, h: 2.6, barDir: "col",
         showLegend: false, chartColors: [cyan],
-        showValue: true, valueFontSize: 8.5, valueColor: "1E293B",
+        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "0.0",
         title: "Branch-wise Average Delay (Days)", titleFontSize: 11, titleColor: purple, titleBold: true
       });
     }
 
 
     // ==========================================
-    // SLIDE 3: BRANCH-WISE DELIVERY DELAY ANALYSIS
+    // SLIDE 3: BRANCH-WISE DELIVERY DELAY ANALYSIS (DETAILED 18 COLUMNS MATRIX)
     // ==========================================
     const slide3 = pptx.addSlide();
     addSlideLayout(slide3, "BRANCH-WISE DELIVERY DELAY ANALYSIS");
 
-    const delayHeaders = [
-      { text: "Branch", options: tableHeaderStyle },
-      { text: "Same & Next Day", options: tableHeaderStyle },
-      { text: "2nd Day", options: tableHeaderStyle },
-      { text: "3rd Day", options: tableHeaderStyle },
-      { text: "4th Day+", options: tableHeaderStyle },
-      { text: "Total Delivered", options: tableHeaderStyle },
-      { text: "Avg Delay (Days)", options: tableHeaderStyle }
+    // Calculate branch delay matrix (0 to 16+ days)
+    const branchDelayMatrix = {};
+    allItems.forEach(item => {
+      if (item.status === 'Delivery Process completed.') {
+        const b = item.branch || "without despatched delivery";
+        if (!branchDelayMatrix[b]) {
+          branchDelayMatrix[b] = Array(17).fill(0); // 0 = Same Day, 1 = 1d, ..., 15 = 15d, 16 = 16d+
+        }
+        if (item.delay !== null && !isNaN(item.delay)) {
+          const d = Math.max(0, Math.floor(item.delay));
+          if (d >= 16) {
+            branchDelayMatrix[b][16]++;
+          } else {
+            branchDelayMatrix[b][d]++;
+          }
+        }
+      }
+    });
+
+    // Detailed headers matching the Screenshot 4 request
+    const slide3HeaderStyle = {
+      ...tableHeaderStyle,
+      fontSize: 6.5
+    };
+    const slide3RowStyle = {
+      ...tableRowStyle,
+      fontSize: 6.5
+    };
+
+    const delayDetailedHeaders = [
+      { text: "Branch", options: { ...slide3HeaderStyle, align: "left" } },
+      { text: "SAME\nDAY", options: slide3HeaderStyle },
+      { text: "NEXT\nDAY", options: slide3HeaderStyle },
+      { text: "2 ND\nDAY", options: slide3HeaderStyle },
+      { text: "3rd\nDay", options: slide3HeaderStyle },
+      { text: "4th\nDay", options: slide3HeaderStyle },
+      { text: "5th\nDay", options: slide3HeaderStyle },
+      { text: "6th\nDay", options: slide3HeaderStyle },
+      { text: "7th\nDay", options: slide3HeaderStyle },
+      { text: "8th\nDay", options: slide3HeaderStyle },
+      { text: "9th\nDay", options: slide3HeaderStyle },
+      { text: "10th\nDay", options: slide3HeaderStyle },
+      { text: "11th\nDay", options: slide3HeaderStyle },
+      { text: "12th\nDay", options: slide3HeaderStyle },
+      { text: "13th\nDay", options: slide3HeaderStyle },
+      { text: "14th\nDay", options: slide3HeaderStyle },
+      { text: "15th\nDay", options: slide3HeaderStyle },
+      { text: "16th+\nDay", options: slide3HeaderStyle }
     ];
 
-    const delayTableRows = [delayHeaders];
+    const delayTableRows = [delayDetailedHeaders];
+    const totalDelayMatrix = Array(17).fill(0);
+
     sortedLeaderboard.forEach((item, idx) => {
       const rowBg = idx % 2 === 1 ? lightGrey : "FFFFFF";
-      const sndRate = item.sndRate || 0;
-      const delay2Rate = item.delay2Rate || 0;
-      const delay3Rate = item.delay3Rate || 0;
-      const delay4AboveRate = item.delay4AboveRate || 0;
+      const arr = branchDelayMatrix[item.name] || Array(17).fill(0);
       
-      delayTableRows.push([
-        { text: item.name || "N/A", options: { ...tableRowStyle, align: "left", bold: true, fill: { color: rowBg } } },
-        { text: `${item.sndCount || 0} (${sndRate.toFixed(0)}%)`, options: { ...tableRowStyle, fill: { color: rowBg } } },
-        { text: `${item.delay2Count || 0} (${delay2Rate.toFixed(0)}%)`, options: { ...tableRowStyle, fill: { color: rowBg } } },
-        { text: `${item.delay3Count || 0} (${delay3Rate.toFixed(0)}%)`, options: { ...tableRowStyle, fill: { color: rowBg } } },
-        { text: `${item.delay4AboveCount || 0} (${delay4AboveRate.toFixed(0)}%)`, options: { ...tableRowStyle, fill: { color: rowBg }, color: "B91C1C" } },
-        { text: String(item.deliveredLrs || 0), options: { ...tableRowStyle, fill: { color: rowBg } } },
-        { text: item.avgDelay !== "-" ? `${item.avgDelay} Days` : "-", options: { ...tableRowStyle, fill: { color: rowBg }, bold: true } }
-      ]);
+      const rowCells = [{ text: item.name || "N/A", options: { ...slide3RowStyle, align: "left", bold: true, fill: { color: rowBg } } }];
+      
+      for (let i = 0; i <= 16; i++) {
+        const val = arr[i];
+        totalDelayMatrix[i] += val;
+        // Display cell value or keep empty if 0
+        rowCells.push({ text: val > 0 ? String(val) : "", options: { ...slide3RowStyle, fill: { color: rowBg } } });
+      }
+      delayTableRows.push(rowCells);
     });
+
+    // Add TOTAL row at the bottom of the table
+    const slide3TotalRowStyle = {
+      fill: { color: "CBD5E1" },
+      fontSize: 6.5,
+      align: "center",
+      valign: "middle",
+      bold: true,
+      color: "000000"
+    };
+
+    const totalCells = [{ text: "TOTAL", options: { ...slide3TotalRowStyle, align: "left" } }];
+    for (let i = 0; i <= 16; i++) {
+      totalCells.push({ text: totalDelayMatrix[i] > 0 ? String(totalDelayMatrix[i]) : "", options: slide3TotalRowStyle });
+    }
+    delayTableRows.push(totalCells);
 
     const delayTableHeight = 0.5 + (delayTableRows.length * 0.35);
     slide3.addTable(delayTableRows, {
       x: 0.5,
       y: 1.1,
       w: 12.33,
-      colW: [2.5, 1.8, 1.4, 1.4, 1.4, 1.8, 2.03],
+      // colW: 2.13 branch + 17 columns of 0.6 inches = 12.33
+      colW: [2.13, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
       border: { pt: 0.5, color: "CBD5E1" }
     });
 
-    // Stacked delay bar chart at the bottom
+    // Chart at the bottom updated with delay categories mapped from matrix
     const delayChartData = [
       {
-        name: "Same & Next Day",
+        name: "Same Day",
         labels: branchNames,
-        values: sortedLeaderboard.map(b => b.sndCount || 0)
+        values: sortedLeaderboard.map(b => {
+          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
+          return arr[0];
+        })
+      },
+      {
+        name: "Next Day",
+        labels: branchNames,
+        values: sortedLeaderboard.map(b => {
+          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
+          return arr[1];
+        })
       },
       {
         name: "2nd Day",
         labels: branchNames,
-        values: sortedLeaderboard.map(b => b.delay2Count || 0)
+        values: sortedLeaderboard.map(b => {
+          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
+          return arr[2];
+        })
       },
       {
         name: "3rd Day",
         labels: branchNames,
-        values: sortedLeaderboard.map(b => b.delay3Count || 0)
+        values: sortedLeaderboard.map(b => {
+          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
+          return arr[3];
+        })
       },
       {
         name: "4th Day+",
         labels: branchNames,
-        values: sortedLeaderboard.map(b => b.delay4AboveCount || 0)
+        values: sortedLeaderboard.map(b => {
+          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
+          return arr.slice(4).reduce((sum, val) => sum + val, 0);
+        })
       }
     ];
 
@@ -456,7 +609,7 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
         showLegend: true,
         legendPos: "r",
         legendFontSize: 9,
-        chartColors: ["0284C7", "F59E0B", "10B981", "EF4444"], // sky, amber, emerald, red
+        chartColors: ["0284C7", "F59E0B", "10B981", "EF4444", "6B7280"], // sky, amber, emerald, red, grey
         showValue: true,
         valueFontSize: 8,
         valueColor: "1E293B",
@@ -559,48 +712,56 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
 
 
     // ==========================================
-    // SLIDE 5: CUSTOMER WISE DELAY REPORT (PAGINATED, 2-COLUMNS, COMPACT, ALL CONSIGNORS)
+    // SLIDE 5: CUSTOMER-WISE PERFORMANCE & FREIGHT TURNOVER REPORT (MERGED & ATTACHED AS REQUESTED)
     // ==========================================
-    // Aggregate consignor delays
-    const consignors = {};
+    // Aggregate consignor combined metrics
+    const consignorsMerged = {};
     allItems.forEach(item => {
+      const c = item.consignor || "N/A";
+      if (!consignorsMerged[c]) {
+        consignorsMerged[c] = { name: c, totalLrs: 0, delivered: 0, totalDelay: 0, delaysCount: 0, sndCount: 0, freight: 0 };
+      }
+      consignorsMerged[c].totalLrs++;
+      consignorsMerged[c].freight += Number(item.freight || 0);
       if (item.status === 'Delivery Process completed.') {
-        const c = item.consignor || "N/A";
-        if (!consignors[c]) {
-          consignors[c] = { name: c, delivered: 0, totalDelay: 0, sndCount: 0 };
-        }
-        consignors[c].delivered++;
+        consignorsMerged[c].delivered++;
         if (item.delay !== null) {
-          consignors[c].totalDelay += item.delay;
+          consignorsMerged[c].totalDelay += item.delay;
+          consignorsMerged[c].delaysCount++;
           if (item.delay <= 1) {
-            consignors[c].sndCount++;
+            consignorsMerged[c].sndCount++;
           }
         }
       }
     });
 
-    const sortedConsignorsDelay = Object.values(consignors)
+    const sortedConsignorsMerged = Object.values(consignorsMerged)
       .map(c => ({
         name: c.name,
+        totalLrs: c.totalLrs,
         delivered: c.delivered,
-        avgDelay: c.delivered > 0 ? c.totalDelay / c.delivered : 0,
-        sndRate: c.delivered > 0 ? (c.sndCount / c.delivered) * 100 : 0
+        sndRate: c.delivered > 0 ? (c.sndCount / c.delivered) * 100 : 0,
+        avgDelay: c.delaysCount > 0 ? c.totalDelay / c.delaysCount : 0,
+        freight: c.freight
       }))
-      .filter(item => item.name.toUpperCase() !== 'TOTAL' && item.name.toUpperCase() !== 'GRAND TOTAL') // Remove totals only, keep all consignors
-      .sort((a, b) => b.avgDelay - a.avgDelay); // Highest delay first
+      .filter(item => item.name.toUpperCase() !== 'TOTAL' && item.name.toUpperCase() !== 'GRAND TOTAL') // Remove totals
+      .sort((a, b) => b.freight - a.freight); // Sort by freight descending
 
-    const customerDelayHeaders = [
+    const customerMergedHeaders = [
       { text: "Consignor Name", options: multiColHeaderStyle },
+      { text: "Total LRs", options: multiColHeaderStyle },
       { text: "Delivered LRs", options: multiColHeaderStyle },
       { text: "Same & Next Day (%)", options: multiColHeaderStyle },
-      { text: "Avg Delay (Days)", options: multiColHeaderStyle }
+      { text: "Avg Delay (Days)", options: multiColHeaderStyle },
+      { text: "Total Freight Amount (₹)", options: multiColHeaderStyle }
     ];
 
-    const customerDelayDataRows = [];
-    sortedConsignorsDelay.forEach((item, idx) => {
+    const customerMergedDataRows = [];
+    sortedConsignorsMerged.forEach((item, idx) => {
       const rowBg = idx % 2 === 1 ? lightGrey : "FFFFFF";
-      customerDelayDataRows.push([
+      customerMergedDataRows.push([
         { text: item.name || "N/A", options: { ...multiColRowStyle, align: "left", bold: true, fill: { color: rowBg } } },
+        { text: String(item.totalLrs || 0), options: { ...multiColRowStyle, fill: { color: rowBg } } },
         { text: String(item.delivered || 0), options: { ...multiColRowStyle, fill: { color: rowBg } } },
         { text: `${(item.sndRate || 0).toFixed(0)}%`, options: { ...multiColRowStyle, fill: { color: rowBg }, bold: true } },
         { 
@@ -611,63 +772,50 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
             bold: true,
             color: (item.avgDelay || 0) >= 2.0 ? "B91C1C" : "1E293B" 
           } 
-        }
-      ]);
-    });
-
-    addMultiColumnTable("CUSTOMER-WISE AVERAGE DELAY REPORT", customerDelayHeaders, customerDelayDataRows, [5.83, 2.0, 2.0, 2.5], 2, 22);
-
-
-    // ==========================================
-    // SLIDE 6: CUSTOMER WISE FREIGHT & DELAY TURNOVER REPORT (PAGINATED, 2-COLUMNS, COMPACT, ALL CONSIGNORS)
-    // ==========================================
-    const consignorsFreight = {};
-    allItems.forEach(item => {
-      const c = item.consignor || "N/A";
-      if (!consignorsFreight[c]) {
-        consignorsFreight[c] = { name: c, totalLrs: 0, delivered: 0, freight: 0, totalDelay: 0, delaysCount: 0 };
-      }
-      consignorsFreight[c].totalLrs++;
-      if (item.status === 'Delivery Process completed.') {
-        consignorsFreight[c].delivered++;
-        if (item.delay !== null) {
-          consignorsFreight[c].totalDelay += item.delay;
-          consignorsFreight[c].delaysCount++;
-        }
-      }
-      consignorsFreight[c].freight += Number(item.freight || 0);
-    });
-
-    const sortedConsignorsFreight = Object.values(consignorsFreight)
-      .filter(item => item.name.toUpperCase() !== 'TOTAL' && item.name.toUpperCase() !== 'GRAND TOTAL') // Remove totals
-      .sort((a, b) => b.freight - a.freight);
-
-    const customerFreightHeaders = [
-      { text: "Consignor Name", options: multiColHeaderStyle },
-      { text: "Total LRs", options: multiColHeaderStyle },
-      { text: "Delivered LRs", options: multiColHeaderStyle },
-      { text: "Avg Delay (Days)", options: multiColHeaderStyle },
-      { text: "Total Freight Amount (₹)", options: multiColHeaderStyle }
-    ];
-
-    const customerFreightDataRows = [];
-    sortedConsignorsFreight.forEach((item, idx) => {
-      const rowBg = idx % 2 === 1 ? lightGrey : "FFFFFF";
-      const avgDelay = item.delaysCount > 0 ? (item.totalDelay / item.delaysCount).toFixed(1) : "0.0";
-      customerFreightDataRows.push([
-        { text: item.name || "N/A", options: { ...multiColRowStyle, align: "left", bold: true, fill: { color: rowBg } } },
-        { text: String(item.totalLrs || 0), options: { ...multiColRowStyle, fill: { color: rowBg } } },
-        { text: String(item.delivered || 0), options: { ...multiColRowStyle, fill: { color: rowBg } } },
-        { text: `${avgDelay} Days`, options: { ...multiColRowStyle, fill: { color: rowBg } } },
+        },
         { text: `₹${(item.freight || 0).toLocaleString("en-IN")}`, options: { ...multiColRowStyle, fill: { color: rowBg }, bold: true, color: "15803D" } }
       ]);
     });
 
-    addMultiColumnTable("CUSTOMER-WISE FREIGHT TURNOVER & DELAY REPORT", customerFreightHeaders, customerFreightDataRows, [4.83, 1.5, 1.5, 1.8, 2.7], 2, 22);
+    // Calculate customer overall totals
+    let customerTotalLrs = 0;
+    let customerDelivered = 0;
+    let customerSndCount = 0;
+    let customerDelaysCount = 0;
+    let customerTotalDelay = 0;
+    let customerTotalFreight = 0;
+
+    Object.values(consignorsMerged).forEach(item => {
+      if (item.name.toUpperCase() !== 'TOTAL' && item.name.toUpperCase() !== 'GRAND TOTAL') {
+        customerTotalLrs += item.totalLrs;
+        customerDelivered += item.delivered;
+        customerSndCount += item.sndCount;
+        customerDelaysCount += item.delaysCount;
+        customerTotalDelay += item.totalDelay;
+        customerTotalFreight += item.freight;
+      }
+    });
+
+    const customerAvgSnd = customerDelivered > 0 ? (customerSndCount / customerDelivered) * 100 : 0;
+    const customerAvgDelay = customerDelaysCount > 0 ? customerTotalDelay / customerDelaysCount : 0;
+
+    const customerTotalRow = [
+      { text: "TOTAL / AVERAGE", options: { ...multiColRowStyle, align: "left", bold: true, fill: { color: "CBD5E1" } } },
+      { text: String(customerTotalLrs), options: { ...multiColRowStyle, bold: true, fill: { color: "CBD5E1" } } },
+      { text: String(customerDelivered), options: { ...multiColRowStyle, bold: true, fill: { color: "CBD5E1" } } },
+      { text: `${customerAvgSnd.toFixed(0)}%`, options: { ...multiColRowStyle, bold: true, fill: { color: "CBD5E1" } } },
+      { text: `${customerAvgDelay.toFixed(1)} Days`, options: { ...multiColRowStyle, bold: true, fill: { color: "CBD5E1" } } },
+      { text: `₹${customerTotalFreight.toLocaleString("en-IN")}`, options: { ...multiColRowStyle, bold: true, fill: { color: "CBD5E1" }, color: "15803D" } }
+    ];
+
+    customerMergedDataRows.push(customerTotalRow);
+
+    // Render combining both delay and freight turnover in 2 columns
+    addMultiColumnTable("CUSTOMER-WISE PERFORMANCE & FREIGHT TURNOVER REPORT", customerMergedHeaders, customerMergedDataRows, [4.33, 1.3, 1.3, 1.7, 1.7, 2.0], 2, 22);
 
 
     // ==========================================
-    // SLIDE 7: DESTINATION WISE DELAY & FREIGHT REPORT (PAGINATED, 2-COLUMNS, COMPACT, FILTERED >= 2 DAYS)
+    // SLIDE 6: DESTINATION WISE DELAY & FREIGHT REPORT (PAGINATED, 2-COLUMNS, COMPACT, FILTERED >= 2 DAYS)
     // ==========================================
     const destinations = {};
     allItems.forEach(item => {
@@ -713,14 +861,39 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       ]);
     });
 
+    // Add totals row at the end of destination report
+    let destTotalLrs = 0;
+    let destDeliveredLrs = 0;
+    let destTotalDelay = 0;
+    let destTotalFreight = 0;
+
+    sortedDestinations.forEach(item => {
+      destTotalLrs += item.totalLrs;
+      destTotalFreight += item.freight;
+      const d = destinations[item.name] || {};
+      destDeliveredLrs += d.deliveredLrs || 0;
+      destTotalDelay += d.totalDelay || 0;
+    });
+
+    const destAvgDelay = destDeliveredLrs > 0 ? destTotalDelay / destDeliveredLrs : 0;
+
+    const destTotalRow = [
+      { text: "TOTAL / AVERAGE", options: { ...multiColRowStyle, align: "left", bold: true, fill: { color: "CBD5E1" } } },
+      { text: String(destTotalLrs), options: { ...multiColRowStyle, bold: true, fill: { color: "CBD5E1" } } },
+      { text: `${destAvgDelay.toFixed(1)} Days`, options: { ...multiColRowStyle, bold: true, fill: { color: "CBD5E1" } } },
+      { text: `₹${destTotalFreight.toLocaleString("en-IN")}`, options: { ...multiColRowStyle, bold: true, fill: { color: "CBD5E1" }, color: "0284C7" } }
+    ];
+
+    destinationDataRows.push(destTotalRow);
+
     addMultiColumnTable("DESTINATION-WISE DELAYS >= 2 DAYS REPORT", destinationHeaders, destinationDataRows, [5.83, 2.0, 2.0, 2.5], 2, 22);
 
 
     // ==========================================
-    // SLIDE 8: DRIVER WISE PERFORMANCE REPORT
+    // SLIDE 7: DRIVER WISE PERFORMANCE REPORT
     // ==========================================
-    const slide8 = pptx.addSlide();
-    addSlideLayout(slide8, "DRIVER PERFORMANCE REPORT");
+    const slide7 = pptx.addSlide();
+    addSlideLayout(slide7, "DRIVER PERFORMANCE REPORT");
 
     const driverTableRows = [
       [
@@ -770,7 +943,7 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       ]);
     });
 
-    slide8.addTable(driverTableRows, {
+    slide7.addTable(driverTableRows, {
       x: 0.5,
       y: 1.1,
       w: 12.33,
@@ -780,7 +953,7 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
 
 
     // ==========================================
-    // SLIDE 9: BRANCH-WISE DETAILED LR DELIVERY DELAY AGING REPORT (NEW)
+    // SLIDE 8: BRANCH-WISE DETAILED LR DELIVERY DELAY AGING REPORT
     // ==========================================
     const agingHeaders = [
       { text: "Branch", options: tableHeaderStyle },
