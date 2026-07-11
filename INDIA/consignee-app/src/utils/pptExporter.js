@@ -456,7 +456,7 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
 
 
     // ==========================================
-    // SLIDE 3: BRANCH-WISE DELIVERY DELAY ANALYSIS (DETAILED 18 COLUMNS MATRIX)
+    // SLIDE 3: BRANCH-WISE DELIVERY DELAY ANALYSIS (DYNAMIC MATRIX - NO '0' SUM COLUMNS)
     // ==========================================
     const slide3 = pptx.addSlide();
     addSlideLayout(slide3, "BRANCH-WISE DELIVERY DELAY ANALYSIS");
@@ -480,39 +480,52 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       }
     });
 
-    // Detailed headers matching the Screenshot 4 request
+    const totalDelayMatrix = Array(17).fill(0);
+    sortedLeaderboard.forEach(item => {
+      const arr = branchDelayMatrix[item.name] || Array(17).fill(0);
+      for (let i = 0; i <= 16; i++) {
+        totalDelayMatrix[i] += arr[i];
+      }
+    });
+
+    // Dynamically identify columns that have > 0 total values (excluding "0" sum columns)
+    const activeIndices = [];
+    for (let i = 0; i <= 16; i++) {
+      if (totalDelayMatrix[i] > 0) {
+        activeIndices.push(i);
+      }
+    }
+    // Fallback in case activeIndices is completely empty
+    if (activeIndices.length === 0) {
+      activeIndices.push(0, 1, 2, 3, 4);
+    }
+
     const slide3HeaderStyle = {
       ...tableHeaderStyle,
-      fontSize: 6.5
+      fontSize: 7.0
     };
     const slide3RowStyle = {
       ...tableRowStyle,
-      fontSize: 6.5
+      fontSize: 7.0
+    };
+
+    const getHeaderLabel = (index) => {
+      if (index === 0) return "SAME\nDAY";
+      if (index === 1) return "NEXT\nDAY";
+      if (index === 2) return "2nd\nDay";
+      if (index === 3) return "3rd\nDay";
+      if (index === 16) return "16th+\nDay";
+      return `${index}th\nDay`;
     };
 
     const delayDetailedHeaders = [
-      { text: "Branch", options: { ...slide3HeaderStyle, align: "left" } },
-      { text: "SAME\nDAY", options: slide3HeaderStyle },
-      { text: "NEXT\nDAY", options: slide3HeaderStyle },
-      { text: "2 ND\nDAY", options: slide3HeaderStyle },
-      { text: "3rd\nDay", options: slide3HeaderStyle },
-      { text: "4th\nDay", options: slide3HeaderStyle },
-      { text: "5th\nDay", options: slide3HeaderStyle },
-      { text: "6th\nDay", options: slide3HeaderStyle },
-      { text: "7th\nDay", options: slide3HeaderStyle },
-      { text: "8th\nDay", options: slide3HeaderStyle },
-      { text: "9th\nDay", options: slide3HeaderStyle },
-      { text: "10th\nDay", options: slide3HeaderStyle },
-      { text: "11th\nDay", options: slide3HeaderStyle },
-      { text: "12th\nDay", options: slide3HeaderStyle },
-      { text: "13th\nDay", options: slide3HeaderStyle },
-      { text: "14th\nDay", options: slide3HeaderStyle },
-      { text: "15th\nDay", options: slide3HeaderStyle },
-      { text: "16th+\nDay", options: slide3HeaderStyle }
+      { text: "Branch", options: { ...slide3HeaderStyle, align: "left" } }
     ];
+    activeIndices.forEach(idx => {
+      delayDetailedHeaders.push({ text: getHeaderLabel(idx), options: slide3HeaderStyle });
+    });
 
     const delayTableRows = [delayDetailedHeaders];
-    const totalDelayMatrix = Array(17).fill(0);
 
     sortedLeaderboard.forEach((item, idx) => {
       const rowBg = idx % 2 === 1 ? lightGrey : "FFFFFF";
@@ -520,19 +533,17 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       
       const rowCells = [{ text: item.name || "N/A", options: { ...slide3RowStyle, align: "left", bold: true, fill: { color: rowBg } } }];
       
-      for (let i = 0; i <= 16; i++) {
+      activeIndices.forEach(i => {
         const val = arr[i];
-        totalDelayMatrix[i] += val;
-        // Display cell value or keep empty if 0
         rowCells.push({ text: val > 0 ? String(val) : "", options: { ...slide3RowStyle, fill: { color: rowBg } } });
-      }
+      });
       delayTableRows.push(rowCells);
     });
 
     // Add TOTAL row at the bottom of the table
     const slide3TotalRowStyle = {
       fill: { color: "CBD5E1" },
-      fontSize: 6.5,
+      fontSize: 7.0,
       align: "center",
       valign: "middle",
       bold: true,
@@ -540,18 +551,23 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     };
 
     const totalCells = [{ text: "TOTAL", options: { ...slide3TotalRowStyle, align: "left" } }];
-    for (let i = 0; i <= 16; i++) {
+    activeIndices.forEach(i => {
       totalCells.push({ text: totalDelayMatrix[i] > 0 ? String(totalDelayMatrix[i]) : "", options: slide3TotalRowStyle });
-    }
+    });
     delayTableRows.push(totalCells);
+
+    // Calculate column widths dynamically based on number of active columns
+    const totalWidthAvailable = 12.33;
+    const branchColWidth = 2.5;
+    const remainingWidth = totalWidthAvailable - branchColWidth;
+    const colWidths = [branchColWidth, ...Array(activeIndices.length).fill(remainingWidth / activeIndices.length)];
 
     const delayTableHeight = 0.5 + (delayTableRows.length * 0.35);
     slide3.addTable(delayTableRows, {
       x: 0.5,
       y: 1.1,
       w: 12.33,
-      // colW: 2.13 branch + 17 columns of 0.6 inches = 12.33
-      colW: [2.13, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+      colW: colWidths,
       border: { pt: 0.5, color: "CBD5E1" }
     });
 
@@ -712,9 +728,8 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
 
 
     // ==========================================
-    // SLIDE 5: CUSTOMER-WISE PERFORMANCE & FREIGHT TURNOVER REPORT (MERGED & ATTACHED AS REQUESTED)
+    // SLIDE 5: CUSTOMER-WISE PERFORMANCE & FREIGHT TURNOVER REPORT (MERGED)
     // ==========================================
-    // Aggregate consignor combined metrics
     const consignorsMerged = {};
     allItems.forEach(item => {
       const c = item.consignor || "N/A";
@@ -810,7 +825,6 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
 
     customerMergedDataRows.push(customerTotalRow);
 
-    // Render combining both delay and freight turnover in 2 columns
     addMultiColumnTable("CUSTOMER-WISE PERFORMANCE & FREIGHT TURNOVER REPORT", customerMergedHeaders, customerMergedDataRows, [4.33, 1.3, 1.3, 1.7, 1.7, 2.0], 2, 22);
 
 
