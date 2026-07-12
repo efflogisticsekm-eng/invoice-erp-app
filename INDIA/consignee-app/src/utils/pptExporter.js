@@ -153,6 +153,22 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       }
     };
 
+    // Helper for calculating branch metrics
+    const branchMetrics = {};
+    const allItems = filteredDashboard.all || [];
+    allItems.forEach(item => {
+      const b = item.branch || "without despatched delivery";
+      if (!branchMetrics[b]) {
+        branchMetrics[b] = { freight: 0, amount: 0 };
+      }
+      branchMetrics[b].freight += Number(item.freight || 0);
+      branchMetrics[b].amount += Number(item.amount || 0);
+    });
+
+    const activeBranchLeaderboard = branchLeaderboard || [];
+    const sortedLeaderboard = [...activeBranchLeaderboard].sort((a, b) => (b.score || 0) - (a.score || 0));
+
+
     // ==========================================
     // SLIDE 1: BRANCH PERFORMANCE SNAPSHOT (BOLD & NO TOTAL AMOUNT & FIXED PENDING "%")
     // ==========================================
@@ -176,21 +192,6 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
         { text: "Avg Delay", options: tableHeaderStyle }
       ]
     ];
-
-    // Calculate freight and points per branch from filtered list
-    const branchMetrics = {};
-    const allItems = filteredDashboard.all || [];
-    allItems.forEach(item => {
-      const b = item.branch || "without despatched delivery";
-      if (!branchMetrics[b]) {
-        branchMetrics[b] = { freight: 0, amount: 0 };
-      }
-      branchMetrics[b].freight += Number(item.freight || 0);
-      branchMetrics[b].amount += Number(item.amount || 0);
-    });
-
-    const activeBranchLeaderboard = branchLeaderboard || [];
-    const sortedLeaderboard = [...activeBranchLeaderboard].sort((a, b) => (b.score || 0) - (a.score || 0));
 
     // Totals calculations
     let totalTotalLrs = 0;
@@ -239,7 +240,7 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
 
       // Check pending count to hide % in pending case as requested
       const podDisplayText = pendingCount > 0
-        ? `${item.podCount || 0}\n(${pendingCount} Pending)`
+        ? `${item.podCount || 0} (${pendingCount} Pending)`
         : `${item.podCount || 0} (100%)`;
 
       branchTableRows.push([
@@ -290,7 +291,7 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     };
 
     const totalPodDisplayText = totalPendingCount > 0
-      ? `${totalPodCount}\n(${totalPendingCount} Pending)`
+      ? `${totalPodCount} (${totalPendingCount} Pending)`
       : `${totalPodCount} (100%)`;
 
     branchTableRows.push([
@@ -325,382 +326,7 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
 
 
     // ==========================================
-    // SLIDE 2 (Part 1): BRANCH PERFORMANCE CHARTS (VERTICALLY STACKED & FULL WIDTH)
-    // ==========================================
-    const slide2Part1 = pptx.addSlide();
-    addSlideLayout(slide2Part1, "BRANCH PERFORMANCE CHARTS (Part 1)");
-
-    const branchNames = sortedLeaderboard.map(b => b.name || "N/A");
-    
-    // 1. 2nd Day Rate chart (passed as integers, formatted with % suffix to prevent 0 labels)
-    const delay2ChartData = [
-      {
-        name: "2nd Day Rate (%)",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => Math.round(b.delay2Rate || 0))
-      }
-    ];
-
-    // 2. Boxes chart
-    const boxesChartData = [
-      {
-        name: "Boxes Delivered",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => b.totalBoxes || 0)
-      }
-    ];
-
-    if (branchNames.length > 0) {
-      // Top Chart Header
-      slide2Part1.addText("Branch-wise 2nd Day Delivery Rate (%)", {
-        x: 0.5, y: 0.95, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
-      });
-      // Top Chart: 2nd Day Column Chart (Widescreen 12.33 width)
-      slide2Part1.addChart(pptx.ChartType.bar, delay2ChartData, {
-        x: 0.5, y: 1.2, w: 12.33, h: 2.5, barDir: "col",
-        showLegend: false, chartColors: [purple],
-        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: '0"%"',
-      });
-
-      // Bottom Chart Header
-      slide2Part1.addText("Branch-wise Boxes Delivered", {
-        x: 0.5, y: 3.85, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
-      });
-      // Bottom Chart: Boxes Column Chart (Changed to column chart & widescreen 12.33 width for clarity)
-      slide2Part1.addChart(pptx.ChartType.bar, boxesChartData, {
-        x: 0.5, y: 4.1, w: 12.33, h: 2.5, barDir: "col",
-        showLegend: false, chartColors: [cyan],
-        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "#,##0",
-      });
-    }
-
-
-    // ==========================================
-    // SLIDE 2 (Part 2): BRANCH PERFORMANCE CHARTS (VERTICALLY STACKED & FULL WIDTH)
-    // ==========================================
-    const slide2Part2 = pptx.addSlide();
-    addSlideLayout(slide2Part2, "BRANCH PERFORMANCE CHARTS (Part 2)");
-
-    // 3. Freight chart (Column chart with Rupee symbol and commas)
-    const freightChartData = [
-      {
-        name: "Freight (₹)",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => {
-          const metrics = branchMetrics[b.name] || { freight: 0 };
-          return metrics.freight;
-        })
-      }
-    ];
-
-    // 4. Avg Delay chart
-    const avgDelayChartData = [
-      {
-        name: "Avg Delay (Days)",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => b.avgDelay === '-' ? 0 : Number(b.avgDelay || 0))
-      }
-    ];
-
-    if (branchNames.length > 0) {
-      // Top Chart Header
-      slide2Part2.addText("Branch-wise Freight Collected (₹)", {
-        x: 0.5, y: 0.95, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
-      });
-      // Top Chart: Freight Column Chart (Widescreen 12.33 width)
-      slide2Part2.addChart(pptx.ChartType.bar, freightChartData, {
-        x: 0.5, y: 1.2, w: 12.33, h: 2.5, barDir: "col",
-        showLegend: false, chartColors: [purple],
-        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "₹#,##0",
-      });
-
-      // Bottom Chart Header
-      slide2Part2.addText("Branch-wise Average Delay (Days)", {
-        x: 0.5, y: 3.85, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
-      });
-      // Bottom Chart: Avg Delay Column Chart (Widescreen 12.33 width)
-      slide2Part2.addChart(pptx.ChartType.bar, avgDelayChartData, {
-        x: 0.5, y: 4.1, w: 12.33, h: 2.5, barDir: "col",
-        showLegend: false, chartColors: [cyan],
-        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "0.0",
-      });
-    }
-
-
-    // ==========================================
-    // SLIDE 3: BRANCH-WISE DELIVERY DELAY ANALYSIS (DYNAMIC MATRIX)
-    // ==========================================
-    const slide3 = pptx.addSlide();
-    addSlideLayout(slide3, "BRANCH-WISE DELIVERY DELAY ANALYSIS");
-
-    // Calculate branch delay matrix (0 to 16+ days)
-    const branchDelayMatrix = {};
-    allItems.forEach(item => {
-      if (item.status === 'Delivery Process completed.') {
-        const b = item.branch || "without despatched delivery";
-        if (!branchDelayMatrix[b]) {
-          branchDelayMatrix[b] = Array(17).fill(0); // 0 = Same Day, 1 = 1d, ..., 15 = 15d, 16 = 16d+
-        }
-        if (item.delay !== null && !isNaN(item.delay)) {
-          const d = Math.max(0, Math.floor(item.delay));
-          if (d >= 16) {
-            branchDelayMatrix[b][16]++;
-          } else {
-            branchDelayMatrix[b][d]++;
-          }
-        }
-      }
-    });
-
-    const totalDelayMatrix = Array(17).fill(0);
-    sortedLeaderboard.forEach(item => {
-      const arr = branchDelayMatrix[item.name] || Array(17).fill(0);
-      for (let i = 0; i <= 16; i++) {
-        totalDelayMatrix[i] += arr[i];
-      }
-    });
-
-    // Dynamically identify columns that have > 0 total values (excluding "0" sum columns)
-    const activeIndices = [];
-    for (let i = 0; i <= 16; i++) {
-      if (totalDelayMatrix[i] > 0) {
-        activeIndices.push(i);
-      }
-    }
-    if (activeIndices.length === 0) {
-      activeIndices.push(0, 1, 2, 3, 4);
-    }
-
-    const slide3HeaderStyle = {
-      ...tableHeaderStyle,
-      fontSize: 8.0
-    };
-    const slide3RowStyle = {
-      ...tableRowStyle,
-      fontSize: 8.0
-    };
-
-    const getHeaderLabel = (index) => {
-      if (index === 0) return "SAME\nDAY";
-      if (index === 1) return "NEXT\nDAY";
-      if (index === 2) return "2nd\nDay";
-      if (index === 3) return "3rd\nDay";
-      if (index === 16) return "16th+\nDay";
-      return `${index}th\nDay`;
-    };
-
-    const delayDetailedHeaders = [
-      { text: "Branch", options: { ...slide3HeaderStyle, align: "left" } }
-    ];
-    activeIndices.forEach(idx => {
-      delayDetailedHeaders.push({ text: getHeaderLabel(idx), options: slide3HeaderStyle });
-    });
-
-    const delayTableRows = [delayDetailedHeaders];
-
-    sortedLeaderboard.forEach((item, idx) => {
-      const rowBg = idx % 2 === 1 ? lightGrey : "FFFFFF";
-      const arr = branchDelayMatrix[item.name] || Array(17).fill(0);
-      
-      const rowCells = [{ text: item.name || "N/A", options: { ...slide3RowStyle, align: "left", fill: { color: rowBg } } }];
-      
-      activeIndices.forEach(i => {
-        const val = arr[i];
-        rowCells.push({ text: val > 0 ? String(val) : "", options: { ...slide3RowStyle, fill: { color: rowBg } } });
-      });
-      delayTableRows.push(rowCells);
-    });
-
-    // Add TOTAL row at the bottom of the table
-    const slide3TotalRowStyle = {
-      fill: { color: "CBD5E1" },
-      fontSize: 8.0,
-      align: "center",
-      valign: "middle",
-      bold: true,
-      color: "000000"
-    };
-
-    const totalCells = [{ text: "TOTAL", options: { ...slide3TotalRowStyle, align: "left" } }];
-    activeIndices.forEach(i => {
-      totalCells.push({ text: totalDelayMatrix[i] > 0 ? String(totalDelayMatrix[i]) : "", options: slide3TotalRowStyle });
-    });
-    delayTableRows.push(totalCells);
-
-    // Calculate column widths dynamically
-    const totalWidthAvailable = 12.33;
-    const branchColWidth = 2.5;
-    const remainingWidth = totalWidthAvailable - branchColWidth;
-    const colWidths = [branchColWidth, ...Array(activeIndices.length).fill(remainingWidth / activeIndices.length)];
-
-    const delayTableHeight = 0.5 + (delayTableRows.length * 0.35);
-    slide3.addTable(delayTableRows, {
-      x: 0.5,
-      y: 1.1,
-      w: 12.33,
-      colW: colWidths,
-      margin: [3, 4, 3, 4],
-      border: { pt: 0.5, color: "CBD5E1" }
-    });
-
-    // Chart at the bottom updated with delay categories mapped from matrix
-    const delayChartData = [
-      {
-        name: "Same Day",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => {
-          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
-          return arr[0];
-        })
-      },
-      {
-        name: "Next Day",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => {
-          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
-          return arr[1];
-        })
-      },
-      {
-        name: "2nd Day",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => {
-          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
-          return arr[2];
-        })
-      },
-      {
-        name: "3rd Day",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => {
-          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
-          return arr[3];
-        })
-      },
-      {
-        name: "4th Day+",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => {
-          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
-          return arr.slice(4).reduce((sum, val) => sum + val, 0);
-        })
-      }
-    ];
-
-    if (branchNames.length > 0) {
-      slide3.addChart(pptx.ChartType.bar, delayChartData, {
-        x: 0.5,
-        y: 1.35 + delayTableHeight,
-        w: 12.33,
-        h: Math.max(2.0, 7.2 - 1.6 - delayTableHeight),
-        barDir: "col",
-        showLegend: true,
-        legendPos: "r",
-        legendFontSize: 9,
-        chartColors: ["0284C7", "F59E0B", "10B981", "EF4444", "6B7280"], // sky, amber, emerald, red, grey
-        showValue: true,
-        valueFontSize: 8,
-        valueColor: "1E293B",
-        title: "Branch-wise Delay Days Comparison",
-        titleFontSize: 11,
-        titleColor: purple,
-        titleBold: true
-      });
-    }
-
-
-    // ==========================================
-    // SLIDE 4: DELIVERY DELAY & PERFORMANCE SUMMARY
-    // ==========================================
-    const slide4 = pptx.addSlide();
-    addSlideLayout(slide4, "DELIVERY DELAY & PERFORMANCE SUMMARY");
-
-    const summary = filteredDashboard.summary || {};
-    const deliveredCount = summary.delivered || 0;
-    const despatchedCount = summary.despatchedCount || 0;
-    const openCount = summary.openCount || 0;
-    const cancelledCount = summary.cancelledCount || 0;
-    const delayCounts = summary.delayCounts || {};
-
-    const totalActive = deliveredCount + despatchedCount + openCount;
-    const delPct = totalActive > 0 ? ((deliveredCount / totalActive) * 100).toFixed(1) : 0;
-    const transitPct = totalActive > 0 ? ((despatchedCount / totalActive) * 100).toFixed(1) : 0;
-    const openPct = totalActive > 0 ? ((openCount / totalActive) * 100).toFixed(1) : 0;
-
-    const statsBoxY = 1.3;
-    const addMetricText = (label, val, yOffset, colorCode = "1E293B") => {
-      slide4.addText(label, { x: 0.8, y: yOffset, w: 2.8, h: 0.35, fontSize: 11, color: "475569", bold: true });
-      slide4.addText(val, { x: 3.3, y: yOffset, w: 1.6, h: 0.35, fontSize: 12, color: colorCode, bold: true, align: "right" });
-    };
-
-    slide4.addShape(pptx.ShapeType.roundRect, {
-      x: 0.5,
-      y: statsBoxY,
-      w: 4.8,
-      h: 5.2,
-      fill: { color: "F8FAFC" },
-      line: { color: "E2E8F0", width: 1 }
-    });
-
-    slide4.addText("Overall Delivery Stats", {
-      x: 0.8,
-      y: statsBoxY + 0.2,
-      w: 4.2,
-      h: 0.4,
-      fontSize: 14,
-      bold: true,
-      color: purple
-    });
-
-    addMetricText("Total Active LRs:", String(totalActive), statsBoxY + 0.8, purple);
-    addMetricText("Delivered LRs:", `${deliveredCount} (${delPct}%)`, statsBoxY + 1.35, "15803D");
-    addMetricText("On Transit (Transit):", `${despatchedCount} (${transitPct}%)`, statsBoxY + 1.9, "0284C7");
-    addMetricText("Not Despatched (Open):", `${openCount} (${openPct}%)`, statsBoxY + 2.45, "B91C1C");
-    addMetricText("Cancelled LRs:", String(cancelledCount), statsBoxY + 3.0, "64748B");
-
-    const sndTotal = (delayCounts[0] || 0) + (delayCounts[1] || 0);
-    const sndRateOverall = deliveredCount > 0 ? ((sndTotal / deliveredCount) * 100).toFixed(1) : 0;
-    slide4.addShape(pptx.ShapeType.rect, { x: 0.8, y: statsBoxY + 3.65, w: 4.2, h: 0.02, fill: { color: "CBD5E1" } });
-    addMetricText("Same & Next Day Checkpoint:", `${sndTotal} (${sndRateOverall}%)`, statsBoxY + 3.9, "0F766E");
-
-    const summaryChartData = [
-      {
-        name: "LR Count",
-        labels: ["Same Day (0d)", "Next Day (1d)", "2 Days", "3 Days", "4 Days", "5 Days", "6 Days", "7 Days", ">7 Days"],
-        values: [
-          delayCounts[0] || 0,
-          delayCounts[1] || 0,
-          delayCounts[2] || 0,
-          delayCounts[3] || 0,
-          delayCounts[4] || 0,
-          delayCounts[5] || 0,
-          delayCounts[6] || 0,
-          delayCounts[7] || 0,
-          delayCounts["more"] || 0
-        ]
-      }
-    ];
-
-    slide4.addChart(pptx.ChartType.bar, summaryChartData, {
-      x: 5.6,
-      y: statsBoxY,
-      w: 7.2,
-      h: 5.2,
-      barDir: "col",
-      chartColors: [purple],
-      showLegend: false,
-      showValue: true,
-      valueFontSize: 10,
-      valueColor: "1E293B",
-      title: "Delivered LRs Delay Distribution",
-      titleFontSize: 12,
-      titleColor: purple,
-      titleBold: true
-    });
-
-
-    // ==========================================
-    // SLIDE 5: CUSTOMER-WISE PERFORMANCE & FREIGHT TURNOVER REPORT (MERGED & BOLD & COMPACT 26 ROWS)
+    // SLIDE 2: CUSTOMER-WISE PERFORMANCE & FREIGHT TURNOVER REPORT (SET AS ORDER 2 AS REQUESTED)
     // ==========================================
     const consignorsMerged = {};
     allItems.forEach(item => {
@@ -801,7 +427,382 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
 
 
     // ==========================================
-    // SLIDE 6: DESTINATION WISE DELAY & FREIGHT REPORT (PAGINATED, 2-COLUMNS, COMPACT, FILTERED >= 2 DAYS, BOLD, 26 ROWS)
+    // SLIDE 3: BRANCH PERFORMANCE CHARTS (Part 1 - SND% PLOTTED INSTEAD OF 2ND DAY RATE)
+    // ==========================================
+    const slide3Part1 = pptx.addSlide();
+    addSlideLayout(slide3Part1, "BRANCH PERFORMANCE CHARTS (Part 1)");
+
+    const branchNames = sortedLeaderboard.map(b => b.name || "N/A");
+    
+    // 1. Same & Next Day (SND%) Chart Data (Plotted instead of 2nd day rate as requested)
+    const sndChartData = [
+      {
+        name: "Same & Next Day Rate (%)",
+        labels: branchNames,
+        values: sortedLeaderboard.map(b => Math.round(b.sndRate || 0))
+      }
+    ];
+
+    // 2. Boxes chart
+    const boxesChartData = [
+      {
+        name: "Boxes Delivered",
+        labels: branchNames,
+        values: sortedLeaderboard.map(b => b.totalBoxes || 0)
+      }
+    ];
+
+    if (branchNames.length > 0) {
+      // Top Chart Header
+      slide3Part1.addText("Branch-wise Same & Next Day Delivery Rate (%)", {
+        x: 0.5, y: 0.95, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
+      });
+      // Top Chart: SND% Column Chart (Widescreen 12.33 width)
+      slide3Part1.addChart(pptx.ChartType.bar, sndChartData, {
+        x: 0.5, y: 1.2, w: 12.33, h: 2.5, barDir: "col",
+        showLegend: false, chartColors: [purple],
+        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: '0"%"',
+      });
+
+      // Bottom Chart Header
+      slide3Part1.addText("Branch-wise Boxes Delivered", {
+        x: 0.5, y: 3.85, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
+      });
+      // Bottom Chart: Boxes Column Chart
+      slide3Part1.addChart(pptx.ChartType.bar, boxesChartData, {
+        x: 0.5, y: 4.1, w: 12.33, h: 2.5, barDir: "col",
+        showLegend: false, chartColors: [cyan],
+        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "#,##0",
+      });
+    }
+
+
+    // ==========================================
+    // SLIDE 4: BRANCH PERFORMANCE CHARTS (Part 2 - FLOAT AVERAGE DELAY VALUES RESOLVED)
+    // ==========================================
+    const slide3Part2 = pptx.addSlide();
+    addSlideLayout(slide3Part2, "BRANCH PERFORMANCE CHARTS (Part 2)");
+
+    // 3. Freight chart (Column chart with Rupee symbol and commas)
+    const freightChartData = [
+      {
+        name: "Freight (₹)",
+        labels: branchNames,
+        values: sortedLeaderboard.map(b => {
+          const metrics = branchMetrics[b.name] || { freight: 0 };
+          return metrics.freight;
+        })
+      }
+    ];
+
+    // 4. Avg Delay chart (Passed as exact decimals and formatted with no round to integers)
+    const avgDelayChartData = [
+      {
+        name: "Avg Delay (Days)",
+        labels: branchNames,
+        values: sortedLeaderboard.map(b => b.avgDelay === '-' ? 0 : Number(Number(b.avgDelay || 0).toFixed(1)))
+      }
+    ];
+
+    if (branchNames.length > 0) {
+      // Top Chart Header
+      slide3Part2.addText("Branch-wise Freight Collected (₹)", {
+        x: 0.5, y: 0.95, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
+      });
+      // Top Chart: Freight Column Chart
+      slide3Part2.addChart(pptx.ChartType.bar, freightChartData, {
+        x: 0.5, y: 1.2, w: 12.33, h: 2.5, barDir: "col",
+        showLegend: false, chartColors: [purple],
+        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "₹#,##0",
+      });
+
+      // Bottom Chart Header
+      slide3Part2.addText("Branch-wise Average Delay (Days)", {
+        x: 0.5, y: 3.85, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
+      });
+      // Bottom Chart: Avg Delay Column Chart (Removed valueFormat completely to show raw decimal value labels correctly)
+      slide3Part2.addChart(pptx.ChartType.bar, avgDelayChartData, {
+        x: 0.5, y: 4.1, w: 12.33, h: 2.5, barDir: "col",
+        showLegend: false, chartColors: [cyan],
+        showValue: true, valueFontSize: 8.5, valueColor: "1E293B",
+      });
+    }
+
+
+    // ==========================================
+    // SLIDE 5: BRANCH-WISE DELIVERY DELAY ANALYSIS (DYNAMIC MATRIX & NO OVERLAPPING CHART FIGURES)
+    // ==========================================
+    const slide5 = pptx.addSlide();
+    addSlideLayout(slide5, "BRANCH-WISE DELIVERY DELAY ANALYSIS");
+
+    // Calculate branch delay matrix (0 to 16+ days)
+    const branchDelayMatrix = {};
+    allItems.forEach(item => {
+      if (item.status === 'Delivery Process completed.') {
+        const b = item.branch || "without despatched delivery";
+        if (!branchDelayMatrix[b]) {
+          branchDelayMatrix[b] = Array(17).fill(0); // 0 = Same Day, 1 = 1d, ..., 15 = 15d, 16 = 16d+
+        }
+        if (item.delay !== null && !isNaN(item.delay)) {
+          const d = Math.max(0, Math.floor(item.delay));
+          if (d >= 16) {
+            branchDelayMatrix[b][16]++;
+          } else {
+            branchDelayMatrix[b][d]++;
+          }
+        }
+      }
+    });
+
+    const totalDelayMatrix = Array(17).fill(0);
+    sortedLeaderboard.forEach(item => {
+      const arr = branchDelayMatrix[item.name] || Array(17).fill(0);
+      for (let i = 0; i <= 16; i++) {
+        totalDelayMatrix[i] += arr[i];
+      }
+    });
+
+    // Dynamically identify columns that have > 0 total values (excluding "0" sum columns)
+    const activeIndices = [];
+    for (let i = 0; i <= 16; i++) {
+      if (totalDelayMatrix[i] > 0) {
+        activeIndices.push(i);
+      }
+    }
+    if (activeIndices.length === 0) {
+      activeIndices.push(0, 1, 2, 3, 4);
+    }
+
+    const slide5HeaderStyle = {
+      ...tableHeaderStyle,
+      fontSize: 8.0
+    };
+    const slide5RowStyle = {
+      ...tableRowStyle,
+      fontSize: 8.0
+    };
+
+    const getHeaderLabel = (index) => {
+      if (index === 0) return "SAME\nDAY";
+      if (index === 1) return "NEXT\nDAY";
+      if (index === 2) return "2nd\nDay";
+      if (index === 3) return "3rd\nDay";
+      if (index === 16) return "16th+\nDay";
+      return `${index}th\nDay`;
+    };
+
+    const delayDetailedHeaders = [
+      { text: "Branch", options: { ...slide5HeaderStyle, align: "left" } }
+    ];
+    activeIndices.forEach(idx => {
+      delayDetailedHeaders.push({ text: getHeaderLabel(idx), options: slide5HeaderStyle });
+    });
+
+    const delayTableRows = [delayDetailedHeaders];
+
+    sortedLeaderboard.forEach((item, idx) => {
+      const rowBg = idx % 2 === 1 ? lightGrey : "FFFFFF";
+      const arr = branchDelayMatrix[item.name] || Array(17).fill(0);
+      
+      const rowCells = [{ text: item.name || "N/A", options: { ...slide5RowStyle, align: "left", fill: { color: rowBg } } }];
+      
+      activeIndices.forEach(i => {
+        const val = arr[i];
+        rowCells.push({ text: val > 0 ? String(val) : "", options: { ...slide5RowStyle, fill: { color: rowBg } } });
+      });
+      delayTableRows.push(rowCells);
+    });
+
+    // Add TOTAL row at the bottom of the table
+    const slide5TotalRowStyle = {
+      fill: { color: "CBD5E1" },
+      fontSize: 8.0,
+      align: "center",
+      valign: "middle",
+      bold: true,
+      color: "000000"
+    };
+
+    const totalCells = [{ text: "TOTAL", options: { ...slide5TotalRowStyle, align: "left" } }];
+    activeIndices.forEach(i => {
+      totalCells.push({ text: totalDelayMatrix[i] > 0 ? String(totalDelayMatrix[i]) : "", options: slide5TotalRowStyle });
+    });
+    delayTableRows.push(totalCells);
+
+    // Calculate column widths dynamically
+    const totalWidthAvailable = 12.33;
+    const branchColWidth = 2.5;
+    const remainingWidth = totalWidthAvailable - branchColWidth;
+    const colWidths = [branchColWidth, ...Array(activeIndices.length).fill(remainingWidth / activeIndices.length)];
+
+    const delayTableHeight = 0.5 + (delayTableRows.length * 0.35);
+    slide5.addTable(delayTableRows, {
+      x: 0.5,
+      y: 1.1,
+      w: 12.33,
+      colW: colWidths,
+      margin: [3, 4, 3, 4],
+      border: { pt: 0.5, color: "CBD5E1" }
+    });
+
+    // Chart at the bottom updated with delay categories mapped from matrix
+    const delayChartData = [
+      {
+        name: "Same Day",
+        labels: branchNames,
+        values: sortedLeaderboard.map(b => {
+          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
+          return arr[0];
+        })
+      },
+      {
+        name: "Next Day",
+        labels: branchNames,
+        values: sortedLeaderboard.map(b => {
+          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
+          return arr[1];
+        })
+      },
+      {
+        name: "2nd Day",
+        labels: branchNames,
+        values: sortedLeaderboard.map(b => {
+          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
+          return arr[2];
+        })
+      },
+      {
+        name: "3rd Day",
+        labels: branchNames,
+        values: sortedLeaderboard.map(b => {
+          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
+          return arr[3];
+        })
+      },
+      {
+        name: "4th Day+",
+        labels: branchNames,
+        values: sortedLeaderboard.map(b => {
+          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
+          return arr.slice(4).reduce((sum, val) => sum + val, 0);
+        })
+      }
+    ];
+
+    if (branchNames.length > 0) {
+      // Set showValue: false to prevent overlapping labels completely. 
+      // The exact figures are shown in the table right above this chart.
+      slide5.addChart(pptx.ChartType.bar, delayChartData, {
+        x: 0.5,
+        y: 1.35 + delayTableHeight,
+        w: 12.33,
+        h: Math.max(2.0, 7.2 - 1.6 - delayTableHeight),
+        barDir: "col",
+        showLegend: true,
+        legendPos: "r",
+        legendFontSize: 9,
+        chartColors: ["0284C7", "F59E0B", "10B981", "EF4444", "6B7280"], // sky, amber, emerald, red, grey
+        showValue: false, 
+        title: "Branch-wise Delay Days Comparison",
+        titleFontSize: 11,
+        titleColor: purple,
+        titleBold: true
+      });
+    }
+
+
+    // ==========================================
+    // SLIDE 6: DELIVERY DELAY & PERFORMANCE SUMMARY
+    // ==========================================
+    const slide6 = pptx.addSlide();
+    addSlideLayout(slide6, "DELIVERY DELAY & PERFORMANCE SUMMARY");
+
+    const summary = filteredDashboard.summary || {};
+    const deliveredCount = summary.delivered || 0;
+    const despatchedCount = summary.despatchedCount || 0;
+    const openCount = summary.openCount || 0;
+    const cancelledCount = summary.cancelledCount || 0;
+    const delayCounts = summary.delayCounts || {};
+
+    const totalActive = deliveredCount + despatchedCount + openCount;
+    const delPct = totalActive > 0 ? ((deliveredCount / totalActive) * 100).toFixed(1) : 0;
+    const transitPct = totalActive > 0 ? ((despatchedCount / totalActive) * 100).toFixed(1) : 0;
+    const openPct = totalActive > 0 ? ((openCount / totalActive) * 100).toFixed(1) : 0;
+
+    const statsBoxY = 1.3;
+    const addMetricText = (label, val, yOffset, colorCode = "1E293B") => {
+      slide6.addText(label, { x: 0.8, y: yOffset, w: 2.8, h: 0.35, fontSize: 11, color: "475569", bold: true });
+      slide6.addText(val, { x: 3.3, y: yOffset, w: 1.6, h: 0.35, fontSize: 12, color: colorCode, bold: true, align: "right" });
+    };
+
+    slide6.addShape(pptx.ShapeType.roundRect, {
+      x: 0.5,
+      y: statsBoxY,
+      w: 4.8,
+      h: 5.2,
+      fill: { color: "F8FAFC" },
+      line: { color: "E2E8F0", width: 1 }
+    });
+
+    slide6.addText("Overall Delivery Stats", {
+      x: 0.8,
+      y: statsBoxY + 0.2,
+      w: 4.2,
+      h: 0.4,
+      fontSize: 14,
+      bold: true,
+      color: purple
+    });
+
+    addMetricText("Total Active LRs:", String(totalActive), statsBoxY + 0.8, purple);
+    addMetricText("Delivered LRs:", `${deliveredCount} (${delPct}%)`, statsBoxY + 1.35, "15803D");
+    addMetricText("On Transit (Transit):", `${despatchedCount} (${transitPct}%)`, statsBoxY + 1.9, "0284C7");
+    addMetricText("Not Despatched (Open):", `${openCount} (${openPct}%)`, statsBoxY + 2.45, "B91C1C");
+    addMetricText("Cancelled LRs:", String(cancelledCount), statsBoxY + 3.0, "64748B");
+
+    const sndTotal = (delayCounts[0] || 0) + (delayCounts[1] || 0);
+    const sndRateOverall = deliveredCount > 0 ? ((sndTotal / deliveredCount) * 100).toFixed(1) : 0;
+    slide6.addShape(pptx.ShapeType.rect, { x: 0.8, y: statsBoxY + 3.65, w: 4.2, h: 0.02, fill: { color: "CBD5E1" } });
+    addMetricText("Same & Next Day Checkpoint:", `${sndTotal} (${sndRateOverall}%)`, statsBoxY + 3.9, "0F766E");
+
+    const summaryChartData = [
+      {
+        name: "LR Count",
+        labels: ["Same Day (0d)", "Next Day (1d)", "2 Days", "3 Days", "4 Days", "5 Days", "6 Days", "7 Days", ">7 Days"],
+        values: [
+          delayCounts[0] || 0,
+          delayCounts[1] || 0,
+          delayCounts[2] || 0,
+          delayCounts[3] || 0,
+          delayCounts[4] || 0,
+          delayCounts[5] || 0,
+          delayCounts[6] || 0,
+          delayCounts[7] || 0,
+          delayCounts["more"] || 0
+        ]
+      }
+    ];
+
+    slide6.addChart(pptx.ChartType.bar, summaryChartData, {
+      x: 5.6,
+      y: statsBoxY,
+      w: 7.2,
+      h: 5.2,
+      barDir: "col",
+      chartColors: [purple],
+      showLegend: false,
+      showValue: true,
+      valueFontSize: 10,
+      valueColor: "1E293B",
+      title: "Delivered LRs Delay Distribution",
+      titleFontSize: 12,
+      titleColor: purple,
+      titleBold: true
+    });
+
+
+    // ==========================================
+    // SLIDE 7: DESTINATION WISE DELAY & FREIGHT REPORT (PAGINATED, 2-COLUMNS, COMPACT, FILTERED >= 2 DAYS, BOLD, 26 ROWS)
     // ==========================================
     const destinations = {};
     allItems.forEach(item => {
@@ -877,10 +878,10 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
 
 
     // ==========================================
-    // SLIDE 7: DRIVER WISE PERFORMANCE REPORT (BOLD & READABLE & FIXED PENDING "%")
+    // SLIDE 8: DRIVER WISE PERFORMANCE REPORT (BOLD & READABLE & FIXED PENDING "%")
     // ==========================================
-    const slide7 = pptx.addSlide();
-    addSlideLayout(slide7, "DRIVER PERFORMANCE REPORT");
+    const slide8 = pptx.addSlide();
+    addSlideLayout(slide8, "DRIVER PERFORMANCE REPORT");
 
     const driverTableHeaderStyle = {
       ...tableHeaderStyle,
@@ -941,7 +942,7 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       ]);
     });
 
-    slide7.addTable(driverTableRows, {
+    slide8.addTable(driverTableRows, {
       x: 0.5,
       y: 1.1,
       w: 12.33,
