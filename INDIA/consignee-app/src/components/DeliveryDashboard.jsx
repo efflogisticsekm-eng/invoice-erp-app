@@ -1450,27 +1450,28 @@ export default function DeliveryDashboard() {
       const hasPod = lrNo && podMap[lrNo];
       const podDate = hasPod ? (podMap[lrNo].podDate || '') : '';
 
-      const item = {
-        lrNo: lrNo,
-        date: row['DATE'] !== undefined && row['DATE'] !== null ? String(row['DATE']).trim() : '',
-        deliveryTime: row['DELIVERY TIME'] !== undefined && row['DELIVERY TIME'] !== null ? String(row['DELIVERY TIME']).trim() : '',
-        deliveryTimeRaw: row['DELIVERY TIME_RAW'] || null,
-        despatchNo: row['DESPATCH NO'] !== undefined && row['DESPATCH NO'] !== null ? String(row['DESPATCH NO']).trim() : '',
-        despatchDate: row['DESPATCH DATE'] !== undefined && row['DESPATCH DATE'] !== null ? String(row['DESPATCH DATE']).trim() : '',
-        consignor: consignor,
-        consignee: row['CONSIGNEE'] !== undefined && row['CONSIGNEE'] !== null ? String(row['CONSIGNEE']).trim() : '',
-        area: row['DESTINATION'] !== undefined && row['DESTINATION'] !== null ? String(row['DESTINATION']).trim() : '',
-        status: mappedStatus,
-        delay: null,
-        supervisor: supervisor || (branch === 'branch missing' ? 'branch missing' : 'without despatched delivery'),
-        branch: branch,
-        boxQty: boxQty,
-        deliveryDriver: deliveryDriver,
-        freight: Number(row['FREIGHT'] || 0),
-        amount: Number(row['AMOUNT'] || 0),
-        podReceived: !!hasPod,
-        podDate: podDate
-      };
+       const hasPodMap = podMap && Object.keys(podMap).length > 0;
+       const item = {
+         lrNo: lrNo,
+         date: row['DATE'] !== undefined && row['DATE'] !== null ? String(row['DATE']).trim() : '',
+         deliveryTime: row['DELIVERY TIME'] !== undefined && row['DELIVERY TIME'] !== null ? String(row['DELIVERY TIME']).trim() : '',
+         deliveryTimeRaw: row['DELIVERY TIME_RAW'] || null,
+         despatchNo: row['DESPATCH NO'] !== undefined && row['DESPATCH NO'] !== null ? String(row['DESPATCH NO']).trim() : '',
+         despatchDate: row['DESPATCH DATE'] !== undefined && row['DESPATCH DATE'] !== null ? String(row['DESPATCH DATE']).trim() : '',
+         consignor: consignor,
+         consignee: row['CONSIGNEE'] !== undefined && row['CONSIGNEE'] !== null ? String(row['CONSIGNEE']).trim() : '',
+         area: row['DESTINATION'] !== undefined && row['DESTINATION'] !== null ? String(row['DESTINATION']).trim() : '',
+         status: mappedStatus,
+         delay: null,
+         supervisor: supervisor || (branch === 'branch missing' ? 'branch missing' : 'without despatched delivery'),
+         branch: branch,
+         boxQty: boxQty,
+         deliveryDriver: deliveryDriver,
+         freight: Number(row['FREIGHT'] || 0),
+         amount: Number(row['AMOUNT'] || 0),
+         podReceived: hasPodMap ? !hasPod : true,
+         podDate: podDate
+       };
 
       if (mappedStatus === 'Cancelled LR' || String(rawStatus).toLowerCase().includes('cancelled')) {
         item.status = 'Cancelled LR';
