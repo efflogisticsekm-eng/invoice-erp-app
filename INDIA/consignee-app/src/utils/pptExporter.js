@@ -695,66 +695,37 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       border: { pt: 0.5, color: "CBD5E1" }
     });
 
-    const delayChartData = [
+    const doughnutChartData = [
       {
-        name: "Same Day",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => {
-          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
-          return arr[0];
-        })
-      },
-      {
-        name: "Next Day",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => {
-          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
-          return arr[1];
-        })
-      },
-      {
-        name: "2nd Day",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => {
-          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
-          return arr[2];
-        })
-      },
-      {
-        name: "3rd Day",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => {
-          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
-          return arr[3];
-        })
-      },
-      {
-        name: "4th Day+",
-        labels: branchNames,
-        values: sortedLeaderboard.map(b => {
-          const arr = branchDelayMatrix[b.name] || Array(17).fill(0);
-          return arr.slice(4).reduce((sum, val) => sum + val, 0);
-        })
+        name: "Overall Delay Distribution",
+        labels: ["Same Day", "Next Day", "2nd Day", "3rd Day", "4th Day+"],
+        values: [
+          totalDelayMatrix[0],
+          totalDelayMatrix[1],
+          totalDelayMatrix[2],
+          totalDelayMatrix[3],
+          totalDelayMatrix.slice(4).reduce((sum, val) => sum + val, 0)
+        ]
       }
     ];
 
     if (branchNames.length > 0) {
-      slide3.addChart(pptx.ChartType.bar, delayChartData, {
-        x: 0.5,
+      slide3.addChart(pptx.ChartType.doughnut, doughnutChartData, {
+        x: 3.5, // Centered horizontally
         y: 1.35 + delayTableHeight,
-        w: 12.33,
+        w: 6.33, // Sized perfectly to fit the bottom area
         h: Math.max(2.0, 7.2 - 1.6 - delayTableHeight),
-        barDir: "col", // Vertical columns
-        barGrouping: "stacked", // Stacked columns to prevent horizontal overlap!
+        holeSize: 60,
         showLegend: true,
         legendPos: "r",
         legendFontSize: 9,
-        chartColors: ["0284C7", "F59E0B", "10B981", "EF4444", "6B7280"],
-        showValue: true,
-        valueFontSize: 8,
-        valueColor: "FFFFFF", // White for readability inside colored stack segments
-        dataLabelFormatCode: "#,##0",
-        title: "Branch-wise Delay Days Comparison (Stacked)",
+        legendColor: "1E293B",
+        chartColors: ["0284C7", "F59E0B", "10B981", "EF4444", "6B7280"], // sky, amber, emerald, red, grey
+        showPercent: true, // Display the calculated percentage on the chart segments!
+        showValue: false,  // Hide raw values to prevent clutter
+        showLabel: false,  // Hide category names inside the segments since they are in the legend on the right!
+        dataLabelPosition: "bestFit",
+        title: "Overall Delivery Delay Distribution (Total LRs)",
         titleFontSize: 11,
         titleColor: purple,
         titleBold: true
