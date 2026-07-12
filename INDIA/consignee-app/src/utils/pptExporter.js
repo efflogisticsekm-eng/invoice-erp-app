@@ -165,9 +165,175 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       branchMetrics[b].amount += Number(item.amount || 0);
     });
 
-     const activeBranchLeaderboard = branchLeaderboard || [];
-     const sortedLeaderboard = [...activeBranchLeaderboard].sort((a, b) => (b.score || 0) - (a.score || 0));
-     const branchNames = sortedLeaderboard.map(b => b.name || "N/A");
+    const activeBranchLeaderboard = branchLeaderboard || [];
+    const sortedLeaderboard = [...activeBranchLeaderboard].sort((a, b) => (b.score || 0) - (a.score || 0));
+    const branchNames = sortedLeaderboard.map(b => b.name || "N/A");
+
+    // ==========================================
+    // PRE-CALCULATIONS FOR MULTI-COLUMN TABLES (TO PREVENT UNDEFINED ERRORS)
+    // ==========================================
+
+    // 1. Customer-Wise Performance data
+    const consignorsMerged = {};
+    allItems.forEach(item => {
+      const c = item.consignor || "N/A";
+      if (!consignorsMerged[c]) {
+        consignorsMerged[c] = { name: c, totalLrs: 0, delivered: 0, totalDelay: 0, delaysCount: 0, sndCount: 0, freight: 0 };
+      }
+      consignorsMerged[c].totalLrs++;
+      consignorsMerged[c].freight += Number(item.freight || 0);
+      if (item.status === 'Delivery Process completed.') {
+        consignorsMerged[c].delivered++;
+        if (item.delay !== null) {
+          consignorsMerged[c].totalDelay += item.delay;
+          consignorsMerged[c].delaysCount++;
+          if (item.delay <= 1) {
+            consignorsMerged[c].sndCount++;
+          }
+        }
+      }
+    });
+
+    const sortedConsignorsMerged = Object.values(consignorsMerged)
+      .map(c => ({
+        name: c.name,
+        totalLrs: c.totalLrs,
+        delivered: c.delivered,
+        sndRate: c.delivered > 0 ? (c.sndCount / c.delivered) * 100 : 0,
+        avgDelay: c.delaysCount > 0 ? c.totalDelay / c.delaysCount : 0,
+        freight: c.freight
+      }))
+      .filter(item => item.name.toUpperCase() !== 'TOTAL' && item.name.toUpperCase() !== 'GRAND TOTAL')
+      .sort((a, b) => b.freight - a.freight);
+
+    const customerMergedHeaders = [
+      { text: "Consignor Name", options: multiColHeaderStyle },
+      { text: "Total LRs", options: multiColHeaderStyle },
+      { text: "Delivered LRs", options: multiColHeaderStyle },
+      { text: "Same & Next Day (%)", options: multiColHeaderStyle },
+      { text: "Avg Delay (Days)", options: multiColHeaderStyle },
+      { text: "Total Freight Amount (₹)", options: multiColHeaderStyle }
+    ];
+
+    const customerMergedDataRows = [];
+    sortedConsignorsMerged.forEach((item, idx) => {
+      const rowBg = idx % 2 === 1 ? lightGrey : "FFFFFF";
+      customerMergedDataRows.push([
+        { text: item.name || "N/A", options: { ...multiColRowStyle, align: "left", fill: { color: rowBg } } },
+        { text: String(item.totalLrs || 0), options: { ...multiColRowStyle, fill: { color: rowBg } } },
+        { text: String(item.delivered || 0), options: { ...multiColRowStyle, fill: { color: rowBg } } },
+        { text: `${(item.sndRate || 0).toFixed(0)}%`, options: { ...multiColRowStyle, fill: { color: rowBg } } },
+        { 
+          text: `${(item.avgDelay || 0).toFixed(1)} Days`, 
+          options: { 
+            ...multiColRowStyle, 
+            fill: { color: rowBg }, 
+            color: (item.avgDelay || 0) >= 2.0 ? "B91C1C" : "1E293B" 
+          } 
+        },
+        { text: `₹${(item.freight || 0).toLocaleString("en-IN")}`, options: { ...multiColRowStyle, fill: { color: rowBg }, color: "15803D" } }
+      ]);
+    });
+
+    let customerTotalLrs = 0;
+    let customerDelivered = 0;
+    let customerSndCount = 0;
+    let customerDelaysCount = 0;
+    let customerTotalDelay = 0;
+    let customerTotalFreight = 0;
+
+    Object.values(consignorsMerged).forEach(item => {
+      if (item.name.toUpperCase() !== 'TOTAL' && item.name.toUpperCase() !== 'GRAND TOTAL') {
+        customerTotalLrs += item.totalLrs;
+        customerDelivered += item.delivered;
+        customerSndCount += item.sndCount;
+        customerDelaysCount += item.delaysCount;
+        customerTotalDelay += item.totalDelay;
+        customerTotalFreight += item.freight;
+      }
+    });
+
+    const customerAvgSnd = customerDelivered > 0 ? (customerSndCount / customerDelivered) * 100 : 0;
+    const customerAvgDelay = customerDelaysCount > 0 ? customerTotalDelay / customerDelaysCount : 0;
+
+    const customerTotalRow = [
+      { text: "TOTAL / AVERAGE", options: { ...multiColRowStyle, align: "left", fill: { color: "CBD5E1" } } },
+      { text: String(customerTotalLrs), options: { ...multiColRowStyle, fill: { color: "CBD5E1" } } },
+      { text: String(customerDelivered), options: { ...multiColRowStyle, fill: { color: "CBD5E1" } } },
+      { text: `${customerAvgSnd.toFixed(0)}%`, options: { ...multiColRowStyle, fill: { color: "CBD5E1" } } },
+      { text: `${customerAvgDelay.toFixed(1)} Days`, options: { ...multiColRowStyle, fill: { color: "CBD5E1" } } },
+      { text: `₹${customerTotalFreight.toLocaleString("en-IN")}`, options: { ...multiColRowStyle, fill: { color: "CBD5E1" }, color: "15803D" } }
+    ];
+    customerMergedDataRows.push(customerTotalRow);
+
+
+    // 2. Destination-Wise Performance data
+    const destinations = {};
+    allItems.forEach(item => {
+      const d = item.area || "N/A";
+      if (!destinations[d]) {
+        destinations[d] = { name: d, totalLrs: 0, deliveredLrs: 0, totalDelay: 0, freight: 0 };
+      }
+      destinations[d].totalLrs++;
+      destinations[d].freight += Number(item.freight || 0);
+      if (item.status === 'Delivery Process completed.') {
+        destinations[d].deliveredLrs++;
+        if (item.delay !== null) {
+          destinations[d].totalDelay += item.delay;
+        }
+      }
+    });
+
+    const sortedDestinations = Object.values(destinations)
+      .map(d => ({
+        name: d.name,
+        totalLrs: d.totalLrs,
+        avgDelay: d.deliveredLrs > 0 ? d.totalDelay / d.deliveredLrs : 0,
+        freight: d.freight
+      }))
+      .filter(item => item.avgDelay >= 2.0 && item.name.toUpperCase() !== 'TOTAL' && item.name.toUpperCase() !== 'GRAND TOTAL')
+      .sort((a, b) => b.avgDelay - a.avgDelay);
+
+    const destinationHeaders = [
+      { text: "Destination Area", options: multiColHeaderStyle },
+      { text: "Total LRs", options: multiColHeaderStyle },
+      { text: "Avg Delay (Days)", options: multiColHeaderStyle },
+      { text: "Total Freight Amount (₹)", options: multiColHeaderStyle }
+    ];
+
+    const destinationDataRows = [];
+    sortedDestinations.forEach((item, idx) => {
+      const rowBg = idx % 2 === 1 ? lightGrey : "FFFFFF";
+      destinationDataRows.push([
+        { text: item.name || "N/A", options: { ...multiColRowStyle, align: "left", fill: { color: rowBg } } },
+        { text: String(item.totalLrs || 0), options: { ...multiColRowStyle, fill: { color: rowBg } } },
+        { text: `${(item.avgDelay || 0).toFixed(1)} Days`, options: { ...multiColRowStyle, fill: { color: rowBg } } },
+        { text: `₹${(item.freight || 0).toLocaleString("en-IN")}`, options: { ...multiColRowStyle, fill: { color: rowBg }, color: "0284C7" } }
+      ]);
+    });
+
+    let destTotalLrs = 0;
+    let destDeliveredLrs = 0;
+    let destTotalDelay = 0;
+    let destTotalFreight = 0;
+
+    sortedDestinations.forEach(item => {
+      destTotalLrs += item.totalLrs;
+      destTotalFreight += item.freight;
+      const d = destinations[item.name] || {};
+      destDeliveredLrs += d.deliveredLrs || 0;
+      destTotalDelay += d.totalDelay || 0;
+    });
+
+    const destAvgDelay = destDeliveredLrs > 0 ? destTotalDelay / destDeliveredLrs : 0;
+
+    const destTotalRow = [
+      { text: "TOTAL / AVERAGE", options: { ...multiColRowStyle, align: "left", fill: { color: "CBD5E1" } } },
+      { text: String(destTotalLrs), options: { ...multiColRowStyle, fill: { color: "CBD5E1" } } },
+      { text: `${destAvgDelay.toFixed(1)} Days`, options: { ...multiColRowStyle, fill: { color: "CBD5E1" } } },
+      { text: `₹${destTotalFreight.toLocaleString("en-IN")}`, options: { ...multiColRowStyle, fill: { color: "CBD5E1" }, color: "0284C7" } }
+    ];
+    destinationDataRows.push(destTotalRow);
 
 
     // ==========================================
@@ -428,7 +594,7 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       if (item.status === 'Delivery Process completed.') {
         const b = item.branch || "without despatched delivery";
         if (!branchDelayMatrix[b]) {
-          branchDelayMatrix[b] = Array(17).fill(0); // 0 = Same Day, 1 = 1d, ..., 15 = 15d, 16 = 16d+
+          branchDelayMatrix[b] = Array(17).fill(0);
         }
         if (item.delay !== null && !isNaN(item.delay)) {
           const d = Math.max(0, Math.floor(item.delay));
@@ -449,7 +615,6 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       }
     });
 
-    // Dynamically identify columns that have > 0 total values (excluding "0" sum columns)
     const activeIndices = [];
     for (let i = 0; i <= 16; i++) {
       if (totalDelayMatrix[i] > 0) {
@@ -500,7 +665,6 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       delayTableRows.push(rowCells);
     });
 
-    // Add TOTAL row at the bottom of the table
     const slide3TotalRowStyle = {
       fill: { color: "CBD5E1" },
       fontSize: 8.0,
@@ -516,7 +680,6 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     });
     delayTableRows.push(totalCells);
 
-    // Calculate column widths dynamically
     const totalWidthAvailable = 12.33;
     const branchColWidth = 2.5;
     const remainingWidth = totalWidthAvailable - branchColWidth;
@@ -532,7 +695,6 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       border: { pt: 0.5, color: "CBD5E1" }
     });
 
-    // Chart at the bottom updated with delay categories mapped from matrix
     const delayChartData = [
       {
         name: "Same Day",
@@ -577,8 +739,6 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     ];
 
     if (branchNames.length > 0) {
-      // Changed to HORIZONTAL grouped bar chart (barDir: "bar") as requested!
-      // This displays the figures next to the horizontal bars (vertically aligned) and prevents any overlaps!
       slide3.addChart(pptx.ChartType.bar, delayChartData, {
         x: 0.5,
         y: 1.35 + delayTableHeight,
@@ -588,8 +748,8 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
         showLegend: true,
         legendPos: "r",
         legendFontSize: 9,
-        chartColors: ["0284C7", "F59E0B", "10B981", "EF4444", "6B7280"], // sky, amber, emerald, red, grey
-        showValue: true, // Show value labels horizontally next to the bars
+        chartColors: ["0284C7", "F59E0B", "10B981", "EF4444", "6B7280"],
+        showValue: true,
         valueFontSize: 8,
         valueColor: "1E293B",
         valueFormat: "#,##0",
@@ -607,7 +767,6 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     const slide4 = pptx.addSlide();
     addSlideLayout(slide4, "BRANCH PERFORMANCE CHARTS (Part 1)");
     
-    // 1. Same & Next Day (SND%) Chart Data (Passed as decimals, formatted with valueFormat: "0%" to display % symbol)
     const sndChartData = [
       {
         name: "Same & Next Day Rate (%)",
@@ -616,7 +775,6 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       }
     ];
 
-    // 2. Boxes chart
     const boxesChartData = [
       {
         name: "Boxes Delivered",
@@ -626,22 +784,18 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     ];
 
     if (branchNames.length > 0) {
-      // Top Chart Header
       slide4.addText("Branch-wise Same & Next Day Delivery Rate (%)", {
         x: 0.5, y: 0.95, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
       });
-      // Top Chart: SND% Column Chart (Widescreen 12.33 width with % format code)
       slide4.addChart(pptx.ChartType.bar, sndChartData, {
         x: 0.5, y: 1.2, w: 12.33, h: 2.5, barDir: "col",
         showLegend: false, chartColors: [purple],
         showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "0%",
       });
 
-      // Bottom Chart Header
       slide4.addText("Branch-wise Boxes Delivered", {
         x: 0.5, y: 3.85, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
       });
-      // Bottom Chart: Boxes Column Chart
       slide4.addChart(pptx.ChartType.bar, boxesChartData, {
         x: 0.5, y: 4.1, w: 12.33, h: 2.5, barDir: "col",
         showLegend: false, chartColors: [cyan],
@@ -656,7 +810,6 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     const slide5 = pptx.addSlide();
     addSlideLayout(slide5, "BRANCH PERFORMANCE CHARTS (Part 2)");
 
-    // 3. Freight chart (Column chart with Rupee symbol and commas)
     const freightChartData = [
       {
         name: "Freight (₹)",
@@ -668,7 +821,6 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       }
     ];
 
-    // 4. Avg Delay chart (Passed as exact decimals and formatted with "0.0" format code to show raw decimal value labels correctly)
     const avgDelayChartData = [
       {
         name: "Avg Delay (Days)",
@@ -678,22 +830,18 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     ];
 
     if (branchNames.length > 0) {
-      // Top Chart Header
       slide5.addText("Branch-wise Freight Collected (₹)", {
         x: 0.5, y: 0.95, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
       });
-      // Top Chart: Freight Column Chart
       slide5.addChart(pptx.ChartType.bar, freightChartData, {
         x: 0.5, y: 1.2, w: 12.33, h: 2.5, barDir: "col",
         showLegend: false, chartColors: [purple],
         showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "₹#,##0",
       });
 
-      // Bottom Chart Header
       slide5.addText("Branch-wise Average Delay (Days)", {
         x: 0.5, y: 3.85, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
       });
-      // Bottom Chart: Avg Delay Column Chart (valueFormat: "0.0" added back to display decimals correctly)
       slide5.addChart(pptx.ChartType.bar, avgDelayChartData, {
         x: 0.5, y: 4.1, w: 12.33, h: 2.5, barDir: "col",
         showLegend: false, chartColors: [cyan],
@@ -737,7 +885,6 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       const sndRate = item.sndRate || 0;
       const pendingCount = item.pendingCount || 0;
 
-      // Check pending count to hide % in pending case as requested
       const driverPodText = pendingCount > 0
         ? `${item.podCount || 0} (${pendingCount} Pending)`
         : `${item.podCount || 0} (100%)`;
