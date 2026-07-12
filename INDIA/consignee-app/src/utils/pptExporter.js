@@ -695,10 +695,22 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       border: { pt: 0.5, color: "CBD5E1" }
     });
 
+    const totalDeliveredDelays = totalDelayMatrix.reduce((sum, val) => sum + val, 0);
+    const getLegendLabel = (name, count) => {
+      const pct = totalDeliveredDelays > 0 ? ((count / totalDeliveredDelays) * 100).toFixed(1) : "0.0";
+      return `${name}: ${count.toLocaleString()} (${pct}%)`;
+    };
+
     const doughnutChartData = [
       {
         name: "Overall Delay Distribution",
-        labels: ["Same Day", "Next Day", "2nd Day", "3rd Day", "4th Day+"],
+        labels: [
+          getLegendLabel("Same Day", totalDelayMatrix[0]),
+          getLegendLabel("Next Day", totalDelayMatrix[1]),
+          getLegendLabel("2nd Day", totalDelayMatrix[2]),
+          getLegendLabel("3rd Day", totalDelayMatrix[3]),
+          getLegendLabel("4th Day+", totalDelayMatrix.slice(4).reduce((sum, val) => sum + val, 0))
+        ],
         values: [
           totalDelayMatrix[0],
           totalDelayMatrix[1],
@@ -711,20 +723,19 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
 
     if (branchNames.length > 0) {
       slide3.addChart(pptx.ChartType.doughnut, doughnutChartData, {
-        x: 3.5, // Centered horizontally
+        x: 3.2, // Slightly wider to fit longer legend labels
         y: 1.35 + delayTableHeight,
-        w: 6.33, // Sized perfectly to fit the bottom area
+        w: 6.93, 
         h: Math.max(2.0, 7.2 - 1.6 - delayTableHeight),
         holeSize: 60,
         showLegend: true,
         legendPos: "r",
-        legendFontSize: 9,
+        legendFontSize: 9.5,
         legendColor: "1E293B",
         chartColors: ["0284C7", "F59E0B", "10B981", "EF4444", "6B7280"], // sky, amber, emerald, red, grey
-        showPercent: true, // Display the calculated percentage on the chart segments!
-        showValue: false,  // Hide raw values to prevent clutter
-        showLabel: false,  // Hide category names inside the segments since they are in the legend on the right!
-        dataLabelPosition: "bestFit",
+        showPercent: false, // Turn off percent labels on slices to prevent overlaps!
+        showValue: false,   // Turn off raw values on slices
+        showLabel: false,   // Turn off slice text labels
         title: "Overall Delivery Delay Distribution (Total LRs)",
         titleFontSize: 11,
         titleColor: purple,
