@@ -744,16 +744,17 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
         y: 1.35 + delayTableHeight,
         w: 12.33,
         h: Math.max(2.0, 7.2 - 1.6 - delayTableHeight),
-        barDir: "bar", // Horizontal bars!
+        barDir: "col", // Vertical columns
+        barGrouping: "stacked", // Stacked columns to prevent horizontal overlap!
         showLegend: true,
         legendPos: "r",
         legendFontSize: 9,
         chartColors: ["0284C7", "F59E0B", "10B981", "EF4444", "6B7280"],
         showValue: true,
         valueFontSize: 8,
-        valueColor: "1E293B",
-        valueFormat: "#,##0",
-        title: "Branch-wise Delay Days Comparison",
+        valueColor: "FFFFFF", // White for readability inside colored stack segments
+        dataLabelFormatCode: "#,##0",
+        title: "Branch-wise Delay Days Comparison (Stacked)",
         titleFontSize: 11,
         titleColor: purple,
         titleBold: true
@@ -790,7 +791,9 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       slide4.addChart(pptx.ChartType.bar, sndChartData, {
         x: 0.5, y: 1.2, w: 12.33, h: 2.5, barDir: "col",
         showLegend: false, chartColors: [purple],
-        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "0%",
+        showValue: true, valueFontSize: 8.5, valueColor: "1E293B",
+        dataLabelFormatCode: "0.0%",
+        valAxisLabelFormatCode: "0%"
       });
 
       slide4.addText("Branch-wise Boxes Delivered", {
@@ -799,7 +802,9 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       slide4.addChart(pptx.ChartType.bar, boxesChartData, {
         x: 0.5, y: 4.1, w: 12.33, h: 2.5, barDir: "col",
         showLegend: false, chartColors: [cyan],
-        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "#,##0",
+        showValue: true, valueFontSize: 8.5, valueColor: "1E293B",
+        dataLabelFormatCode: "#,##0",
+        valAxisLabelFormatCode: "#,##0"
       });
     }
 
@@ -836,7 +841,9 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       slide5.addChart(pptx.ChartType.bar, freightChartData, {
         x: 0.5, y: 1.2, w: 12.33, h: 2.5, barDir: "col",
         showLegend: false, chartColors: [purple],
-        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "₹#,##0",
+        showValue: true, valueFontSize: 8.5, valueColor: "1E293B",
+        dataLabelFormatCode: "₹#,##0",
+        valAxisLabelFormatCode: "₹#,##0"
       });
 
       slide5.addText("Branch-wise Average Delay (Days)", {
@@ -845,7 +852,9 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       slide5.addChart(pptx.ChartType.bar, avgDelayChartData, {
         x: 0.5, y: 4.1, w: 12.33, h: 2.5, barDir: "col",
         showLegend: false, chartColors: [cyan],
-        showValue: true, valueFontSize: 8.5, valueColor: "1E293B", valueFormat: "0.0",
+        showValue: true, valueFontSize: 8.5, valueColor: "1E293B",
+        dataLabelFormatCode: "0.0",
+        valAxisLabelFormatCode: "0.0"
       });
     }
 
