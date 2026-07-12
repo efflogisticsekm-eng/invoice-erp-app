@@ -165,8 +165,9 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
       branchMetrics[b].amount += Number(item.amount || 0);
     });
 
-    const activeBranchLeaderboard = branchLeaderboard || [];
-    const sortedLeaderboard = [...activeBranchLeaderboard].sort((a, b) => (b.score || 0) - (a.score || 0));
+     const activeBranchLeaderboard = branchLeaderboard || [];
+     const sortedLeaderboard = [...activeBranchLeaderboard].sort((a, b) => (b.score || 0) - (a.score || 0));
+     const branchNames = sortedLeaderboard.map(b => b.name || "N/A");
 
 
     // ==========================================
@@ -605,14 +606,12 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     // ==========================================
     const slide4 = pptx.addSlide();
     addSlideLayout(slide4, "BRANCH PERFORMANCE CHARTS (Part 1)");
-
-    const branchNamesList = sortedLeaderboard.map(b => b.name || "N/A");
     
     // 1. Same & Next Day (SND%) Chart Data (Passed as decimals, formatted with valueFormat: "0%" to display % symbol)
     const sndChartData = [
       {
         name: "Same & Next Day Rate (%)",
-        labels: branchNamesList,
+        labels: branchNames,
         values: sortedLeaderboard.map(b => (b.sndRate || 0) / 100)
       }
     ];
@@ -621,12 +620,12 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     const boxesChartData = [
       {
         name: "Boxes Delivered",
-        labels: branchNamesList,
+        labels: branchNames,
         values: sortedLeaderboard.map(b => b.totalBoxes || 0)
       }
     ];
 
-    if (branchNamesList.length > 0) {
+    if (branchNames.length > 0) {
       // Top Chart Header
       slide4.addText("Branch-wise Same & Next Day Delivery Rate (%)", {
         x: 0.5, y: 0.95, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
@@ -661,7 +660,7 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     const freightChartData = [
       {
         name: "Freight (₹)",
-        labels: branchNamesList,
+        labels: branchNames,
         values: sortedLeaderboard.map(b => {
           const metrics = branchMetrics[b.name] || { freight: 0 };
           return metrics.freight;
@@ -673,12 +672,12 @@ export function exportToPPT(data, filteredDashboard, branchLeaderboard, driverLe
     const avgDelayChartData = [
       {
         name: "Avg Delay (Days)",
-        labels: branchNamesList,
+        labels: branchNames,
         values: sortedLeaderboard.map(b => b.avgDelay === '-' ? 0 : Number(Number(b.avgDelay || 0).toFixed(1)))
       }
     ];
 
-    if (branchNamesList.length > 0) {
+    if (branchNames.length > 0) {
       // Top Chart Header
       slide5.addText("Branch-wise Freight Collected (₹)", {
         x: 0.5, y: 0.95, w: 12.33, h: 0.3, fontSize: 11, bold: true, color: purple, fontFace: "Arial"
