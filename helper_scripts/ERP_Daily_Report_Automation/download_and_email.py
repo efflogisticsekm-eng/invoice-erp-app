@@ -239,8 +239,12 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
         from_date_str = from_override if from_override else now_ist.strftime("%Y-%m-%d")
         to_date_str = to_override if to_override else now_ist.strftime("%Y-%m-%d")
     elif mode in ("daily_evening_report", "afternoon_open_lrs"):
-        yesterday = now_ist - timedelta(days=1)
-        from_date_str = from_override if from_override else yesterday.strftime("%Y-%m-%d")
+        # On Monday evenings, the report needs to span from Saturday to Monday (Sunday is not considered)
+        if mode == "daily_evening_report" and now_ist.weekday() == 0:
+            default_start = now_ist - timedelta(days=2) # Saturday
+        else:
+            default_start = now_ist - timedelta(days=1) # Yesterday
+        from_date_str = from_override if from_override else default_start.strftime("%Y-%m-%d")
         to_date_str = to_override if to_override else now_ist.strftime("%Y-%m-%d")
     else:
         yesterday = now_ist - timedelta(days=1)
@@ -790,12 +794,20 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
                     dt_obj = dt_obj + timedelta(hours=12)
         
         if dt_obj and start_dt <= dt_obj <= end_dt:
+            # Extract supervisor, driver, and despatch_no with N/A fallback
+            sup_val = desp_meta.get(dp_no, {}).get("supervisor") or (clean_val(r[sup_col_desp]) if sup_col_desp else "")
+            drv_val = desp_meta.get(dp_no, {}).get("driver") or (clean_val(r[driver_col_desp]) if driver_col_desp else "")
+            
+            if not sup_val or pd.isna(sup_val): sup_val = "N/A"
+            if not drv_val or pd.isna(drv_val): drv_val = "N/A"
+            dp_no_val = dp_no if dp_no else "N/A"
+            
             # Valid despatch in time window
             filtered_despatches[lr] = {
                 "lr_no": lr,
-                "supervisor": desp_meta.get(dp_no, {}).get("supervisor") or (clean_val(r[sup_col_desp]) if sup_col_desp else ""),
-                "driver": desp_meta.get(dp_no, {}).get("driver") or (clean_val(r[driver_col_desp]) if driver_col_desp else ""),
-                "despatch_no": dp_no,
+                "supervisor": sup_val,
+                "driver": drv_val,
+                "despatch_no": dp_no_val,
                 "dp_date": dt_obj
             }
             
@@ -869,9 +881,12 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
         dp_date_str = snap.get("dp_date").strftime("%Y-%m-%d %H:%M:%S")
         
         norm_sup = normalize_name(supervisor)
-        branch = supervisor_map.get(norm_sup, "N/A") if supervisor else resolve_branch_name(destination, supervisor, supervisor_map)
+        if supervisor and supervisor != "N/A" and supervisor_map.get(norm_sup):
+            branch = supervisor_map.get(norm_sup)
+        else:
+            branch = resolve_branch_name(destination, supervisor, supervisor_map)
         
-        if supervisor and branch == "N/A":
+        if supervisor and supervisor != "N/A" and branch == "N/A":
             unmapped_supervisors.add(supervisor)
             
         lr_date_obj = parse_date(lr_date)
@@ -1063,8 +1078,8 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
         b, dr, dn = b_d_d.split("|")
         
         times = [parse_date(x["delivery_time"]) for x in del_lrs if x["delivery_time"] and parse_date(x["delivery_time"])]
-        f_time = min(times).strftime("%I:%M %p") if times else "-"
-        l_time = max(times).strftime("%I:%M %p") if times else "-"
+        f_time = min(times).strftime("%d/%m %I:%M %p") if times else "-"
+        l_time = max(times).strftime("%d/%m %I:%M %p") if times else "-"
         
         # Extract despatch time from the items
         desp_time = ""
@@ -1184,11 +1199,22 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
         del_time_dt = parse_date(del_time)
         
         branch = snap.get("branch", "N/A")
+        if not branch or pd.isna(branch):
+            branch = "N/A"
+            
         driver = snap.get("driver_name", "")
+        if not driver or pd.isna(driver):
+            driver = "N/A"
+            
         despatch_no = snap.get("despatch_no", "")
+        if not despatch_no or pd.isna(despatch_no):
+            despatch_no = "N/A"
+            
         supervisor = snap.get("supervisor_name", "")
+        if not supervisor or pd.isna(supervisor):
+            supervisor = "N/A"
         
-        if supervisor and branch == "N/A":
+        if supervisor and supervisor != "N/A" and branch == "N/A":
             unmapped_supervisors.add(supervisor)
             
         lr_item = {
@@ -1619,7 +1645,11 @@ def main():
         ist_tz = timezone(timedelta(hours=5, minutes=30))
         now_ist = datetime.now(ist_tz)
         today_str = now_ist.strftime("%Y-%m-%d")
-        yesterday_str = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
+        # On Monday evenings, default starting date is Saturday (2 days ago)
+        if now_ist.weekday() == 0:
+            yesterday_str = (now_ist - timedelta(days=2)).strftime("%Y-%m-%d") # Saturday
+        else:
+            yesterday_str = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
         
         if args.from_date:
             yesterday_str = args.from_date
