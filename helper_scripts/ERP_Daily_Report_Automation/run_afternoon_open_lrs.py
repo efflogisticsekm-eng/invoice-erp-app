@@ -306,7 +306,8 @@ def run_afternoon_open_lrs_flow(lr_file_path):
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        server.send_message(msg)
+        recipient_list = [r.strip() for r in RECEIVER_EMAIL.split(",") if r.strip()]
+        server.send_message(msg, to_addrs=recipient_list)
         server.quit()
         print("🎉 Afternoon Open LRs email sent successfully!")
     except Exception as e:

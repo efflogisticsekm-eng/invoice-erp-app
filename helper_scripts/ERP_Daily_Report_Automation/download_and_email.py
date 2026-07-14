@@ -59,6 +59,11 @@ SUPABASE_KEY = clean_env_var(SUPABASE_KEY)
 SENDER_EMAIL = clean_env_var(SENDER_EMAIL)
 SENDER_PASSWORD = clean_env_var(SENDER_PASSWORD)
 RECEIVER_EMAIL = clean_env_var(RECEIVER_EMAIL)
+# Support comma-separated list of receivers and ensure salim@efflogistics.biz is added
+receivers_list = [r.strip() for r in RECEIVER_EMAIL.split(",") if r.strip()]
+if "salim@efflogistics.biz" not in receivers_list:
+    receivers_list.append("salim@efflogistics.biz")
+RECEIVER_EMAIL = ", ".join(receivers_list)
 WHATSAPP_TOKEN = clean_env_var(WHATSAPP_TOKEN)
 WHATSAPP_PHONE_NUMBER_ID = clean_env_var(WHATSAPP_PHONE_NUMBER_ID)
 RECIPIENT_PHONE_NUMBER = clean_env_var(RECIPIENT_PHONE_NUMBER)
@@ -1610,7 +1615,8 @@ def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        server.send_message(msg)
+        recipient_list = [r.strip() for r in RECEIVER_EMAIL.split(",") if r.strip()]
+        server.send_message(msg, to_addrs=recipient_list)
         server.quit()
         print("🎉 Daily report email sent successfully!")
     except Exception as e:
