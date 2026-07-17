@@ -527,7 +527,17 @@ export default function DeliveryDashboard() {
     if (!despatchRawRows) return [];
     const unique = new Set();
     despatchRawRows.forEach(row => {
-      const branch = row.supervisor ? (supervisorMap[row.supervisor] || 'N/A') : 'N/A';
+      let branch = row.supervisor ? (supervisorMap[row.supervisor] || 'N/A') : 'N/A';
+      if (row.deliveryType && String(row.deliveryType).toUpperCase().trim() === 'OTHER GODOWN') {
+        let cleanDespBranch = String(row.despatchBranch || '').trim();
+        if (cleanDespBranch.toUpperCase().startsWith('EFF ')) {
+          cleanDespBranch = cleanDespBranch.substring(4).trim();
+        }
+        if (cleanDespBranch) {
+          const resolvedB = branch || 'N/A';
+          branch = `LH-${resolvedB} to ${cleanDespBranch}`;
+        }
+      }
       unique.add(branch);
     });
     return Array.from(unique).sort();
@@ -551,7 +561,17 @@ export default function DeliveryDashboard() {
     // 1. Filter raw rows first
     const filteredRows = despatchRawRows.filter(row => {
       // Branch check
-      const branch = row.supervisor ? (supervisorMap[row.supervisor] || 'N/A') : 'N/A';
+      let branch = row.supervisor ? (supervisorMap[row.supervisor] || 'N/A') : 'N/A';
+      if (row.deliveryType && String(row.deliveryType).toUpperCase().trim() === 'OTHER GODOWN') {
+        let cleanDespBranch = String(row.despatchBranch || '').trim();
+        if (cleanDespBranch.toUpperCase().startsWith('EFF ')) {
+          cleanDespBranch = cleanDespBranch.substring(4).trim();
+        }
+        if (cleanDespBranch) {
+          const resolvedB = branch || 'N/A';
+          branch = `LH-${resolvedB} to ${cleanDespBranch}`;
+        }
+      }
       if (selectedBranch !== 'All' && branch !== selectedBranch) {
         return false;
       }
@@ -587,10 +607,21 @@ export default function DeliveryDashboard() {
       if (!dNo) return;
       
       if (!groups[dNo]) {
+        let branch = row.supervisor ? (supervisorMap[row.supervisor] || 'N/A') : 'N/A';
+        if (row.deliveryType && String(row.deliveryType).toUpperCase().trim() === 'OTHER GODOWN') {
+          let cleanDespBranch = String(row.despatchBranch || '').trim();
+          if (cleanDespBranch.toUpperCase().startsWith('EFF ')) {
+            cleanDespBranch = cleanDespBranch.substring(4).trim();
+          }
+          if (cleanDespBranch) {
+            const resolvedB = branch || 'N/A';
+            branch = `LH-${resolvedB} to ${cleanDespBranch}`;
+          }
+        }
         groups[dNo] = {
           despatchNo: dNo,
           despatchDate: row.despatchDate || '',
-          branch: row.supervisor ? (supervisorMap[row.supervisor] || 'N/A') : 'N/A',
+          branch: branch,
           totalLrCount: 0,
           consigneeKeys: new Set(),
           deliveredLrs: [],
@@ -618,8 +649,19 @@ export default function DeliveryDashboard() {
       }
       
       if (g.branch === 'N/A' && row.supervisor) {
-        const mappedBranch = supervisorMap[row.supervisor];
-        if (mappedBranch) g.branch = mappedBranch;
+        let mappedBranch = supervisorMap[row.supervisor];
+        if (mappedBranch) {
+          if (row.deliveryType && String(row.deliveryType).toUpperCase().trim() === 'OTHER GODOWN') {
+            let cleanDespBranch = String(row.despatchBranch || '').trim();
+            if (cleanDespBranch.toUpperCase().startsWith('EFF ')) {
+              cleanDespBranch = cleanDespBranch.substring(4).trim();
+            }
+            if (cleanDespBranch) {
+              mappedBranch = `LH-${mappedBranch} to ${cleanDespBranch}`;
+            }
+          }
+          g.branch = mappedBranch;
+        }
       }
     });
 
@@ -1164,6 +1206,8 @@ export default function DeliveryDashboard() {
               const destinationKey = findKey(['DESTINATION', 'AREA', 'PLACE', 'TO', 'DESTINATIONNAME']);
               const deliveryDriverKey = findKey(['DELIVERYDRIVER', 'DELIVERY_DRIVER', 'DRIVER', 'DRIVERNAME', 'DRIVER_NAME', 'VEHICLEDRIVER', 'DRIVERNAME.', 'DELIVERYDRIVERNAME', 'DELIVERY_DRIVER_NAME']);
               const boxQtyKey = findKey(['BOXQTY', 'BOXQUANTITY', 'BOX_QTY', 'BOX_QUANTITY', 'BOX']);
+              const deliveryTypeKey = findKey(['DELIVERYTYPE', 'DELIVERY_TYPE', 'DELTYPE', 'TYPE']);
+              const branchKey = findKey(['BRANCH', 'BRANCHNAME', 'BRANCH_NAME', 'DESPATCHBRANCH', 'DESPATCH_BRANCH']);
 
               const lrNoVal = lrNoKey ? cleanLrNumber(row[lrNoKey]) : '';
               const despatchNoVal = despatchNoKey && row[despatchNoKey] !== undefined && row[despatchNoKey] !== null ? String(row[despatchNoKey]).trim() : '';
@@ -1205,6 +1249,9 @@ export default function DeliveryDashboard() {
                 boxQtyVal = val !== undefined && val !== null && !isNaN(Number(val)) ? Number(val) : 0;
               }
 
+              const deliveryTypeVal = deliveryTypeKey && row[deliveryTypeKey] !== undefined && row[deliveryTypeKey] !== null ? String(row[deliveryTypeKey]).trim() : '';
+              const branchVal = branchKey && row[branchKey] !== undefined && row[branchKey] !== null ? String(row[branchKey]).trim() : '';
+
               return {
                 lrNo: lrNoVal,
                 despatchNo: despatchNoVal,
@@ -1216,7 +1263,9 @@ export default function DeliveryDashboard() {
                 consignee: consigneeVal,
                 destination: destinationVal,
                 deliveryDriver: deliveryDriverVal,
-                boxQty: boxQtyVal
+                boxQty: boxQtyVal,
+                deliveryType: deliveryTypeVal,
+                despatchBranch: branchVal
               };
             };
             
@@ -1231,7 +1280,9 @@ export default function DeliveryDashboard() {
                 deliveryTimeRaw: row.deliveryTimeRaw,
                 supervisor: row.supervisor,
                 deliveryDriver: row.deliveryDriver,
-                boxQty: row.boxQty
+                boxQty: row.boxQty,
+                deliveryType: row.deliveryType,
+                despatchBranch: row.despatchBranch
               };
               if (row.supervisor) {
                 dMap[row.lrNo] = row.supervisor;
@@ -1436,6 +1487,16 @@ export default function DeliveryDashboard() {
       }
 
       const despatchInfo = lrNo ? despatchDetailsMap[lrNo] : null;
+      if (despatchInfo && despatchInfo.deliveryType && String(despatchInfo.deliveryType).toUpperCase().trim() === 'OTHER GODOWN') {
+        let cleanDespBranch = String(despatchInfo.despatchBranch || '').trim();
+        if (cleanDespBranch.toUpperCase().startsWith('EFF ')) {
+          cleanDespBranch = cleanDespBranch.substring(4).trim();
+        }
+        if (cleanDespBranch) {
+          const resolvedB = branch || 'N/A';
+          branch = `LH-${resolvedB} to ${cleanDespBranch}`;
+        }
+      }
       let boxQty = 0;
       if (despatchInfo) {
         boxQty = despatchInfo.boxQty || 0;
