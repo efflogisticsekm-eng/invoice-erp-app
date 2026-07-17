@@ -88,9 +88,9 @@ jobs:
           python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode daily_evening_report
         fi
 
-    - name: Upload Debug Screenshots
+    - name: Upload Debug Artifacts
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: debug-screenshots
-        path: /home/runner/Downloads/erp_temp_downloads/*.png
+        name: debug-artifacts
+        path: /home/runner/Downloads/erp_temp_downloads/

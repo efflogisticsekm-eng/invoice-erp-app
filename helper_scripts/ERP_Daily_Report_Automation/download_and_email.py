@@ -126,6 +126,12 @@ def normalize_name(val):
     s = re.sub(r'\s*\.\s*', '.', s)
     return " ".join(s.split())
 
+def is_other_godown_delivery(val):
+    if not val or pd.isna(val):
+        return False
+    s = str(val).strip().upper()
+    return "OTHER GODOWN" in s or "OTHER_GODOWN" in s or "GODOWN" in s
+
 def parse_date(val):
     val_str = clean_val(val)
     if not val_str:
@@ -656,8 +662,8 @@ def run_evening_flow(despatch_file, supervisor_map):
     dest_col = next((c for c in df.columns if c in ['DESTINATION', 'PLACE', 'AREA']), None)
     consignee_col = next((c for c in df.columns if c in ['CONSIGNEE', 'CONSIGNEE NAME', 'SHIP TO PARTY', 'CONSIGNEE_NAME']), None)
     
-    del_type_col = next((c for c in df.columns if c in ['DELIVERY TYPE', 'DELIVERY_TYPE', 'DEL_TYPE']), None)
-    desp_branch_col = next((c for c in df.columns if c in ['BRANCH', 'BRANCH NAME', 'BRANCH_NAME', 'DESPATCH_BRANCH', 'DESPATCH BRANCH']), None)
+    del_type_col = next((c for c in df.columns if c in ['DELIVERY TYPE', 'DELIVERY_TYPE', 'DEL_TYPE'] or ('DELIVERY' in c and 'TYPE' in c)), None)
+    desp_branch_col = next((c for c in df.columns if c in ['BRANCH', 'BRANCH NAME', 'BRANCH_NAME', 'DESPATCH_BRANCH', 'DESPATCH BRANCH'] or c == 'BRANCH' or ('BRANCH' in c and 'DESPATCH' in c)), None)
     
     if not lr_col or not desp_date_col:
         print("Error: Required columns (LR NO, DESPATCH DATE) not found in Despatch report.")
@@ -683,7 +689,7 @@ def run_evening_flow(despatch_file, supervisor_map):
         if clean_desp_branch.upper().startswith("EFF "):
             clean_desp_branch = clean_desp_branch[4:].strip()
             
-        if del_type_val.upper().strip() == "OTHER GODOWN" and clean_desp_branch:
+        if is_other_godown_delivery(del_type_val) and clean_desp_branch:
             resolved_b = branch_val if branch_val else "N/A"
             branch_val = f"LH-{resolved_b} to {clean_desp_branch}"
         
@@ -763,8 +769,8 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
     desp_no_col_desp = next((c for c in df_desp.columns if c in ['DESPATCH NO', 'DISPATCH NO', 'DESPATCH_NO']), None)
     date_col_desp = next((c for c in df_desp.columns if c in ['DP DATE', 'DESPATCH DATE', 'DISPATCH DATE']), None)
     time_col_desp = next((c for c in df_desp.columns if c in ['DP TIME', 'DESPATCH TIME', 'DISPATCH TIME']), None)
-    del_type_col_desp = next((c for c in df_desp.columns if c in ['DELIVERY TYPE', 'DELIVERY_TYPE', 'DEL_TYPE']), None)
-    branch_col_desp = next((c for c in df_desp.columns if c in ['BRANCH', 'BRANCH NAME', 'BRANCH_NAME', 'DESPATCH_BRANCH', 'DESPATCH BRANCH']), None)
+    del_type_col_desp = next((c for c in df_desp.columns if c in ['DELIVERY TYPE', 'DELIVERY_TYPE', 'DEL_TYPE'] or ('DELIVERY' in c and 'TYPE' in c)), None)
+    branch_col_desp = next((c for c in df_desp.columns if c in ['BRANCH', 'BRANCH NAME', 'BRANCH_NAME', 'DESPATCH_BRANCH', 'DESPATCH BRANCH'] or c == 'BRANCH' or ('BRANCH' in c and 'DESPATCH' in c)), None)
     
     # Date time boundaries
     start_dt = datetime.strptime(f"{yesterday_str} {start_time}", "%Y-%m-%d %H:%M:%S")
@@ -919,7 +925,7 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
         if clean_desp_branch.upper().startswith("EFF "):
             clean_desp_branch = clean_desp_branch[4:].strip()
             
-        if del_type_val.upper().strip() == "OTHER GODOWN" and clean_desp_branch:
+        if is_other_godown_delivery(del_type_val) and clean_desp_branch:
             resolved_b = branch if branch else "N/A"
             branch = f"LH-{resolved_b} to {clean_desp_branch}"
         
@@ -1167,8 +1173,8 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
         driver_col_desp = next((c for c in df_desp.columns if c in ['DELIVERY DRIVER', 'DRIVER', 'DRIVER_NAME']), None)
         desp_no_col_desp = next((c for c in df_desp.columns if c in ['DESPATCH NO', 'DISPATCH NO', 'DESPATCH_NO']), None)
         dest_col_desp = next((c for c in df_desp.columns if c in ['DESTINATION', 'PLACE', 'AREA']), None)
-        del_type_col_desp = next((c for c in df_desp.columns if c in ['DELIVERY TYPE', 'DELIVERY_TYPE', 'DEL_TYPE']), None)
-        branch_col_desp = next((c for c in df_desp.columns if c in ['BRANCH', 'BRANCH NAME', 'BRANCH_NAME', 'DESPATCH_BRANCH', 'DESPATCH BRANCH']), None)
+        del_type_col_desp = next((c for c in df_desp.columns if c in ['DELIVERY TYPE', 'DELIVERY_TYPE', 'DEL_TYPE'] or ('DELIVERY' in c and 'TYPE' in c)), None)
+        branch_col_desp = next((c for c in df_desp.columns if c in ['BRANCH', 'BRANCH NAME', 'BRANCH_NAME', 'DESPATCH_BRANCH', 'DESPATCH BRANCH'] or c == 'BRANCH' or ('BRANCH' in c and 'DESPATCH' in c)), None)
         
         for _, r in df_desp.iterrows():
             lr = clean_val(r[lr_col_desp])
@@ -1188,7 +1194,7 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
                 if clean_desp_branch.upper().startswith("EFF "):
                     clean_desp_branch = clean_desp_branch[4:].strip()
                 
-                if del_type_val.upper().strip() == "OTHER GODOWN" and clean_desp_branch:
+                if is_other_godown_delivery(del_type_val) and clean_desp_branch:
                     resolved_b = branch_val if branch_val else "N/A"
                     branch_val = f"LH-{resolved_b} to {clean_desp_branch}"
                 
