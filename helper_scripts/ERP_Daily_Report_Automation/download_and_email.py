@@ -405,17 +405,28 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                             const headers = Array.from(table.querySelectorAll("th")).map(th => th.innerText.trim().toLowerCase());
                             const dpIdx = headers.findIndex(h => h.includes("dp no"));
                             const timeIdx = headers.findIndex(h => h.includes("dp time"));
-                            if (dpIdx === -1 || timeIdx === -1) return {error: "Headers not found", headers: headers};
+                            const typeIdx = headers.findIndex(h => h.includes("delivery type") || (h.includes("delivery") && h.includes("type")));
+                            const branchIdx = headers.findIndex(h => h.includes("branch"));
+                            if (dpIdx === -1) return {error: "DP No header not found", headers: headers};
                             
                             const result = {};
                             const rows = Array.from(table.querySelectorAll("tbody tr"));
                             rows.forEach(tr => {
                                 const cells = Array.from(tr.querySelectorAll("td"));
-                                if (cells.length > Math.max(dpIdx, timeIdx)) {
+                                const maxIdx = Math.max(dpIdx, timeIdx, typeIdx, branchIdx);
+                                if (cells.length > maxIdx) {
                                     let dp = cells[dpIdx].innerText.trim();
                                     dp = dp.replace(/\s+/g, ""); // Remove all whitespace/newlines
-                                    const time = cells[timeIdx].innerText.trim();
-                                    if (dp && time) result[dp] = time;
+                                    const time = timeIdx !== -1 ? cells[timeIdx].innerText.trim() : "";
+                                    const delType = typeIdx !== -1 ? cells[typeIdx].innerText.trim() : "";
+                                    const branch = branchIdx !== -1 ? cells[branchIdx].innerText.trim() : "";
+                                    if (dp) {
+                                        result[dp] = {
+                                            "time": time,
+                                            "delivery_type": delType,
+                                            "despatch_branch": branch
+                                        };
+                                    }
                                 }
                             });
                             return result;
@@ -669,6 +680,17 @@ def run_evening_flow(despatch_file, supervisor_map):
         print("Error: Required columns (LR NO, DESPATCH DATE) not found in Despatch report.")
         return
         
+    ui_times = {}
+    import json
+    import tempfile
+    ui_times_file = os.path.join(tempfile.gettempdir(), "ui_despatch_times.json")
+    if os.path.exists(ui_times_file):
+        try:
+            with open(ui_times_file, "r") as f:
+                ui_times = json.load(f)
+        except Exception:
+            pass
+            
     payload = []
     for _, r in df.iterrows():
         lr_val = clean_val(r[lr_col])
@@ -683,8 +705,16 @@ def run_evening_flow(despatch_file, supervisor_map):
         branch_val = supervisor_map.get(norm_sup, "N/A")
         
         # Check for Other Godown Delivery Type
-        del_type_val = clean_val(r[del_type_col]) if del_type_col else ""
-        desp_branch_val = clean_val(r[desp_branch_col]) if desp_branch_col else ""
+        ui_delivery_type = ""
+        ui_despatch_branch = ""
+        if desp_no_val and desp_no_val in ui_times:
+            val = ui_times[desp_no_val]
+            if isinstance(val, dict):
+                ui_delivery_type = val.get("delivery_type", "")
+                ui_despatch_branch = val.get("despatch_branch", "")
+                
+        del_type_val = ui_delivery_type if ui_delivery_type else (clean_val(r[del_type_col]) if del_type_col else "")
+        desp_branch_val = ui_despatch_branch if ui_despatch_branch else (clean_val(r[desp_branch_col]) if desp_branch_col else "")
         clean_desp_branch = desp_branch_val.strip()
         if clean_desp_branch.upper().startswith("EFF "):
             clean_desp_branch = clean_desp_branch[4:].strip()
@@ -812,8 +842,16 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
         d_val = clean_val(r[date_col_desp]) if date_col_desp else ""
         t_val = clean_val(r[time_col_desp]) if time_col_desp else ""
         
+        ui_delivery_type = ""
+        ui_despatch_branch = ""
         if dp_no and dp_no in ui_times:
-            t_val = ui_times[dp_no]
+            val = ui_times[dp_no]
+            if isinstance(val, dict):
+                t_val = val.get("time", "")
+                ui_delivery_type = val.get("delivery_type", "")
+                ui_despatch_branch = val.get("despatch_branch", "")
+            else:
+                t_val = val
         
         # Try to parse DP Date and DP Time
         dt_obj = parse_date(f"{d_val} {t_val}") if t_val else parse_date(d_val)
@@ -839,8 +877,8 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
                 "driver": drv_val,
                 "despatch_no": dp_no_val,
                 "dp_date": dt_obj,
-                "delivery_type": clean_val(r[del_type_col_desp]) if del_type_col_desp else "",
-                "despatch_branch": clean_val(r[branch_col_desp]) if branch_col_desp else ""
+                "delivery_type": ui_delivery_type if ui_delivery_type else (clean_val(r[del_type_col_desp]) if del_type_col_desp else ""),
+                "despatch_branch": ui_despatch_branch if ui_despatch_branch else (clean_val(r[branch_col_desp]) if branch_col_desp else "")
             }
             
     print(f"Filtered {len(filtered_despatches)} LRs dispatched between {start_dt} and {end_dt}")
@@ -1163,6 +1201,17 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
     # Group yesterday's snapshot dispatches by LR NO
     snapshot_lrs = {item["lr_no"]: item for item in snapshot_data if item.get("lr_no")}
     
+    ui_times = {}
+    import json
+    import tempfile
+    ui_times_file = os.path.join(tempfile.gettempdir(), "ui_despatch_times.json")
+    if os.path.exists(ui_times_file):
+        try:
+            with open(ui_times_file, "r") as f:
+                ui_times = json.load(f)
+        except Exception:
+            pass
+            
     # 2. Build 30-day dispatch map from the downloaded despatch file as supervisor fallback
     df_desp = load_df(despatch_file)
     desp_30d_map = {}
@@ -1188,8 +1237,17 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
                     branch_val = resolve_branch_name(dest_val, sup_val, supervisor_map)
                 
                 # Check for Other Godown
-                del_type_val = clean_val(r[del_type_col_desp]) if del_type_col_desp else ""
-                desp_branch_val = clean_val(r[branch_col_desp]) if branch_col_desp else ""
+                dp_no_val = clean_val(r[desp_no_col_desp]) if desp_no_col_desp else ""
+                ui_delivery_type = ""
+                ui_despatch_branch = ""
+                if dp_no_val and dp_no_val in ui_times:
+                    val = ui_times[dp_no_val]
+                    if isinstance(val, dict):
+                        ui_delivery_type = val.get("delivery_type", "")
+                        ui_despatch_branch = val.get("despatch_branch", "")
+                        
+                del_type_val = ui_delivery_type if ui_delivery_type else (clean_val(r[del_type_col_desp]) if del_type_col_desp else "")
+                desp_branch_val = ui_despatch_branch if ui_despatch_branch else (clean_val(r[branch_col_desp]) if branch_col_desp else "")
                 clean_desp_branch = desp_branch_val.strip()
                 if clean_desp_branch.upper().startswith("EFF "):
                     clean_desp_branch = clean_desp_branch[4:].strip()
