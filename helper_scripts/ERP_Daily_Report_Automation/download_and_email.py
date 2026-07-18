@@ -818,10 +818,7 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
         except Exception:
             pass
             
-    print("DEBUG: Loaded ui_times keys:", list(ui_times.keys())[:10])
-    if ui_times:
-        first_key = list(ui_times.keys())[0]
-        print(f"DEBUG: Example ui_times key-val: {first_key} -> {ui_times[first_key]}")
+
             
     # Extract supervisor and driver from despatch to avoid empty values on some LRs
     desp_meta = {}
@@ -971,7 +968,7 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
         if is_other_godown_delivery(del_type_val) and clean_desp_branch:
             resolved_b = branch if branch else "N/A"
             branch = f"LH-{resolved_b} to {clean_desp_branch}"
-            print(f"DEBUG: Matched Other Godown! lr={lr_no}, original_branch={resolved_b}, clean_desp_branch={clean_desp_branch}, final_branch={branch}")
+
         
         if supervisor and supervisor != "N/A" and branch == "N/A":
             unmapped_supervisors.add(supervisor)
