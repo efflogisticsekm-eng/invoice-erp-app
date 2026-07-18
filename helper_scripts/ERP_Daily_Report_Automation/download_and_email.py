@@ -398,39 +398,47 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                         
                     max_pages = 50
                     for i in range(max_pages):
-                        data = page.evaluate('''() => {
-                            const tables = Array.from(document.querySelectorAll("table"));
-                            const table = tables.find(t => t.innerText.toLowerCase().includes("dp no"));
-                            if (!table) return {error: "No table with 'dp no' found"};
-                            const headers = Array.from(table.querySelectorAll("th")).map(th => th.innerText.trim().toLowerCase());
-                            const dpIdx = headers.findIndex(h => h.includes("dp no"));
-                            const timeIdx = headers.findIndex(h => h.includes("dp time"));
-                            const typeIdx = headers.findIndex(h => h.includes("delivery type") || (h.includes("delivery") && h.includes("type")));
-                            const branchIdx = headers.findIndex(h => h.includes("branch"));
-                            if (dpIdx === -1) return {error: "DP No header not found", headers: headers};
-                            
-                            const result = {};
-                            const rows = Array.from(table.querySelectorAll("tbody tr"));
-                            rows.forEach(tr => {
-                                const cells = Array.from(tr.querySelectorAll("td"));
-                                const maxIdx = Math.max(dpIdx, timeIdx, typeIdx, branchIdx);
-                                if (cells.length > maxIdx) {
-                                    let dp = cells[dpIdx].innerText.trim();
-                                    dp = dp.replace(/\s+/g, ""); // Remove all whitespace/newlines
-                                    const time = timeIdx !== -1 ? cells[timeIdx].innerText.trim() : "";
-                                    const delType = typeIdx !== -1 ? cells[typeIdx].innerText.trim() : "";
-                                    const branch = branchIdx !== -1 ? cells[branchIdx].innerText.trim() : "";
-                                    if (dp) {
-                                        result[dp] = {
-                                            "time": time,
-                                            "delivery_type": delType,
-                                            "despatch_branch": branch
-                                        };
+                        data = None
+                        for retry in range(10):
+                            data = page.evaluate('''() => {
+                                const tables = Array.from(document.querySelectorAll("table"));
+                                const table = tables.find(t => t.innerText.toLowerCase().includes("dp no"));
+                                if (!table) return {error: "No table with 'dp no' found"};
+                                const headers = Array.from(table.querySelectorAll("th")).map(th => th.innerText.trim().toLowerCase());
+                                const dpIdx = headers.findIndex(h => h.includes("dp no"));
+                                const timeIdx = headers.findIndex(h => h.includes("dp time"));
+                                const typeIdx = headers.findIndex(h => h.includes("delivery type") || (h.includes("delivery") && h.includes("type")));
+                                const branchIdx = headers.findIndex(h => h.includes("branch"));
+                                if (dpIdx === -1) return {error: "DP No header not found", headers: headers};
+                                
+                                const rows = Array.from(table.querySelectorAll("tbody tr"));
+                                if (rows.length === 0) return {error: "Table is empty or loading"};
+                                
+                                const result = {};
+                                rows.forEach(tr => {
+                                    const cells = Array.from(tr.querySelectorAll("td"));
+                                    const maxIdx = Math.max(dpIdx, timeIdx, typeIdx, branchIdx);
+                                    if (cells.length > maxIdx) {
+                                        let dp = cells[dpIdx].innerText.trim();
+                                        dp = dp.replace(/\s+/g, ""); // Remove all whitespace/newlines
+                                        const time = timeIdx !== -1 ? cells[timeIdx].innerText.trim() : "";
+                                        const delType = typeIdx !== -1 ? cells[typeIdx].innerText.trim() : "";
+                                        const branch = branchIdx !== -1 ? cells[branchIdx].innerText.trim() : "";
+                                        if (dp) {
+                                            result[dp] = {
+                                                "time": time,
+                                                "delivery_type": delType,
+                                                "despatch_branch": branch
+                                            };
+                                        }
                                     }
-                                }
-                            });
-                            return result;
-                        }''')
+                                });
+                                return result;
+                            }''')
+                            if data and "error" not in data:
+                                break
+                            page.wait_for_timeout(1000)
+                            
                         if data and "error" in data:
                             print(f"UI extraction error on page {i}: {data['error']}")
                             if "headers" in data:
