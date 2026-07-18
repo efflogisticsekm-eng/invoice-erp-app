@@ -599,33 +599,33 @@ def get_pillow_font(size, bold=False):
     return ImageFont.load_default()
 
 def generate_pillow_dashboard(overall_stats, date_str):
-    im = Image.new("RGB", (800, 320), "#F8FAFC")
+    im = Image.new("RGB", (800, 180), "#F8FAFC")
     draw = ImageDraw.Draw(im)
     
-    title_font = get_pillow_font(20, bold=True)
-    card_title_font = get_pillow_font(13, bold=True)
-    card_number_font = get_pillow_font(36, bold=True)
-    card_detail_font = get_pillow_font(11, bold=False)
+    title_font = get_pillow_font(16, bold=True)
+    card_title_font = get_pillow_font(10, bold=True)
+    card_number_font = get_pillow_font(24, bold=True)
+    card_detail_font = get_pillow_font(9, bold=False)
     
-    draw.text((30, 20), f"DAILY ERP SUMMARY ({date_str}) 📊", fill="#0F172A", font=title_font)
+    draw.text((30, 15), f"DAILY ERP SUMMARY ({date_str}) 📊", fill="#0F172A", font=title_font)
     
     # Card 1: Delivered
-    draw.rounded_rectangle([30, 70, 260, 280], radius=12, fill="#F0FDF4", outline="#DCFCE7", width=2)
-    draw.text((50, 90), "DELIVERED YESTERDAY", fill="#166534", font=card_title_font)
-    draw.text((50, 120), f"{overall_stats['delivered_count']} LRs", fill="#14532D", font=card_number_font)
-    draw.text((50, 180), f"Max Delay: {overall_stats['delivered_max_age']} Days\n({overall_stats['delivered_max_age_count']} LRs)", fill="#15803D", font=card_detail_font)
+    draw.rounded_rectangle([30, 50, 260, 155], radius=10, fill="#F0FDF4", outline="#DCFCE7", width=2)
+    draw.text((45, 65), "DELIVERED YESTERDAY", fill="#166534", font=card_title_font)
+    draw.text((45, 85), f"{overall_stats['delivered_count']} LRs", fill="#14532D", font=card_number_font)
+    draw.text((45, 125), f"Max Delay: {overall_stats['delivered_max_age']} Days ({overall_stats['delivered_max_age_count']} LRs)", fill="#15803D", font=card_detail_font)
     
     # Card 2: Returned
-    draw.rounded_rectangle([280, 70, 510, 280], radius=12, fill="#FEF2F2", outline="#FEE2E2", width=2)
-    draw.text((300, 90), "RETURNED YESTERDAY", fill="#991B1B", font=card_title_font)
-    draw.text((300, 120), f"{overall_stats['returned_count']} LRs", fill="#7F1D1D", font=card_number_font)
-    draw.text((300, 180), f"Max Aging: {overall_stats['returned_max_age']} Days\n({overall_stats['returned_max_age_count']} LRs)", fill="#B91C1C", font=card_detail_font)
+    draw.rounded_rectangle([280, 50, 510, 155], radius=10, fill="#FEF2F2", outline="#FEE2E2", width=2)
+    draw.text((295, 65), "RETURNED YESTERDAY", fill="#991B1B", font=card_title_font)
+    draw.text((295, 85), f"{overall_stats['returned_count']} LRs", fill="#7F1D1D", font=card_number_font)
+    draw.text((295, 125), f"Max Aging: {overall_stats['returned_max_age']} Days ({overall_stats['returned_max_age_count']} LRs)", fill="#B91C1C", font=card_detail_font)
     
     # Card 3: Open
-    draw.rounded_rectangle([530, 70, 760, 280], radius=12, fill="#EFF6FF", outline="#DBEAFE", width=2)
-    draw.text((550, 90), "OPEN LRS (as of 7 AM)", fill="#1D4ED8", font=card_title_font)
-    draw.text((550, 120), f"{overall_stats['open_count']} LRs", fill="#1E3A8A", font=card_number_font)
-    draw.text((550, 180), f"Max Aging: {overall_stats['open_max_age']} Days\n({overall_stats['open_max_age_count']} LRs)", fill="#1E40AF", font=card_detail_font)
+    draw.rounded_rectangle([530, 50, 760, 155], radius=10, fill="#EFF6FF", outline="#DBEAFE", width=2)
+    draw.text((545, 65), "OPEN LRS (as of 7 AM)", fill="#1D4ED8", font=card_title_font)
+    draw.text((545, 85), f"{overall_stats['open_count']} LRs", fill="#1E3A8A", font=card_number_font)
+    draw.text((545, 125), f"Max Aging: {overall_stats['open_max_age']} Days ({overall_stats['open_max_age_count']} LRs)", fill="#1E40AF", font=card_detail_font)
     
     image_path = os.path.join(DOWNLOAD_DIR, "daily_dashboard.png")
     im.save(image_path)
@@ -982,8 +982,12 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
             unmapped_supervisors.add(supervisor)
             
         lr_date_obj = parse_date(lr_date)
-        # Calculate aging relative to today_str 8PM
-        aging = (end_dt - lr_date_obj).days if lr_date_obj else 0
+        is_delivered = (mapped_status == 'Delivery Process completed.')
+        if is_delivered:
+            del_time_obj = parse_date(del_time)
+            aging = (del_time_obj.date() - lr_date_obj.date()).days if lr_date_obj and del_time_obj else 0
+        else:
+            aging = (end_dt.date() - lr_date_obj.date()).days if lr_date_obj else 0
         if aging < 0: aging = 0
             
         lr_item = {
@@ -1067,7 +1071,8 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
             "Destination": destination,
             "Box Qty": box_qty,
             "Current Status": mapped_status,
-            "Delivery Time": del_time if is_delivered else "-"
+            "Delivery Time": del_time if is_delivered else "-",
+            "LR Age (Days)": aging
         })
         
     # Process branch summary for Excel and WhatsApp
@@ -1143,7 +1148,7 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
     
     # 2. Despatch Snapshot Sheet
     ws_snap = wb.create_sheet("Despatch Snapshot")
-    headers = ["Branch", "Despatch No", "Despatch Time", "Driver Name", "Supervisor Name", "LR No", "Consignee", "Destination", "Box Qty", "Current Status", "Delivery Time"]
+    headers = ["Branch", "Despatch No", "Despatch Time", "Driver Name", "Supervisor Name", "LR No", "Consignee", "Destination", "Box Qty", "Current Status", "Delivery Time", "LR Age (Days)"]
     ws_snap.append(headers)
     for r in despatch_snapshot_rows:
         ws_snap.append([r[h] for h in headers])
@@ -1193,7 +1198,8 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
     
     send_whatsapp_message(whatsapp_msg)
     
-    return processed_file_path, dashboard_image_path, unmapped_supervisors
+    delay_tables_html = generate_delay_tables_html(despatch_snapshot_rows)
+    return processed_file_path, dashboard_image_path, unmapped_supervisors, delay_tables_html
 
 def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
     print(f"Running Morning Flow: Analyzing deliveries for date {yesterday_str}...")
@@ -1643,13 +1649,107 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
     apply_styles(wb["4. Despatch Summary"], len(df_despatch_summary) + 1, len(df_despatch_summary.columns), enable_filter=True)
     wb.save(processed_file)
     
-    # 6. Generate Pillow Dashboard Image
     dashboard_image_path = generate_pillow_dashboard(overall_stats, date_display)
+    delay_tables_html = generate_delay_tables_html(despatch_snapshot_rows)
+    return processed_file, dashboard_image_path, unmapped_supervisors, delay_tables_html
+
+def generate_delay_tables_html(despatch_snapshot_rows):
+    delivered_buckets = {}
+    open_buckets = {}
     
-    return processed_file, dashboard_image_path, unmapped_supervisors
+    for r in despatch_snapshot_rows:
+        branch = r.get("Branch", "N/A")
+        if not branch or pd.isna(branch):
+            branch = "N/A"
+        branch_str = str(branch).strip()
+        if branch_str.startswith("LH-"):
+            parts = branch_str[3:].split(" to ")
+            if parts:
+                branch_str = parts[0].strip()
+        branch_str = branch_str.upper()
+        if not branch_str:
+            branch_str = "N/A"
+            
+        status = r.get("Current Status", "Open")
+        is_delivered = (status == "Delivery Process completed.")
+        
+        age = r.get("LR Age (Days)", 0)
+        try:
+            age = int(float(age))
+        except (ValueError, TypeError):
+            age = 0
+        if age < 0:
+            age = 0
+            
+        bucket_key = age if age <= 15 else 16
+        
+        if is_delivered:
+            if branch_str not in delivered_buckets:
+                delivered_buckets[branch_str] = {}
+            delivered_buckets[branch_str][bucket_key] = delivered_buckets[branch_str].get(bucket_key, 0) + 1
+        else:
+            if age >= 2:
+                if branch_str not in open_buckets:
+                    open_buckets[branch_str] = {}
+                open_buckets[branch_str][bucket_key] = open_buckets[branch_str].get(bucket_key, 0) + 1
+
+    headers_delivered = ["Branch", "SAME DAY", "NEXT DAY", "2nd Day", "3rd Day", "4th Day", "5th Day", "6th Day", "7th Day", "8th Day", "9th Day", "10th Day", "11th Day", "12th Day", "13th Day", "14th Day", "15th Day", "16th+ Day"]
+    headers_open = ["Branch", "2nd Day", "3rd Day", "4th Day", "5th Day", "6th Day", "7th Day", "8th Day", "9th Day", "10th Day", "11th Day", "12th Day", "13th Day", "14th Day", "15th Day", "16th+ Day"]
+    
+    def build_html_table(title, headers, data_dict, is_open=False):
+        sorted_branches = sorted(data_dict.keys())
+        
+        html = f"""
+        <h3 style="color: #4C1D95; font-family: Arial, sans-serif; margin-top: 25px; margin-bottom: 10px; font-size: 16px;">{title}</h3>
+        <table style="border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 11px; margin-bottom: 20px; border: 1px solid #E2E8F0;">
+          <thead>
+            <tr style="background-color: #522A7A; color: #FFFFFF;">
+              <th style="padding: 8px 10px; border: 1px solid #E2E8F0; text-align: left; font-weight: bold;">Branch</th>
+        """
+        for h in headers[1:]:
+            html += f'<th style="padding: 8px 10px; border: 1px solid #E2E8F0; text-align: center; font-weight: bold;">{h}</th>'
+        html += "</tr></thead><tbody>"
+        
+        col_totals = {h: 0 for h in headers[1:]}
+        
+        for idx, br in enumerate(sorted_branches):
+            bg_color = "#F8FAFC" if idx % 2 == 0 else "#FFFFFF"
+            html += f'<tr style="background-color: {bg_color};">'
+            html += f'<td style="padding: 8px 10px; border: 1px solid #E2E8F0; font-weight: bold; color: #0F172A;">{br}</td>'
+            
+            for h in headers[1:]:
+                if h == "SAME DAY":
+                    val = data_dict[br].get(0, 0)
+                elif h == "NEXT DAY":
+                    val = data_dict[br].get(1, 0)
+                elif h == "16th+ Day":
+                    val = data_dict[br].get(16, 0)
+                else:
+                    day_num = int(h.split()[0][:-2])
+                    val = data_dict[br].get(day_num, 0)
+                    
+                val_str = str(val) if val > 0 else ""
+                html += f'<td style="padding: 8px 10px; border: 1px solid #E2E8F0; text-align: center; font-weight: {"bold" if val > 0 else "normal"}; color: #0F172A;">{val_str}</td>'
+                col_totals[h] += val
+                
+            html += "</tr>"
+            
+        html += '<tr style="background-color: #CBD5E1; font-weight: bold; color: #0F172A;">'
+        html += '<td style="padding: 8px 10px; border: 1px solid #E2E8F0; text-align: left;">TOTAL</td>'
+        for h in headers[1:]:
+            val = col_totals[h]
+            val_str = str(val) if val > 0 else ""
+            html += f'<td style="padding: 8px 10px; border: 1px solid #E2E8F0; text-align: center;">{val_str}</td>'
+        html += "</tr></tbody></table>"
+        return html
+
+    delivered_html = build_html_table("Branch-wise Delivery Delay Analysis (Buckets) 📦", headers_delivered, delivered_buckets) if delivered_buckets else ""
+    open_html = build_html_table("Branch-wise Open LR Aging Analysis (2nd Day onwards) 🕒", headers_open, open_buckets, is_open=True) if open_buckets else ""
+    
+    return delivered_html + open_html
 
 # Email function
-def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_image_path, from_date=None, to_date=None, unmapped_supervisors=None):
+def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_image_path, from_date=None, to_date=None, unmapped_supervisors=None, delay_tables_html=""):
     print("Sending daily report email...")
     if not SENDER_EMAIL or not SENDER_PASSWORD or not RECEIVER_EMAIL:
         print("⚠️ Email credentials (SENDER_EMAIL, SENDER_PASSWORD, RECEIVER_EMAIL) are missing. Skipping email sending.")
@@ -1678,6 +1778,7 @@ def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_
         <p>Please find the daily ERP Dispatch & Delivery performance dashboard summary for <b>{today_str}</b> below:</p>
         <img src="cid:dashboard_image"><br>
         <p>Report Period: <b>{from_date}</b> to <b>{to_date}</b> 📅</p>
+        {delay_tables_html}
         {unmapped_str}
         <p><b>Included sheets in Interactive_Delivery_Report.xlsx:</b><br>
         1. Daily Summary (Overall & Branch summaries)<br>
@@ -1794,12 +1895,12 @@ def main():
         start_time_override = getattr(args, 'from_time', None)
         end_time_override = getattr(args, 'to_time', None)
             
-        processed_file, dashboard_image_path, unmapped_supervisors = run_daily_evening_report_flow(
+        processed_file, dashboard_image_path, unmapped_supervisors, delay_tables_html = run_daily_evening_report_flow(
             lr_file, despatch_file, supervisor_map, yesterday_str, today_str, start_time_override, end_time_override
         )
         
         # Email report
-        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors)
+        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors, delay_tables_html)
         print("Daily Evening report flow execution completed successfully.")
         
     elif args.mode == "morning":
@@ -1812,10 +1913,10 @@ def main():
         if args.from_date:
             yesterday_str = args.from_date  # Use overridden date as yesterday's date
             
-        processed_file, dashboard_image_path, unmapped_supervisors = run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str)
+        processed_file, dashboard_image_path, unmapped_supervisors, delay_tables_html = run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str)
         
         # Email report
-        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors)
+        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors, delay_tables_html)
         print("Morning flow execution completed successfully.")
 
     elif args.mode == "afternoon_open_lrs":
