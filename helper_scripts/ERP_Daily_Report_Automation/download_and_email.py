@@ -1021,7 +1021,7 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
             overall_stats["returned_count"] += 1
             open_lrs_rows.append({
                 "Branch": branch, "Despatch No": despatch_no, "Despatch Time": dp_date_str,
-                "Driver": driver, "LR No": lr_no, "Consignee": consignee,
+                "Driver": driver, "LR No": lr_no, "LR Date": lr_date, "Consignee": consignee,
                 "Destination": destination, "Current Status": "Returned (On transit)", "Aging (Days)": aging
             })
         else:
@@ -1029,7 +1029,7 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
             overall_stats["open_count"] += 1
             open_lrs_rows.append({
                 "Branch": branch, "Despatch No": despatch_no, "Despatch Time": dp_date_str,
-                "Driver": driver, "LR No": lr_no, "Consignee": consignee,
+                "Driver": driver, "LR No": lr_no, "LR Date": lr_date, "Consignee": consignee,
                 "Destination": destination, "Current Status": mapped_status, "Aging (Days)": aging
             })
             
@@ -1156,7 +1156,7 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
     
     # 3. Open/Returned LRs Sheet
     ws_open = wb.create_sheet("Open LRs")
-    headers_open = ["Branch", "Despatch No", "Despatch Time", "Driver", "LR No", "Consignee", "Destination", "Current Status", "Aging (Days)"]
+    headers_open = ["Branch", "Despatch No", "Despatch Time", "Driver", "LR No", "LR Date", "Consignee", "Destination", "Current Status", "Aging (Days)"]
     ws_open.append(headers_open)
     for r in open_lrs_rows:
         ws_open.append([r[h] for h in headers_open])
@@ -1688,13 +1688,13 @@ def generate_delay_tables_html(despatch_snapshot_rows):
                 delivered_buckets[branch_str] = {}
             delivered_buckets[branch_str][bucket_key] = delivered_buckets[branch_str].get(bucket_key, 0) + 1
         else:
-            if age >= 2:
+            if age >= 1:
                 if branch_str not in open_buckets:
                     open_buckets[branch_str] = {}
                 open_buckets[branch_str][bucket_key] = open_buckets[branch_str].get(bucket_key, 0) + 1
 
     headers_delivered = ["Branch", "SAME DAY", "NEXT DAY", "2nd Day", "3rd Day", "4th Day", "5th Day", "6th Day", "7th Day", "8th Day", "9th Day", "10th Day", "11th Day", "12th Day", "13th Day", "14th Day", "15th Day", "16th+ Day"]
-    headers_open = ["Branch", "2nd Day", "3rd Day", "4th Day", "5th Day", "6th Day", "7th Day", "8th Day", "9th Day", "10th Day", "11th Day", "12th Day", "13th Day", "14th Day", "15th Day", "16th+ Day"]
+    headers_open = ["Branch", "1st Day", "2nd Day", "3rd Day", "4th Day", "5th Day", "6th Day", "7th Day", "8th Day", "9th Day", "10th Day", "11th Day", "12th Day", "13th Day", "14th Day", "15th Day", "16th+ Day"]
     
     def build_html_table(title, headers, data_dict, is_open=False):
         sorted_branches = sorted(data_dict.keys())
@@ -1744,7 +1744,7 @@ def generate_delay_tables_html(despatch_snapshot_rows):
         return html
 
     delivered_html = build_html_table("Branch-wise Delivery Delay Analysis (Buckets) 📦", headers_delivered, delivered_buckets) if delivered_buckets else ""
-    open_html = build_html_table("Branch-wise Open LR Aging Analysis (2nd Day onwards) 🕒", headers_open, open_buckets, is_open=True) if open_buckets else ""
+    open_html = build_html_table("Branch-wise Open LR Aging Analysis (1st Day onwards) 🕒", headers_open, open_buckets, is_open=True) if open_buckets else ""
     
     return delivered_html + open_html
 
