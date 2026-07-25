@@ -345,7 +345,8 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                         ui_url = f"https://eff.aadhocc.in/eff_2021/main/effdespatch?despatch_number=&location_id=&lr_number=&from_date={from_date_str}&to_date={to_date_str}&delivery_staff_search="
                         print(f"Navigating to: {ui_url}")
                         page.goto(ui_url, timeout=30000)
-                        page.wait_for_selector("table tbody tr td", timeout=10000)
+                        page.wait_for_timeout(5000)  # Wait for table to load via AJAX
+                        page.wait_for_selector("table tbody tr td", timeout=15000)
                     except Exception as e:
                         print(f"Failed to navigate and load table: {e}")
                         
@@ -357,12 +358,12 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                                 select.dispatchEvent(new Event('change'));
                             }
                         }''')
-                        page.wait_for_timeout(2000)
+                        page.wait_for_timeout(5000)  # Wait for table redraw via AJAX
                     except Exception:
                         pass
                         
                     try:
-                        page.wait_for_selector("table tbody tr td", timeout=10000)
+                        page.wait_for_selector("table tbody tr td", timeout=15000)
                     except Exception as e:
                         print(f"Table didn't load in time: {e}")
                         
@@ -384,7 +385,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                                 }
                             }
                         }''')
-                        page.wait_for_timeout(3000)
+                        page.wait_for_timeout(5000)  # Wait for full table draw via AJAX
                     except Exception as e:
                         print(f"Could not change page length: {e}")
                         
