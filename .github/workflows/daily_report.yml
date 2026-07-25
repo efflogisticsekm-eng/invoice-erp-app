@@ -1,9 +1,13 @@
 name: Daily ERP Report Automation
+run-name: Daily Report [Mode:${{ inputs.mode || 'daily_evening_report' }}]
 
 on:
   schedule:
     # 14:45 UTC is 20:15 IST (8:15 PM IST)
     - cron: '45 14 * * *'
+    # Retry every 30 minutes from 8:45 PM IST to 11:45 PM IST if failed
+    - cron: '15,45 15,16,17 * * *'
+    - cron: '15 18 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -51,7 +55,29 @@ jobs:
         pip install -r helper_scripts/ERP_Daily_Report_Automation/requirements.txt
         playwright install --with-deps chromium
 
+    - name: Check if report already sent today
+      id: check_success
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        if [ "${{ github.event_name }}" = "schedule" ]; then
+          echo "Running scheduled cron. Checking for previous successful run today..."
+          SKIP_STATUS=$(python helper_scripts/ERP_Daily_Report_Automation/check_already_succeeded.py)
+          echo "Skip status: $SKIP_STATUS"
+          if [ "$SKIP_STATUS" = "skip" ]; then
+            echo "Report has already been successfully sent today. Skipping execution."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "No successful report run found for today. Proceeding."
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "Manually triggered workflow. Always proceeding."
+          echo "skip=false" >> $GITHUB_OUTPUT
+        fi
+
     - name: Run Automation Script
+      if: steps.check_success.outputs.skip != 'true'
       env:
         ERP_USERNAME: ${{ secrets.ERP_USERNAME }}
         ERP_PASSWORD: ${{ secrets.ERP_PASSWORD }}
@@ -63,6 +89,7 @@ jobs:
         WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
         WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
         RECIPIENT_PHONE_NUMBER: ${{ secrets.RECIPIENT_PHONE_NUMBER }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
           echo "Running manually triggered workflow in ${{ github.event.inputs.mode }} mode..."

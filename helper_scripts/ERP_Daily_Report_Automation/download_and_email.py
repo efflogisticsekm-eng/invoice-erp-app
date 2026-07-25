@@ -1748,8 +1748,66 @@ def generate_delay_tables_html(despatch_snapshot_rows):
     
     return delivered_html + open_html
 
+def check_if_delayed(mode="daily_evening_report"):
+    """
+    Check if this execution is delayed.
+    It returns True if:
+    1. The current IST time is past 8:30 PM (for daily_evening_report) or past 6:30 AM (for morning).
+    2. Or there are failed runs in the GitHub workflow history for today.
+    """
+    import subprocess
+    import json
+    
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(ist_tz)
+    
+    # Time-based delay detection
+    if mode == "daily_evening_report":
+        if now_ist.hour > 20 or (now_ist.hour == 20 and now_ist.minute >= 30):
+            return True
+    elif mode == "morning":
+        if now_ist.hour > 6 or (now_ist.hour == 6 and now_ist.minute >= 30):
+            return True
+            
+    # Check GitHub run history for any failures today
+    gh_token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
+    if not gh_token:
+        # If we are not in GitHub Actions or have no token, rely on time-based only
+        return False
+        
+    try:
+        cmd = ["gh", "run", "list", "--workflow", "daily_report.yml", "--json", "conclusion,createdAt,status,databaseId"]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        runs = json.loads(result.stdout)
+        
+        current_run_id = os.getenv("GITHUB_RUN_ID")
+        if current_run_id:
+            try:
+                current_run_id = int(current_run_id)
+            except ValueError:
+                current_run_id = None
+            
+        today_str = now_ist.strftime("%Y-%m-%d")
+        for run in runs:
+            # Skip current running run
+            if current_run_id and run.get("databaseId") == current_run_id:
+                continue
+                
+            if run.get("status") == "completed" and run.get("conclusion") == "failure":
+                created_at_utc_str = run.get("createdAt")
+                if created_at_utc_str.endswith("Z"):
+                    created_at_utc_str = created_at_utc_str[:-1] + "+00:00"
+                created_at_utc = datetime.fromisoformat(created_at_utc_str)
+                created_at_ist = created_at_utc.astimezone(ist_tz)
+                if created_at_ist.strftime("%Y-%m-%d") == today_str:
+                    return True
+    except Exception as e:
+        print(f"Error checking GitHub runs for failure detection: {e}")
+        
+    return False
+
 # Email function
-def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_image_path, from_date=None, to_date=None, unmapped_supervisors=None, delay_tables_html=""):
+def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_image_path, from_date=None, to_date=None, unmapped_supervisors=None, delay_tables_html="", is_delayed=False):
     print("Sending daily report email...")
     if not SENDER_EMAIL or not SENDER_PASSWORD or not RECEIVER_EMAIL:
         print("⚠️ Email credentials (SENDER_EMAIL, SENDER_PASSWORD, RECEIVER_EMAIL) are missing. Skipping email sending.")
@@ -1771,9 +1829,18 @@ def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_
         for s in sorted(unmapped_supervisors):
             unmapped_str += f"- {s}<br>"
             
+    delayed_banner = ""
+    if is_delayed:
+        delayed_banner = """
+        <div style="background-color: #FEF3C7; border-left: 4px solid #D97706; padding: 10px 15px; margin-bottom: 20px; font-family: Arial, sans-serif; font-size: 12px; color: #92400E; border-radius: 4px;">
+          <strong>⚠️ Delayed Report Notice:</strong> This report was delayed due to temporary connection or infrastructure issues with the ERP server/runner earlier today. It has been successfully processed and sent now.
+        </div>
+        """
+            
     html_body = f"""
     <html>
       <body style="font-family: Arial, sans-serif; color: #1E293B;">
+        {delayed_banner}
         <p>Dear User,</p>
         <p>Please find the daily ERP Dispatch & Delivery performance dashboard summary for <b>{today_str}</b> below:</p>
         <img src="cid:dashboard_image"><br>
@@ -1900,7 +1967,8 @@ def main():
         )
         
         # Email report
-        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors, delay_tables_html)
+        is_delayed = check_if_delayed("daily_evening_report")
+        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors, delay_tables_html, is_delayed=is_delayed)
         print("Daily Evening report flow execution completed successfully.")
         
     elif args.mode == "morning":
@@ -1916,7 +1984,8 @@ def main():
         processed_file, dashboard_image_path, unmapped_supervisors, delay_tables_html = run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str)
         
         # Email report
-        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors, delay_tables_html)
+        is_delayed = check_if_delayed("morning")
+        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors, delay_tables_html, is_delayed=is_delayed)
         print("Morning flow execution completed successfully.")
 
     elif args.mode == "afternoon_open_lrs":
