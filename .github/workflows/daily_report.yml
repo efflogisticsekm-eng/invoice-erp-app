@@ -5,9 +5,9 @@ on:
   schedule:
     # 14:45 UTC is 20:15 IST (8:15 PM IST)
     - cron: '45 14 * * 1-6'
-    # Retry every 30 minutes from 8:45 PM IST to 11:45 PM IST if failed
-    - cron: '15,45 15,16,17 * * 1-6'
-    - cron: '15 18 * * 1-6'
+    # Retry every 30 minutes from 8:45 PM IST to 9:45 PM IST if failed
+    - cron: '15,45 15 * * 1-6'
+    - cron: '15 16 * * 1-6'
   workflow_dispatch:
     inputs:
       mode:

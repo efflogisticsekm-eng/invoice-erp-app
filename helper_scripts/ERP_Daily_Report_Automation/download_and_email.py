@@ -248,22 +248,31 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
     ist_tz = timezone(timedelta(hours=5, minutes=30))
     now_ist = datetime.now(ist_tz)
     
-    if mode == "evening":
-        from_date_str = from_override if from_override else now_ist.strftime("%Y-%m-%d")
-        from_date_str = from_override if from_override else now_ist.strftime("%Y-%m-%d")
-        to_date_str = to_override if to_override else now_ist.strftime("%Y-%m-%d")
-    elif mode in ("daily_evening_report", "afternoon_open_lrs"):
-        # On Monday evenings, the report needs to span from Saturday to Monday (Sunday is not considered)
-        if mode == "daily_evening_report" and now_ist.weekday() == 0:
-            default_start = now_ist - timedelta(days=2) # Saturday
+    # Resolve the target date for reporting.
+    # If running before 12:00 PM (noon) IST, treat it as a delayed run for the previous calendar day.
+    if mode in ("daily_evening_report", "evening", "afternoon_open_lrs"):
+        if now_ist.hour < 12:
+            target_date = now_ist - timedelta(days=1)
         else:
-            default_start = now_ist - timedelta(days=1) # Yesterday
-        from_date_str = from_override if from_override else default_start.strftime("%Y-%m-%d")
-        to_date_str = to_override if to_override else now_ist.strftime("%Y-%m-%d")
+            target_date = now_ist
     else:
-        yesterday = now_ist - timedelta(days=1)
+        target_date = now_ist
+        
+    if mode == "evening":
+        from_date_str = from_override if from_override else target_date.strftime("%Y-%m-%d")
+        to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
+    elif mode in ("daily_evening_report", "afternoon_open_lrs"):
+        # On Monday evenings (or when the target date is Monday), the report needs to span from Saturday to Monday (Sunday is not considered)
+        if mode == "daily_evening_report" and target_date.weekday() == 0:
+            default_start = target_date - timedelta(days=2) # Saturday
+        else:
+            default_start = target_date - timedelta(days=1) # Yesterday
+        from_date_str = from_override if from_override else default_start.strftime("%Y-%m-%d")
+        to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
+    else:
+        yesterday = target_date - timedelta(days=1)
         from_date_str = from_override if from_override else (yesterday - timedelta(days=30)).strftime("%Y-%m-%d")
-        to_date_str = to_override if to_override else now_ist.strftime("%Y-%m-%d")
+        to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
         
     print(f"Date range resolved: fromDate={from_date_str}, toDate={to_date_str}")
     
@@ -789,8 +798,8 @@ def calculate_aging_metrics(lrs, reference_date):
     return max_age, max_age_count, unique_pts
 
 def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yesterday_str, today_str, start_time_override=None, end_time_override=None):
-    start_time = start_time_override if start_time_override else "20:00:00"
-    end_time = end_time_override if end_time_override else "20:00:00"
+    start_time = start_time_override if start_time_override else "19:00:00"
+    end_time = end_time_override if end_time_override else "19:00:00"
     print(f"Running Daily Evening Flow: {yesterday_str} {start_time} to {today_str} {end_time}")
     
     # 1. Load Despatch Report
@@ -1948,12 +1957,19 @@ def main():
         
         ist_tz = timezone(timedelta(hours=5, minutes=30))
         now_ist = datetime.now(ist_tz)
-        today_str = now_ist.strftime("%Y-%m-%d")
-        # On Monday evenings, default starting date is Saturday (2 days ago)
-        if now_ist.weekday() == 0:
-            yesterday_str = (now_ist - timedelta(days=2)).strftime("%Y-%m-%d") # Saturday
+        
+        # If running before 12:00 PM (noon) IST, treat it as a delayed run for the previous calendar day.
+        if now_ist.hour < 12:
+            target_date = now_ist - timedelta(days=1)
         else:
-            yesterday_str = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
+            target_date = now_ist
+            
+        today_str = target_date.strftime("%Y-%m-%d")
+        # On Monday evenings (or when the target date is Monday), default starting date is Saturday (2 days ago)
+        if target_date.weekday() == 0:
+            yesterday_str = (target_date - timedelta(days=2)).strftime("%Y-%m-%d") # Saturday
+        else:
+            yesterday_str = (target_date - timedelta(days=1)).strftime("%Y-%m-%d")
         
         if args.from_date:
             yesterday_str = args.from_date

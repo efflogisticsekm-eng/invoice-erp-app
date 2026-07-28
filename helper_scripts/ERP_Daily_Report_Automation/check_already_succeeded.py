@@ -20,7 +20,12 @@ def main():
     # Define IST timezone (UTC+5:30)
     ist = timezone(timedelta(hours=5, minutes=30))
     now_ist = datetime.now(ist)
-    today_str = now_ist.strftime("%Y-%m-%d")
+    # Determine the target reporting date for the current execution
+    # If running before 12:00 PM (noon) IST, treat it as a delayed run for the previous calendar day.
+    if now_ist.hour < 12:
+        current_target_date = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
+    else:
+        current_target_date = now_ist.strftime("%Y-%m-%d")
     
     # Current run's databaseId can be obtained from the GITHUB_RUN_ID environment variable
     current_run_id = os.getenv("GITHUB_RUN_ID")
@@ -44,10 +49,15 @@ def main():
                     created_at_utc_str = created_at_utc_str[:-1] + "+00:00"
                 created_at_utc = datetime.fromisoformat(created_at_utc_str)
                 created_at_ist = created_at_utc.astimezone(ist)
-                run_date_ist = created_at_ist.strftime("%Y-%m-%d")
                 
-                # Check if it was run today
-                if run_date_ist == today_str:
+                # Determine target reporting date for the historical run
+                if created_at_ist.hour < 12:
+                    run_target_date = (created_at_ist - timedelta(days=1)).strftime("%Y-%m-%d")
+                else:
+                    run_target_date = created_at_ist.strftime("%Y-%m-%d")
+                
+                # Check if the historical run was for the same target reporting date
+                if run_target_date == current_target_date:
                     # Also check if it was daily_evening_report mode
                     title = run.get("displayTitle", "")
                     # If displayTitle does not specify another mode, we assume it's daily_evening_report (default)
