@@ -21,6 +21,13 @@ export const cleanLrNumber = (lr) => {
   return s;
 };
 
+export const normalizeName = (val) => {
+  if (val === undefined || val === null) return "";
+  let s = String(val).trim().toUpperCase();
+  s = s.replace(/\s*\.\s*/g, '.');
+  return s.replace(/\s+/g, ' ');
+};
+
 const parseSheetToJSON = (ws, headerKeywords) => {
   const rows = XLSXReader.utils.sheet_to_json(ws, { header: 1, defval: "" });
   if (rows.length === 0) return [];
@@ -214,6 +221,7 @@ export default function DeliveryDashboard() {
 
   const [despatchMap, setDespatchMap] = useState({});
   const [supervisorMap, setSupervisorMap] = useState({});
+  const [dbSupervisorMap, setDbSupervisorMap] = useState({});
   const [selectedBranch, setSelectedBranch] = useState('All');
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [branchSearchTerm, setBranchSearchTerm] = useState('');
@@ -252,7 +260,26 @@ export default function DeliveryDashboard() {
         console.error("Error fetching holidays:", err);
       }
     };
+    const fetchSupervisorMappings = async () => {
+      try {
+        const res = await fetch('/api/explorer/data/supervisor_branch_mapping');
+        if (res.ok) {
+          const result = await res.json();
+          const list = result.data || [];
+          const mapping = {};
+          list.forEach(item => {
+            if (item.supervisor_name && item.branch) {
+              mapping[normalizeName(item.supervisor_name)] = item.branch.trim();
+            }
+          });
+          setDbSupervisorMap(mapping);
+        }
+      } catch (err) {
+        console.error("Error fetching supervisor mappings:", err);
+      }
+    };
     fetchHolidays();
+    fetchSupervisorMappings();
   }, []);
 
   const consignorsList = React.useMemo(() => {
@@ -527,7 +554,7 @@ export default function DeliveryDashboard() {
     if (!despatchRawRows) return [];
     const unique = new Set();
     despatchRawRows.forEach(row => {
-      let branch = row.supervisor ? (supervisorMap[row.supervisor] || 'N/A') : 'N/A';
+      let branch = row.supervisor ? (supervisorMap[normalizeName(row.supervisor)] || 'N/A') : 'N/A';
       if (row.deliveryType && String(row.deliveryType).toUpperCase().trim() === 'OTHER GODOWN') {
         let cleanDespBranch = String(row.despatchBranch || '').trim();
         if (cleanDespBranch.toUpperCase().startsWith('EFF ')) {
@@ -561,7 +588,7 @@ export default function DeliveryDashboard() {
     // 1. Filter raw rows first
     const filteredRows = despatchRawRows.filter(row => {
       // Branch check
-      let branch = row.supervisor ? (supervisorMap[row.supervisor] || 'N/A') : 'N/A';
+      let branch = row.supervisor ? (supervisorMap[normalizeName(row.supervisor)] || 'N/A') : 'N/A';
       if (row.deliveryType && String(row.deliveryType).toUpperCase().trim() === 'OTHER GODOWN') {
         let cleanDespBranch = String(row.despatchBranch || '').trim();
         if (cleanDespBranch.toUpperCase().startsWith('EFF ')) {
@@ -607,7 +634,7 @@ export default function DeliveryDashboard() {
       if (!dNo) return;
       
       if (!groups[dNo]) {
-        let branch = row.supervisor ? (supervisorMap[row.supervisor] || 'N/A') : 'N/A';
+        let branch = row.supervisor ? (supervisorMap[normalizeName(row.supervisor)] || 'N/A') : 'N/A';
         if (row.deliveryType && String(row.deliveryType).toUpperCase().trim() === 'OTHER GODOWN') {
           let cleanDespBranch = String(row.despatchBranch || '').trim();
           if (cleanDespBranch.toUpperCase().startsWith('EFF ')) {
@@ -649,7 +676,7 @@ export default function DeliveryDashboard() {
       }
       
       if (g.branch === 'N/A' && row.supervisor) {
-        let mappedBranch = supervisorMap[row.supervisor];
+        let mappedBranch = supervisorMap[normalizeName(row.supervisor)];
         if (mappedBranch) {
           if (row.deliveryType && String(row.deliveryType).toUpperCase().trim() === 'OTHER GODOWN') {
             let cleanDespBranch = String(row.despatchBranch || '').trim();
@@ -1164,7 +1191,7 @@ export default function DeliveryDashboard() {
           
           let lrData = [];
           let dMap = {}; 
-          let sMap = {}; 
+          let sMap = { ...dbSupervisorMap }; 
           
           const sheetNames = wb.SheetNames;
 
@@ -1304,7 +1331,7 @@ export default function DeliveryDashboard() {
                 const supVal = String(row[supervisorKey] !== undefined && row[supervisorKey] !== null ? row[supervisorKey] : '').trim();
                 const branchVal = String(row[branchKey] !== undefined && row[branchKey] !== null ? row[branchKey] : '').trim();
                 if (supVal && branchVal) {
-                  sMap[supVal] = branchVal;
+                  sMap[normalizeName(supVal)] = branchVal;
                 }
               }
             });
@@ -1421,7 +1448,7 @@ export default function DeliveryDashboard() {
       reader.readAsArrayBuffer(file);
     } else {
       setDespatchMap({});
-      setSupervisorMap({});
+      setSupervisorMap(dbSupervisorMap);
       setDespatchRawRows([]);
       Papa.parse(file, {
         header: true,
@@ -1439,7 +1466,7 @@ export default function DeliveryDashboard() {
           setDespatchLrStartDateFilter('');
           setDespatchLrEndDateFilter('');
           setDespatchGdmFilter('');
-          processData(standardizedCSV, customHolidays, excludeSundays, {}, {}, {}, {}, {});
+          processData(standardizedCSV, customHolidays, excludeSundays, {}, dbSupervisorMap, {}, {}, {});
           setLoading(false);
         },
         error: (error) => {
@@ -1474,7 +1501,7 @@ export default function DeliveryDashboard() {
       
       const lrNo = cleanLrNumber(row['LR NO']);
       const supervisor = row['LD SUPERVISOR'] || (lrNo ? (dMap[lrNo] || '') : '');
-      const branchVal = supervisor ? (sMap[supervisor] || '') : '';
+      const branchVal = supervisor ? (sMap[normalizeName(supervisor)] || '') : '';
       
       let branch = branchVal;
       if (!branch) {
