@@ -410,43 +410,46 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     for i in range(max_pages):
                         data = None
                         for retry in range(10):
-                            data = page.evaluate('''() => {
-                                const tables = Array.from(document.querySelectorAll("table"));
-                                const table = tables.find(t => t.innerText.toLowerCase().includes("dp no"));
-                                if (!table) return {error: "No table with 'dp no' found"};
-                                const headers = Array.from(table.querySelectorAll("th")).map(th => th.innerText.trim().toLowerCase());
-                                const dpIdx = headers.findIndex(h => h.includes("dp no"));
-                                const timeIdx = headers.findIndex(h => h.includes("dp time"));
-                                const typeIdx = headers.findIndex(h => h.includes("delivery type") || (h.includes("delivery") && h.includes("type")));
-                                const branchIdx = headers.findIndex(h => h.includes("branch"));
-                                if (dpIdx === -1) return {error: "DP No header not found", headers: headers};
-                                
-                                const rows = Array.from(table.querySelectorAll("tbody tr"));
-                                if (rows.length === 0) return {error: "Table is empty or loading"};
-                                
-                                const result = {};
-                                rows.forEach(tr => {
-                                    const cells = Array.from(tr.querySelectorAll("td"));
-                                    const maxIdx = Math.max(dpIdx, timeIdx, typeIdx, branchIdx);
-                                    if (cells.length > maxIdx) {
-                                        let dp = cells[dpIdx].innerText.trim();
-                                        dp = dp.replace(/\s+/g, ""); // Remove all whitespace/newlines
-                                        const time = timeIdx !== -1 ? cells[timeIdx].innerText.trim() : "";
-                                        const delType = typeIdx !== -1 ? cells[typeIdx].innerText.trim() : "";
-                                        const branch = branchIdx !== -1 ? cells[branchIdx].innerText.trim() : "";
-                                        if (dp) {
-                                            result[dp] = {
-                                                "time": time,
-                                                "delivery_type": delType,
-                                                "despatch_branch": branch
-                                            };
+                            try:
+                                data = page.evaluate('''() => {
+                                    const tables = Array.from(document.querySelectorAll("table"));
+                                    const table = tables.find(t => t.innerText.toLowerCase().includes("dp no"));
+                                    if (!table) return {error: "No table with 'dp no' found"};
+                                    const headers = Array.from(table.querySelectorAll("th")).map(th => th.innerText.trim().toLowerCase());
+                                    const dpIdx = headers.findIndex(h => h.includes("dp no"));
+                                    const timeIdx = headers.findIndex(h => h.includes("dp time"));
+                                    const typeIdx = headers.findIndex(h => h.includes("delivery type") || (h.includes("delivery") && h.includes("type")));
+                                    const branchIdx = headers.findIndex(h => h.includes("branch"));
+                                    if (dpIdx === -1) return {error: "DP No header not found", headers: headers};
+                                    
+                                    const rows = Array.from(table.querySelectorAll("tbody tr"));
+                                    if (rows.length === 0) return {error: "Table is empty or loading"};
+                                    
+                                    const result = {};
+                                    rows.forEach(tr => {
+                                        const cells = Array.from(tr.querySelectorAll("td"));
+                                        const maxIdx = Math.max(dpIdx, timeIdx, typeIdx, branchIdx);
+                                        if (cells.length > maxIdx) {
+                                            let dp = cells[dpIdx].innerText.trim();
+                                            dp = dp.replace(/\s+/g, ""); // Remove all whitespace/newlines
+                                            const time = timeIdx !== -1 ? cells[timeIdx].innerText.trim() : "";
+                                            const delType = typeIdx !== -1 ? cells[typeIdx].innerText.trim() : "";
+                                            const branch = branchIdx !== -1 ? cells[branchIdx].innerText.trim() : "";
+                                            if (dp) {
+                                                result[dp] = {
+                                                    "time": time,
+                                                    "delivery_type": delType,
+                                                    "despatch_branch": branch
+                                                };
+                                            }
                                         }
-                                    }
-                                });
-                                return result;
-                            }''')
-                            if data and "error" not in data:
-                                break
+                                    });
+                                    return result;
+                                }''')
+                                if data and "error" not in data:
+                                    break
+                            except Exception as eval_err:
+                                print(f"Retry {retry} evaluating page: {eval_err}")
                             page.wait_for_timeout(1000)
                             
                         if data and "error" in data:
@@ -474,6 +477,10 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                         }''')
                         
                         if has_next:
+                            try:
+                                page.wait_for_load_state("load", timeout=5000)
+                            except Exception:
+                                pass
                             page.wait_for_timeout(3000)
                         else:
                             break
@@ -488,10 +495,48 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
             
             # 2. Download LR Report
             if mode in ("morning", "daily_evening_report", "afternoon_open_lrs"):
+                try:
+                    print("Opening a fresh page for LR report download to avoid context lockups...")
+                    page.close()
+                except Exception:
+                    pass
+                page = context.new_page()
+                page.on("console", lambda msg: print(f"Browser Console: {msg.text}"))
+                page.on("pageerror", lambda err: print(f"Browser Page Error: {err}"))
+                
                 lr_url = "https://eff.aadhocc.in/eff_2021/main/lr/"
                 print(f"Navigating to LR page: {lr_url}...")
                 page.goto(lr_url)
                 page.wait_for_load_state("load")
+                
+                # Check if session is lost on the new page, and perform login if redirected to login page
+                if page.locator("#login_user_id").count() > 0 or "login" in page.url.lower():
+                    print("Session lost on new page, performing login again...")
+                    if page.locator("#login_user_id").count() > 0:
+                        page.fill("#login_user_id", ERP_USERNAME)
+                    else:
+                        page.fill("input[type='text']", ERP_USERNAME)
+                        
+                    if page.locator("#login_password").count() > 0:
+                        page.fill("#login_password", ERP_PASSWORD)
+                    else:
+                        page.fill("input[type='password']", ERP_PASSWORD)
+                        
+                    submit_button = page.locator("form#login_form button[type='submit'], button[type='submit']")
+                    if submit_button.count() > 0:
+                        submit_button.first.click()
+                    else:
+                        page.keyboard.press("Enter")
+                        
+                    page.wait_for_timeout(2000)
+                    try:
+                        page.wait_for_url(lambda u: "/login" not in u, timeout=15000)
+                        page.wait_for_load_state("load")
+                        print("Re-login complete. Navigating back to LR page...")
+                        page.goto(lr_url)
+                        page.wait_for_load_state("load")
+                    except Exception as nav_err:
+                        print("Re-login navigation timeout. Current URL:", page.url)
                 
                 # Convert dates to DD-MM-YYYY for input fields
                 if mode in ("daily_evening_report", "afternoon_open_lrs"):
