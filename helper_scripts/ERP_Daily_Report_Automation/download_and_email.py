@@ -59,10 +59,12 @@ SUPABASE_KEY = clean_env_var(SUPABASE_KEY)
 SENDER_EMAIL = clean_env_var(SENDER_EMAIL)
 SENDER_PASSWORD = clean_env_var(SENDER_PASSWORD)
 RECEIVER_EMAIL = clean_env_var(RECEIVER_EMAIL)
-# Support comma-separated list of receivers and ensure salim@efflogistics.biz is added
+# Support comma-separated list of receivers and ensure salim@efflogistics.biz and shajahan@efflogistics.biz are added
 receivers_list = [r.strip() for r in RECEIVER_EMAIL.split(",") if r.strip()]
 if "salim@efflogistics.biz" not in receivers_list:
     receivers_list.append("salim@efflogistics.biz")
+if "shajahan@efflogistics.biz" not in receivers_list:
+    receivers_list.append("shajahan@efflogistics.biz")
 RECEIVER_EMAIL = ", ".join(receivers_list)
 WHATSAPP_TOKEN = clean_env_var(WHATSAPP_TOKEN)
 WHATSAPP_PHONE_NUMBER_ID = clean_env_var(WHATSAPP_PHONE_NUMBER_ID)
@@ -842,10 +844,50 @@ def calculate_aging_metrics(lrs, reference_date):
     unique_pts = len(set(f"{x['consignee'].lower()}||{x['destination'].lower()}" for x in lrs))
     return max_age, max_age_count, unique_pts
 
+def calculate_aging(start_date, end_date, holidays=None):
+    """
+    Calculates aging between start_date and end_date (both are datetime.date or datetime.datetime objects or parseable dates),
+    excluding Sundays and optionally holidays.
+    """
+    if not start_date or not end_date:
+        return 0
+    if isinstance(start_date, str):
+        start_date = parse_date(start_date)
+    if isinstance(end_date, str):
+        end_date = parse_date(end_date)
+        
+    # Convert to date objects if they are datetime objects
+    if isinstance(start_date, datetime):
+        start_date = start_date.date()
+    if isinstance(end_date, datetime):
+        end_date = end_date.date()
+        
+    if end_date <= start_date:
+        return 0
+        
+    days = 0
+    curr = start_date
+    while curr < end_date:
+        curr += timedelta(days=1)
+        # Exclude Sundays (weekday 6 is Sunday)
+        if curr.weekday() == 6:
+            continue
+        # Exclude holidays if provided
+        if holidays:
+            d_str = curr.strftime("%Y-%m-%d")
+            d_str2 = curr.strftime("%d/%m/%Y")
+            if d_str in holidays or d_str2 in holidays:
+                continue
+        days += 1
+    return days
+
 def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yesterday_str, today_str, start_time_override=None, end_time_override=None):
     start_time = start_time_override if start_time_override else "19:00:00"
     end_time = end_time_override if end_time_override else "19:00:00"
     print(f"Running Daily Evening Flow: {yesterday_str} {start_time} to {today_str} {end_time}")
+    
+    # Load holidays
+    holidays = fetch_holidays()
     
     # 1. Load Despatch Report
     df_desp = load_df(despatch_file)
@@ -1040,10 +1082,9 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
         is_delivered = (mapped_status == 'Delivery Process completed.')
         if is_delivered:
             del_time_obj = parse_date(del_time)
-            aging = (del_time_obj.date() - lr_date_obj.date()).days if lr_date_obj and del_time_obj else 0
+            aging = calculate_aging(lr_date_obj, del_time_obj, holidays)
         else:
-            aging = (end_dt.date() - lr_date_obj.date()).days if lr_date_obj else 0
-        if aging < 0: aging = 0
+            aging = calculate_aging(lr_date_obj, end_dt, holidays)
             
         lr_item = {
             "lr_no": lr_no,
@@ -1122,6 +1163,7 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
             "Driver Name": driver,
             "Supervisor Name": supervisor,
             "LR No": lr_no,
+            "LR Date": lr_date,
             "Consignee": consignee,
             "Destination": destination,
             "Box Qty": box_qty,
@@ -1203,7 +1245,7 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
     
     # 2. Despatch Snapshot Sheet
     ws_snap = wb.create_sheet("Despatch Snapshot")
-    headers = ["Branch", "Despatch No", "Despatch Time", "Driver Name", "Supervisor Name", "LR No", "Consignee", "Destination", "Box Qty", "Current Status", "Delivery Time", "LR Age (Days)"]
+    headers = ["Branch", "Despatch No", "Despatch Time", "Driver Name", "Supervisor Name", "LR No", "LR Date", "Consignee", "Destination", "Box Qty", "Current Status", "Delivery Time", "LR Age (Days)"]
     ws_snap.append(headers)
     for r in despatch_snapshot_rows:
         ws_snap.append([r[h] for h in headers])
@@ -1258,6 +1300,9 @@ def run_daily_evening_report_flow(lr_file, despatch_file, supervisor_map, yester
 
 def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
     print(f"Running Morning Flow: Analyzing deliveries for date {yesterday_str}...")
+    
+    # Load holidays
+    holidays = fetch_holidays()
     
     # 1. Fetch yesterday's snapshot from Supabase REST API
     url = f"{SUPABASE_URL}/rest/v1/daily_despatch_snapshot?despatch_date=eq.{yesterday_str}"
@@ -1430,9 +1475,9 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
         is_delivered = (mapped_status == 'Delivery Process completed.')
         
         if is_delivered:
-            lr_item["aging"] = (del_time_dt.date() - lr_date_dt.date()).days if lr_date_dt and del_time_dt else 0
+            lr_item["aging"] = calculate_aging(lr_date_dt, del_time_dt, holidays)
         else:
-            lr_item["aging"] = (yesterday_dt.date() - lr_date_dt.date()).days if lr_date_dt else 0
+            lr_item["aging"] = calculate_aging(lr_date_dt, yesterday_dt, holidays)
             
         # Accumulate Branch statistics
         if branch not in branch_stats:
@@ -1465,6 +1510,7 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
             "Driver Name": driver,
             "Supervisor Name": supervisor,
             "LR No": lr_no,
+            "LR Date": lr_date,
             "Consignee": consignee,
             "Destination": destination,
             "Box Qty": box_qty,
@@ -1522,7 +1568,7 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
             else:
                 branch = resolve_branch_name(dest_val, "", supervisor_map)
                 
-            open_age = (yesterday_dt.date() - lr_date_dt.date()).days
+            open_age = calculate_aging(lr_date_dt, yesterday_dt, holidays)
             
             open_item = {
                 "lr_no": lr_no,
@@ -1679,7 +1725,7 @@ def run_morning_flow(lr_file, despatch_file, supervisor_map, yesterday_str):
     # Sheet 2: Despatch Snapshot
     df_despatch_snap = pd.DataFrame(despatch_snapshot_rows)
     if df_despatch_snap.empty:
-        df_despatch_snap = pd.DataFrame(columns=["Branch", "Despatch No", "Despatch Date", "Driver Name", "Supervisor Name", "LR No", "Consignee", "Destination", "Box Qty", "Current Status", "Delivery Time", "LR Age (Days)"])
+        df_despatch_snap = pd.DataFrame(columns=["Branch", "Despatch No", "Despatch Date", "Driver Name", "Supervisor Name", "LR No", "LR Date", "Consignee", "Destination", "Box Qty", "Current Status", "Delivery Time", "LR Age (Days)"])
     df_despatch_snap.to_excel(writer, sheet_name="2. Despatch Snapshot", index=False)
     
     # Sheet 3: Open LRs
