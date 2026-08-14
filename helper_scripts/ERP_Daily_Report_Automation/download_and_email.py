@@ -152,17 +152,19 @@ def discover_consignors_and_gdms():
             print(f"Reading active consignors and GDMs from spreadsheet: {s.title}...", flush=True)
             try:
                 worksheets = s.worksheets()
-                # 1. Rate sheet for consignors
-                rate_ws = next((w for w in worksheets if w.title.strip().upper() == "RATE"), None)
-                if rate_ws:
-                    data = rate_ws.get_all_values()
+                # 1. PAID LR sheet for active consignors
+                paid_lr_ws = next((w for w in worksheets if w.title.strip().upper() == "PAID LR"), None)
+                if paid_lr_ws:
+                    data = paid_lr_ws.get_all_values()
                     if len(data) > 1:
-                        headers_upper = [h.strip().upper() for h in data[0]]
-                        c_idx = next((i for i, h in enumerate(headers_upper) if "CONSIGNOR" in h), None)
-                        if c_idx is not None:
-                            for row in data[1:]:
-                                if len(row) > c_idx and row[c_idx].strip():
-                                    consignors.add(row[c_idx].strip())
+                        # Extract from index 4 (consignor column in PAID LR)
+                        for row in data[1:]:
+                            if len(row) > 4 and row[4].strip():
+                                c_name = row[4].strip()
+                                if "," in c_name:
+                                    c_name = c_name.split(",")[0].strip()
+                                if c_name.upper() not in ("CONSIGNOR", ""):
+                                    consignors.add(c_name)
                     time.sleep(1.5)
                 
                 # 2. GDM sheet for GDM numbers
@@ -703,7 +705,16 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                                 page.wait_for_load_state("load")
                                 page.wait_for_timeout(1000)
                                 
-                                page.select_option("#consignor_id", opt_val)
+                                page.evaluate("""(val) => {
+                                     const selectEl = document.querySelector("#consignor_id");
+                                     if (selectEl) {
+                                         selectEl.value = val;
+                                         selectEl.dispatchEvent(new Event('change'));
+                                     }
+                                     if (typeof window.jQuery !== 'undefined') {
+                                         window.jQuery("#consignor_id").trigger("chosen:updated").trigger("change");
+                                     }
+                                 }""", opt_val)
                                 page.fill("#fromDate", from_date_bc)
                                 page.fill("#toDate", to_date_bc)
                                 page.wait_for_timeout(500)
