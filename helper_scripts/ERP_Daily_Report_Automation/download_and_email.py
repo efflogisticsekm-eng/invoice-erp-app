@@ -127,7 +127,18 @@ def discover_consignors_and_gdms():
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
         client = gspread.authorize(creds)
-        all_sheets = client.openall()
+        # Wrapped in a retry loop to handle transient 503 errors
+        all_sheets = []
+        for attempt in range(5):
+            try:
+                all_sheets = client.openall()
+                break
+            except Exception as api_err:
+                if attempt == 4:
+                    raise api_err
+                backoff_secs = (attempt + 1) * 5
+                print(f"Google API Error (attempt {attempt+1}/5): {api_err}. Retrying in {backoff_secs}s...", flush=True)
+                time.sleep(backoff_secs)
         
         branch_prefixes = [
             "CLT NEW Petty Cash",

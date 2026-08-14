@@ -198,7 +198,18 @@ def main():
 
     # 2. Get list of all spreadsheets shared with the service account
     print("Discovering shared spreadsheets on Google Drive...", flush=True)
-    all_spreadsheets = client.openall()
+    # Wrapped in a retry loop to handle transient 503 errors
+    all_spreadsheets = []
+    for attempt in range(5):
+        try:
+            all_spreadsheets = client.openall()
+            break
+        except Exception as api_err:
+            if attempt == 4:
+                raise api_err
+            backoff_secs = (attempt + 1) * 5
+            print(f"Google API Error (attempt {attempt+1}/5): {api_err}. Retrying in {backoff_secs}s...", flush=True)
+            time.sleep(backoff_secs)
     print(f"Found {len(all_spreadsheets)} accessible spreadsheets.", flush=True)
 
     # Locate Purchase Register
