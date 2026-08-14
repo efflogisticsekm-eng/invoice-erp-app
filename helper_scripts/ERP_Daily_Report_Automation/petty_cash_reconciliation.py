@@ -552,12 +552,17 @@ def main():
                     # Rate check for loading/unloading
                     if sheet_lc_uc > 0:
                         rate_rows = cache["Rate"]
-                        if rate_rows:
+                        r_consignor_idx = None
+                        r_consignee_idx = None
+                        r_rate_idx = None
+                        if rate_rows and len(rate_rows) > 0:
                             rate_headers = [h.strip() for h in rate_rows[0]]
-                            r_consignor_idx = rate_headers.index("Consignor")
-                            r_consignee_idx = rate_headers.index("Consignee")
-                            r_rate_idx = rate_headers.index("Rate")
+                            rate_headers_upper = [h.upper() for h in rate_headers]
+                            r_consignor_idx = next((i for i, h in enumerate(rate_headers_upper) if "CONSIGNOR" in h), None)
+                            r_consignee_idx = next((i for i, h in enumerate(rate_headers_upper) if "CONSIGNEE" in h), None)
+                            r_rate_idx = next((i for i, h in enumerate(rate_headers_upper) if "RATE" in h), None)
                             
+                        if rate_rows and r_consignor_idx is not None and r_consignee_idx is not None and r_rate_idx is not None:
                             matched_rate = None
                             erp_consignor = erp_info["consignor"].upper()
                             erp_consignee = erp_info["consignee"].upper()
@@ -633,11 +638,15 @@ def main():
                     allowed_unloading_sum = 0.0
                     
                     rate_rows = cache["Rate"]
-                    if rate_rows:
+                    r_consignor_idx = None
+                    r_consignee_idx = None
+                    r_rate_idx = None
+                    if rate_rows and len(rate_rows) > 0:
                         rate_headers = [h.strip() for h in rate_rows[0]]
-                        r_consignor_idx = rate_headers.index("Consignor")
-                        r_consignee_idx = rate_headers.index("Consignee")
-                        r_rate_idx = rate_headers.index("Rate")
+                        rate_headers_upper = [h.upper() for h in rate_headers]
+                        r_consignor_idx = next((i for i, h in enumerate(rate_headers_upper) if "CONSIGNOR" in h), None)
+                        r_consignee_idx = next((i for i, h in enumerate(rate_headers_upper) if "CONSIGNEE" in h), None)
+                        r_rate_idx = next((i for i, h in enumerate(rate_headers_upper) if "RATE" in h), None)
                         
                     for lr_no in lrs_in_gdm:
                         if lr_no in lr_db:
@@ -645,7 +654,7 @@ def main():
                             if erp_info["status"].upper() == "TO PAY" or "TO PAY" in erp_info["status"].upper():
                                 actual_to_pay_sum += erp_info["total_fright"]
                                 
-                            if rate_rows:
+                            if rate_rows and r_consignor_idx is not None and r_consignee_idx is not None and r_rate_idx is not None:
                                 matched_rate = 0.0
                                 erp_consignor = erp_info["consignor"].upper()
                                 erp_consignee = erp_info["consignee"].upper()
