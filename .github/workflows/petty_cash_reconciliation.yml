@@ -40,7 +40,15 @@ jobs:
         ERP_USERNAME: ${{ secrets.ERP_USERNAME }}
         ERP_PASSWORD: ${{ secrets.ERP_PASSWORD }}
       run: |
-        python helper_scripts/ERP_Daily_Report_Automation/inspect_gdm_html.py
+        python helper_scripts/ERP_Daily_Report_Automation/inspect_gdm_playwright.py
+
+    - name: Upload GDM Print View Screenshot
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: gdm-print-view
+        path: |
+          gdm_35530_view.png
 
     - name: Download Raw ERP Reports
       env:
