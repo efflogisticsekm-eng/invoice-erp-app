@@ -575,7 +575,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     print("Error extracting UI times:", e)
             
             # 2. Download LR Report
-            if mode in ("morning", "daily_evening_report", "afternoon_open_lrs"):
+            if mode in ("morning", "daily_evening_report", "afternoon_open_lrs", "reconcile"):
                 try:
                     print("Opening a fresh page for LR report download to avoid context lockups...")
                     page.close()
@@ -620,7 +620,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                         print("Re-login navigation timeout. Current URL:", page.url)
                 
                 # Convert dates to DD-MM-YYYY for input fields
-                if mode in ("daily_evening_report", "afternoon_open_lrs"):
+                if mode in ("daily_evening_report", "afternoon_open_lrs", "reconcile"):
                     from_dt = datetime.strptime(from_date_str, "%Y-%m-%d") - timedelta(days=60)
                 else:
                     from_dt = datetime.strptime(from_date_str, "%Y-%m-%d")
@@ -823,7 +823,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                         json.dump(gdm_details, json_f, indent=4)
                     print(f"Saved GDM details map to: {gdm_json_path}", flush=True)
                  
-                return lr_file_path if mode in ("morning", "daily_evening_report", "afternoon_open_lrs") else None, despatch_file_path if mode != "afternoon_open_lrs" else None, from_date_str, to_date_str
+                return lr_file_path if mode in ("morning", "daily_evening_report", "afternoon_open_lrs", "reconcile") else None, despatch_file_path if mode != "afternoon_open_lrs" else None, from_date_str, to_date_str
             
         except Exception as e:
             print("Error downloading from ERP:", e)
@@ -2281,7 +2281,7 @@ def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_
 # 9. Main orchestrator
 def main():
     parser = argparse.ArgumentParser(description="ERP Dispatch & Delivery Performance Report")
-    parser.add_argument("--mode", choices=["evening", "morning", "daily_evening_report", "afternoon_open_lrs"], required=True, help="Run mode")
+    parser.add_argument("--mode", choices=["evening", "morning", "daily_evening_report", "afternoon_open_lrs", "reconcile"], required=True, help="Run mode")
     parser.add_argument("--from-date", help="Override from date (YYYY-MM-DD)")
     parser.add_argument("--to-date", help="Override to date (YYYY-MM-DD)")
     parser.add_argument("--from-time", help="Override from time (HH:MM:SS)")
@@ -2374,6 +2374,11 @@ def main():
             print("Afternoon Open LRs flow execution completed successfully.")
         else:
             print("Failed to download LR file. Aborting.")
+            
+    elif args.mode == "reconcile":
+        # Download reports needed for reconciliation (raw LR, raw Despatch, bill clear reports, and GDM details)
+        lr_file, despatch_file, from_date, to_date = download_erp_reports(mode="reconcile", from_override=args.from_date, to_override=args.to_date)
+        print("Reconciliation downloads completed successfully.")
 
 if __name__ == "__main__":
     main()
