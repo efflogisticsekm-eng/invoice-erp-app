@@ -15,6 +15,8 @@ from playwright.sync_api import sync_playwright
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from PIL import Image, ImageDraw, ImageFont
+import gspread
+from google.oauth2.service_account import Credentials
 
 # 1. Load Configurations from Env
 ERP_USERNAME = os.getenv("ERP_USERNAME")
@@ -110,6 +112,81 @@ def load_df(file_path):
             except Exception:
                 continue
         return pd.read_csv(file_path)
+
+def discover_consignors_and_gdms():
+    print("Discovering active consignors and GDMs from Google Sheets...", flush=True)
+    consignors = set()
+    gdms = set()
+    
+    creds_path = "ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
+    if not os.path.exists(creds_path):
+        print(f"Google credentials not found at {creds_path}. Skipping sheet discovery.", flush=True)
+        return consignors, gdms
+        
+    try:
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
+        client = gspread.authorize(creds)
+        all_sheets = client.openall()
+        
+        branch_prefixes = [
+            "CLT NEW Petty Cash",
+            "MLPM Petty Cash",
+            "KSD NEW Petty Cash",
+            "NEW Petty Cash - EDATHALA",
+            "KNR NEW Petty Cash",
+            "KLM NEW Petty Cash",
+            "KOTTAYAM Petty Cash -"
+        ]
+        
+        for s in all_sheets:
+            title = s.title.strip().upper()
+            is_branch = False
+            for prefix in branch_prefixes:
+                if title.startswith(prefix.upper()):
+                    is_branch = True
+                    break
+            if not is_branch:
+                continue
+                
+            print(f"Reading active consignors and GDMs from spreadsheet: {s.title}...", flush=True)
+            try:
+                worksheets = s.worksheets()
+                # 1. Rate sheet for consignors
+                rate_ws = next((w for w in worksheets if w.title.strip().upper() == "RATE"), None)
+                if rate_ws:
+                    data = rate_ws.get_all_values()
+                    if len(data) > 1:
+                        headers_upper = [h.strip().upper() for h in data[0]]
+                        c_idx = next((i for i, h in enumerate(headers_upper) if "CONSIGNOR" in h), None)
+                        if c_idx is not None:
+                            for row in data[1:]:
+                                if len(row) > c_idx and row[c_idx].strip():
+                                    consignors.add(row[c_idx].strip())
+                    time.sleep(1.5)
+                
+                # 2. GDM sheet for GDM numbers
+                gdm_ws = next((w for w in worksheets if w.title.strip().upper() == "GDM"), None)
+                if gdm_ws:
+                    data = gdm_ws.get_all_values()
+                    if len(data) > 4: # Data starts at row 5 (index 4)
+                        headers_upper = [h.strip().upper() for h in data[3]] # Headers at row 4
+                        gdm_idx = next((i for i, h in enumerate(headers_upper) if "GDM" in h or "DESPATCH NO" in h or "DESPATCH_NO" in h or "DESPATCH" in h), None)
+                        if gdm_idx is not None:
+                            for row in data[4:]:
+                                if len(row) > gdm_idx and row[gdm_idx].strip():
+                                    val = row[gdm_idx].strip()
+                                    if val.upper() not in ("GDM NO", "TOTAL", "SUB TOTAL", ""):
+                                        gdms.add(val)
+                    time.sleep(1.5)
+            except Exception as sheet_err:
+                print(f"Error reading worksheets of {s.title}: {sheet_err}", flush=True)
+                time.sleep(1.5)
+    except Exception as e:
+        print(f"Error in Google Sheets discovery: {e}", flush=True)
+        
+    print(f"Discovery complete. Found {len(consignors)} consignors, {len(gdms)} GDMs.", flush=True)
+    return consignors, gdms
 
 # 2. Date and String Helper Utilities
 def clean_val(val, default=""):
@@ -565,8 +642,177 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 download_lr = download_info_lr.value
                 download_lr.save_as(lr_file_path)
                 print("LR raw report saved to:", lr_file_path)
-                
-            return lr_file_path if mode in ("morning", "daily_evening_report", "afternoon_open_lrs") else None, despatch_file_path if mode != "afternoon_open_lrs" else None, from_date_str, to_date_str
+                 
+                # --- NEW: Discover Active Consignors and GDMs from Google Sheets ---
+                consignors, gdms = discover_consignors_and_gdms()
+                 
+                # --- NEW: Download Bill Clear Excel Reports for Active Consignors ---
+                if consignors:
+                    print("Navigating to Bill Clear page for exports...", flush=True)
+                    bill_clear_url = "https://eff.aadhocc.in/eff_2021/main/bill_clear/"
+                    try:
+                        page.goto(bill_clear_url)
+                        page.wait_for_load_state("load")
+                        page.wait_for_timeout(3000)
+                        
+                        # Check session
+                        if page.locator("#login_user_id").count() > 0 or "login" in page.url.lower():
+                            print("Session lost on Bill Clear navigation, re-logging in...")
+                            page.goto("https://eff.aadhocc.in/eff_2021/login")
+                            page.wait_for_load_state("load")
+                            page.fill("#login_user_id", ERP_USERNAME)
+                            page.fill("#login_password", ERP_PASSWORD)
+                            page.locator("button[type='submit']").click()
+                            page.wait_for_timeout(3000)
+                            page.goto(bill_clear_url)
+                            page.wait_for_load_state("load")
+                            page.wait_for_timeout(3000)
+                        
+                        # Map dropdown option text to value
+                        consignor_id_map = {}
+                        options = page.locator("#consignor_id option").all()
+                        for opt in options:
+                            val = opt.get_attribute("value") or ""
+                            text = opt.inner_text().strip().upper()
+                            if val:
+                                consignor_id_map[text] = val
+                        
+                        print(f"Mapped {len(consignor_id_map)} consignors from ERP dropdown.", flush=True)
+                        
+                        # Calculate date range for bill clear (last 60 days to match any active sheet)
+                        from_date_bc = (target_date - timedelta(days=60)).strftime("%d-%m-%Y")
+                        to_date_bc = target_date.strftime("%d-%m-%Y")
+                        
+                        for cons_name in sorted(list(consignors)):
+                            cons_name_upper = cons_name.strip().upper()
+                            opt_val = consignor_id_map.get(cons_name_upper)
+                            if not opt_val:
+                                # Try partial matching
+                                for map_text, map_val in consignor_id_map.items():
+                                    if cons_name_upper in map_text or map_text in cons_name_upper:
+                                        opt_val = map_val
+                                        break
+                            
+                            if not opt_val:
+                                print(f"  [Warning] Consignor '{cons_name}' not found in ERP dropdown map. Skipping.", flush=True)
+                                continue
+                                
+                            print(f"  Downloading Bill Clear for '{cons_name}' (ID: {opt_val})...", flush=True)
+                            try:
+                                page.goto(bill_clear_url)
+                                page.wait_for_load_state("load")
+                                page.wait_for_timeout(1000)
+                                
+                                page.select_option("#consignor_id", opt_val)
+                                page.fill("#fromDate", from_date_bc)
+                                page.fill("#toDate", to_date_bc)
+                                page.wait_for_timeout(500)
+                                
+                                search_btn = page.locator("input[type='submit'][name='search']").first
+                                search_btn.click()
+                                page.wait_for_timeout(3000)
+                                
+                                excel_btn = page.locator("#excel_new")
+                                with page.expect_download(timeout=30000) as bc_download_info:
+                                    excel_btn.click(no_wait_after=True)
+                                bc_download = bc_download_info.value
+                                bc_file_path = os.path.join(DOWNLOAD_DIR, f"bill_clear_{opt_val}.xlsx")
+                                bc_download.save_as(bc_file_path)
+                                print(f"    Saved Bill Clear to: {bc_file_path}", flush=True)
+                            except Exception as bc_err:
+                                print(f"    Failed to download Bill Clear for '{cons_name}': {bc_err}", flush=True)
+                    except Exception as bc_page_err:
+                        print(f"  Failed to load Bill Clear page: {bc_page_err}", flush=True)
+                 
+                # --- NEW: Scrape GDM Print Layouts for Active GDMs ---
+                if gdms:
+                    print(f"Scraping print layouts for {len(gdms)} active GDMs...", flush=True)
+                    gdm_details = {}
+                    
+                    # Extract cookies to use with requests for fast fetching
+                    session = requests.Session()
+                    for cookie in context.cookies():
+                        session.cookies.set(cookie['name'], cookie['value'], domain=cookie['domain'])
+                    
+                    for gdm_no in sorted(list(gdms)):
+                        gdm_url = f"https://eff.aadhocc.in/eff_2021/main/effdespatch/view/{gdm_no}"
+                        print(f"  Scraping GDM {gdm_no} print layout: {gdm_url}...", flush=True)
+                        try:
+                            res = session.get(gdm_url, timeout=15)
+                            if res.status_code == 200:
+                                from bs4 import BeautifulSoup
+                                soup = BeautifulSoup(res.text, "html.parser")
+                                table = soup.find("table")
+                                if table:
+                                    rows = table.find_all("tr")
+                                    lr_entries = []
+                                    t_headers = []
+                                    if len(rows) > 0:
+                                        t_headers = [th.get_text(strip=True).upper() for th in rows[0].find_all(["td", "th"])]
+                                    
+                                    lr_no_idx = 1
+                                    consignor_idx = 2
+                                    consignee_idx = 3
+                                    dest_idx = 4
+                                    acc_pay_idx = 6
+                                    topay_idx = 7
+                                    paid_idx = 8
+                                    boxes_idx = 10
+                                    
+                                    if t_headers:
+                                        lr_no_idx = next((i for i, h in enumerate(t_headers) if "LRNO" in h or "LR NO" in h or "LR_NO" in h), 1)
+                                        consignor_idx = next((i for i, h in enumerate(t_headers) if "CONSIGNOR" in h), 2)
+                                        consignee_idx = next((i for i, h in enumerate(t_headers) if "CONSIGNEE" in h), 3)
+                                        dest_idx = next((i for i, h in enumerate(t_headers) if "DESTINATION" in h), 4)
+                                        acc_pay_idx = next((i for i, h in enumerate(t_headers) if "ACCOUNT PAY" in h or "ACCOUNT_PAY" in h), 6)
+                                        topay_idx = next((i for i, h in enumerate(t_headers) if "TOPAY" in h or "TO PAY" in h or "TO_PAY" in h), 7)
+                                        paid_idx = next((i for i, h in enumerate(t_headers) if "PAID" in h), 8)
+                                        boxes_idx = next((i for i, h in enumerate(t_headers) if "BOXES" in h or "BOX" in h), 10)
+                                    
+                                    for row in rows[1:]:
+                                        cells = [td.get_text(strip=True) for td in row.find_all(["td", "th"])]
+                                        if len(cells) > max(lr_no_idx, topay_idx, paid_idx):
+                                            lr_no = cells[lr_no_idx].strip()
+                                            if lr_no and not lr_no.upper().startswith("TOTAL"):
+                                                try:
+                                                    topay_val = float(cells[topay_idx].replace(",", "")) if cells[topay_idx] else 0.0
+                                                    paid_val = float(cells[paid_idx].replace(",", "")) if cells[paid_idx] else 0.0
+                                                    acc_pay_val = float(cells[acc_pay_idx].replace(",", "")) if cells[acc_pay_idx] else 0.0
+                                                    boxes_val = float(cells[boxes_idx].replace(",", "")) if cells[boxes_idx] else 0.0
+                                                except ValueError:
+                                                    topay_val = 0.0
+                                                    paid_val = 0.0
+                                                    acc_pay_val = 0.0
+                                                    boxes_val = 0.0
+                                                    
+                                                lr_entries.append({
+                                                    "lr_no": lr_no,
+                                                    "consignor": cells[consignor_idx] if len(cells) > consignor_idx else "",
+                                                    "consignee": cells[consignee_idx] if len(cells) > consignee_idx else "",
+                                                    "destination": cells[dest_idx] if len(cells) > dest_idx else "",
+                                                    "account_pay": acc_pay_val,
+                                                    "topay": topay_val,
+                                                    "paid": paid_val,
+                                                    "boxes": boxes_val
+                                                })
+                                    
+                                    gdm_details[gdm_no] = lr_entries
+                                    print(f"    Scraped GDM {gdm_no} successfully: {len(lr_entries)} LRs found.", flush=True)
+                                else:
+                                    print(f"    No table found on view page for GDM {gdm_no}.", flush=True)
+                            else:
+                                print(f"    Failed to fetch GDM {gdm_no}: Status {res.status_code}", flush=True)
+                        except Exception as gdm_err:
+                            print(f"    Error scraping GDM {gdm_no}: {gdm_err}", flush=True)
+                            
+                    # Save GDM details to json file
+                    gdm_json_path = os.path.join(DOWNLOAD_DIR, "gdm_details.json")
+                    import json
+                    with open(gdm_json_path, "w", encoding="utf-8") as json_f:
+                        json.dump(gdm_details, json_f, indent=4)
+                    print(f"Saved GDM details map to: {gdm_json_path}", flush=True)
+                 
+                return lr_file_path if mode in ("morning", "daily_evening_report", "afternoon_open_lrs") else None, despatch_file_path if mode != "afternoon_open_lrs" else None, from_date_str, to_date_str
             
         except Exception as e:
             print("Error downloading from ERP:", e)

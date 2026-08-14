@@ -35,21 +35,6 @@ jobs:
         mkdir -p "ERP nxt Data collection/Invoice_Extractor_Tool"
         echo "$GOOGLE_CREDENTIALS_JSON" > "ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
 
-    - name: Inspect GDM HTML Print View
-      env:
-        ERP_USERNAME: ${{ secrets.ERP_USERNAME }}
-        ERP_PASSWORD: ${{ secrets.ERP_PASSWORD }}
-      run: |
-        python helper_scripts/ERP_Daily_Report_Automation/inspect_gdm_playwright.py
-
-    - name: Upload GDM Print View Screenshot
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: gdm-print-view
-        path: |
-          gdm_35530_view.png
-
     - name: Download Raw ERP Reports
       env:
         ERP_USERNAME: ${{ secrets.ERP_USERNAME }}
@@ -57,7 +42,7 @@ jobs:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       run: |
-        # Download morning raw reports (which fetches latest lr_raw and despatch_raw)
+        # Download raw reports (fetches latest lr_raw, despatch_raw, bill_clear and gdm_details)
         python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode morning
 
     - name: Run Petty Cash Reconciliation Script

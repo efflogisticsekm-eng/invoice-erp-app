@@ -344,6 +344,65 @@ def main():
                 if gdm not in gdm_lrs:
                     gdm_lrs[gdm] = []
                 gdm_lrs[gdm].append(lr)
+ 
+    # Load bill_clear exports
+    bill_clear_db = {}
+    import glob
+    bc_files = glob.glob(os.path.join(DOWNLOAD_DIR, "bill_clear_*.xlsx"))
+    print(f"Loading {len(bc_files)} bill clearance report files...", flush=True)
+    for bf in bc_files:
+        try:
+            df_bc = load_df(bf)
+            if df_bc.empty:
+                continue
+            df_bc.columns = [str(c).strip().upper() for c in df_bc.columns]
+            
+            lr_col = next((c for c in df_bc.columns if c in ['LR NUMBER', 'LR_NUMBER', 'LR NO', 'LRNO', 'LR']), None)
+            fright_col = next((c for c in df_bc.columns if c in ['FREIGHT', 'TOTAL FRIGHT', 'FRIGHT AMOUNT']), None)
+            topay_col = next((c for c in df_bc.columns if c in ['TO PAY', 'TOPAY', 'TO_PAY']), None)
+            qty_col = next((c for c in df_bc.columns if c in ['QUANTITY', 'QTY', 'BOX COUNT', 'BOXES']), None)
+            
+            for _, r in df_bc.iterrows():
+                lr_no = clean_val(r[lr_col]) if lr_col else ""
+                if lr_no:
+                    try:
+                        fright_val = float(clean_val(r[fright_col], "0").replace('INR', '').replace(',', '').strip())
+                    except ValueError:
+                        fright_val = 0.0
+                    try:
+                        topay_val = float(clean_val(r[topay_col], "0").replace('INR', '').replace(',', '').strip())
+                    except ValueError:
+                        topay_val = 0.0
+                    try:
+                        qty_val = int(float(clean_val(r[qty_col], "0")))
+                    except ValueError:
+                        qty_val = 0
+                        
+                    bill_clear_db[lr_no] = {
+                        "total_fright": fright_val,
+                        "topay": topay_val,
+                        "box_qty": qty_val,
+                        "status": "PAID" if topay_val == 0.0 else "TO PAY",
+                        "consignor": clean_val(r.get('CONSIGNOR', '')),
+                        "consignee": clean_val(r.get('CONSIGNEE', '')),
+                        "destination": clean_val(r.get('DESTINATION', ''))
+                    }
+        except Exception as bc_err:
+            print(f"Error parsing bill clear file {bf}: {bc_err}", flush=True)
+            
+    print(f"Loaded {len(bill_clear_db)} cleared LRs from bill_clear files.", flush=True)
+
+    # Load GDM details scraped from view print layouts
+    gdm_scraped_db = {}
+    gdm_json_path = os.path.join(DOWNLOAD_DIR, "gdm_details.json")
+    if os.path.exists(gdm_json_path):
+        try:
+            import json
+            with open(gdm_json_path, "r", encoding="utf-8") as json_f:
+                gdm_scraped_db = json.load(json_f)
+            print(f"Loaded {len(gdm_scraped_db)} scraped GDMs from gdm_details.json", flush=True)
+        except Exception as json_err:
+            print(f"Error loading gdm_details.json: {json_err}", flush=True)
 
     # 5. Core Reconciliation Engine
     discrepancies_funding = []
@@ -533,8 +592,14 @@ def main():
                 except ValueError:
                     continue
 
-                if lr_no in lr_db:
+                # Look up first in bill clearance DB, then standard LR DB
+                erp_info = None
+                if lr_no in bill_clear_db:
+                    erp_info = bill_clear_db[lr_no]
+                elif lr_no in lr_db:
                     erp_info = lr_db[lr_no]
+                    
+                if erp_info:
                     actual_freight = erp_info["total_fright"]
                     
                     if abs(sheet_lr_amt - actual_freight) > 2.0:
@@ -631,7 +696,76 @@ def main():
                 except ValueError:
                     continue
                     
-                if gdm_no in gdm_lrs:
+                if gdm_no in gdm_scraped_db:
+                    lr_list = gdm_scraped_db[gdm_no]
+                    
+                    base_to_pay_sum = sum(item["topay"] for item in lr_list)
+                    actual_to_pay_sum = round(base_to_pay_sum * 1.18, 2)
+                    
+                    # Accept either base amount or GST-inclusive amount
+                    final_to_pay_sum = actual_to_pay_sum
+                    if abs(sheet_to_pay - base_to_pay_sum) <= 2.0 and abs(sheet_to_pay - actual_to_pay_sum) > 2.0:
+                        final_to_pay_sum = base_to_pay_sum
+                    
+                    allowed_unloading_sum = 0.0
+                    rate_rows = cache["Rate"]
+                    r_consignor_idx = None
+                    r_consignee_idx = None
+                    r_rate_idx = None
+                    if rate_rows and len(rate_rows) > 0:
+                        rate_headers = [h.strip() for h in rate_rows[0]]
+                        rate_headers_upper = [h.upper() for h in rate_headers]
+                        r_consignor_idx = next((i for i, h in enumerate(rate_headers_upper) if "CONSIGNOR" in h), None)
+                        r_consignee_idx = next((i for i, h in enumerate(rate_headers_upper) if "CONSIGNEE" in h), None)
+                        r_rate_idx = next((i for i, h in enumerate(rate_headers_upper) if "RATE" in h), None)
+                        
+                    for item in lr_list:
+                        if rate_rows and r_consignor_idx is not None and r_consignee_idx is not None and r_rate_idx is not None:
+                            matched_rate = 0.0
+                            erp_consignor = item["consignor"].upper()
+                            erp_consignee = item["consignee"].upper()
+                            
+                            for rate_row in rate_rows[1:]:
+                                if len(rate_row) <= max(r_consignor_idx, r_consignee_idx, r_rate_idx):
+                                    continue
+                                row_consignor = rate_row[r_consignor_idx].strip().upper()
+                                row_consignee = rate_row[r_consignee_idx].strip().upper()
+                                
+                                if row_consignor in erp_consignor and row_consignee in erp_consignee:
+                                    try:
+                                        matched_rate = float(rate_row[r_rate_idx].strip())
+                                    except ValueError:
+                                        matched_rate = 0.0
+                                    break
+                            allowed_unloading_sum += item["boxes"] * matched_rate
+                            
+                    # Audit To-Pay
+                    if abs(sheet_to_pay - final_to_pay_sum) > 5.0:
+                        discrepancies_gdm.append({
+                            "Sheet": title,
+                            "Row": row_idx + 5,
+                            "GDM No": gdm_no,
+                            "Type": "To-Pay Mismatch",
+                            "Sheet Value": sheet_to_pay,
+                            "ERP Value": final_to_pay_sum,
+                            "Status": "TO-PAY MISMATCH",
+                            "Details": f"To-Pay sum in sheet ({sheet_to_pay}) does not match ERP dispatches (GST-inclusive: {actual_to_pay_sum}, Base: {base_to_pay_sum})"
+                        })
+                        
+                    # Audit Unloading
+                    if sheet_unloading > allowed_unloading_sum + 5.0 and allowed_unloading_sum > 0:
+                        discrepancies_gdm.append({
+                            "Sheet": title,
+                            "Row": row_idx + 5,
+                            "GDM No": gdm_no,
+                            "Type": "Excess Unloading",
+                            "Sheet Value": sheet_unloading,
+                            "ERP Value": allowed_unloading_sum,
+                            "Status": "EXCESS UNLOADING",
+                            "Details": f"Entered unloading ({sheet_unloading}) exceeds allowed limit ({allowed_unloading_sum})"
+                        })
+                        
+                elif gdm_no in gdm_lrs:
                     lrs_in_gdm = gdm_lrs[gdm_no]
                     
                     actual_to_pay_sum = 0.0
@@ -649,10 +783,23 @@ def main():
                         r_rate_idx = next((i for i, h in enumerate(rate_headers_upper) if "RATE" in h), None)
                         
                     for lr_no in lrs_in_gdm:
-                        if lr_no in lr_db:
+                        erp_info = None
+                        if lr_no in bill_clear_db:
+                            erp_info = bill_clear_db[lr_no]
+                        elif lr_no in lr_db:
                             erp_info = lr_db[lr_no]
-                            if erp_info["status"].upper() == "TO PAY" or "TO PAY" in erp_info["status"].upper():
-                                actual_to_pay_sum += erp_info["total_fright"]
+                            
+                        if erp_info:
+                            is_to_pay = False
+                            if "topay" in erp_info:
+                                is_to_pay = erp_info["topay"] > 0.0
+                                freight_amt = erp_info["topay"]
+                            else:
+                                is_to_pay = erp_info["status"].upper() == "TO PAY" or "TO PAY" in erp_info["status"].upper()
+                                freight_amt = erp_info["total_fright"]
+                                
+                            if is_to_pay:
+                                actual_to_pay_sum += freight_amt
                                 
                             if rate_rows and r_consignor_idx is not None and r_consignee_idx is not None and r_rate_idx is not None:
                                 matched_rate = 0.0
@@ -673,16 +820,21 @@ def main():
                                         break
                                 allowed_unloading_sum += erp_info["box_qty"] * matched_rate
                                 
-                    if abs(sheet_to_pay - actual_to_pay_sum) > 5.0: 
+                    actual_to_pay_sum_gst = round(actual_to_pay_sum * 1.18, 2)
+                    final_to_pay_sum = actual_to_pay_sum_gst
+                    if abs(sheet_to_pay - actual_to_pay_sum) <= 2.0 and abs(sheet_to_pay - actual_to_pay_sum_gst) > 2.0:
+                        final_to_pay_sum = actual_to_pay_sum
+                        
+                    if abs(sheet_to_pay - final_to_pay_sum) > 5.0: 
                         discrepancies_gdm.append({
                             "Sheet": title,
                             "Row": row_idx + 5,
                             "GDM No": gdm_no,
                             "Type": "To-Pay Mismatch",
                             "Sheet Value": sheet_to_pay,
-                            "ERP Value": actual_to_pay_sum,
+                            "ERP Value": final_to_pay_sum,
                             "Status": "TO-PAY MISMATCH",
-                            "Details": f"To-Pay sum in sheet ({sheet_to_pay}) does not match ERP dispatches ({actual_to_pay_sum})"
+                            "Details": f"To-Pay sum in sheet ({sheet_to_pay}) does not match ERP dispatches (GST-inclusive: {actual_to_pay_sum_gst}, Base: {actual_to_pay_sum})"
                         })
                         
                     if sheet_unloading > allowed_unloading_sum + 5.0 and allowed_unloading_sum > 0:
