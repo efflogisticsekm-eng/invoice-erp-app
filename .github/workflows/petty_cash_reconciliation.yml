@@ -25,7 +25,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r helper_scripts/ERP_Daily_Report_Automation/requirements.txt
-        pip install gspread google-auth
+        pip install gspread google-auth beautifulsoup4
         playwright install --with-deps chromium
 
     - name: Create Google Credentials File
@@ -35,20 +35,12 @@ jobs:
         mkdir -p "ERP nxt Data collection/Invoice_Extractor_Tool"
         echo "$GOOGLE_CREDENTIALS_JSON" > "ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
 
-    - name: Inspect GDM Print Links
+    - name: Inspect GDM HTML Print View
       env:
         ERP_USERNAME: ${{ secrets.ERP_USERNAME }}
         ERP_PASSWORD: ${{ secrets.ERP_PASSWORD }}
       run: |
-        python helper_scripts/ERP_Daily_Report_Automation/inspect_effdespatch_links.py
-
-    - name: Upload GDM Search Screenshot
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: gdm-search-results
-        path: |
-          effdespatch_search_35530.png
+        python helper_scripts/ERP_Daily_Report_Automation/inspect_gdm_html.py
 
     - name: Download Raw ERP Reports
       env:
