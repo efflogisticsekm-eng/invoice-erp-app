@@ -35,6 +35,20 @@ jobs:
         mkdir -p "ERP nxt Data collection/Invoice_Extractor_Tool"
         echo "$GOOGLE_CREDENTIALS_JSON" > "ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
 
+    - name: Inspect Bill Clear Page
+      env:
+        ERP_USERNAME: ${{ secrets.ERP_USERNAME }}
+        ERP_PASSWORD: ${{ secrets.ERP_PASSWORD }}
+      run: |
+        python helper_scripts/ERP_Daily_Report_Automation/inspect_bill_clear.py
+
+    - name: Upload Bill Clear Screenshot
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: bill-clear-debug
+        path: bill_clear_screenshot.png
+
     - name: Download Raw ERP Reports
       env:
         ERP_USERNAME: ${{ secrets.ERP_USERNAME }}
