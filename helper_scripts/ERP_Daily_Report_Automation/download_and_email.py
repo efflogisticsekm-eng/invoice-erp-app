@@ -363,7 +363,8 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
         to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
     else:
         yesterday = target_date - timedelta(days=1)
-        from_date_str = from_override if from_override else (yesterday - timedelta(days=30)).strftime("%Y-%m-%d")
+        days_back = 60 if mode == "reconcile" else 30
+        from_date_str = from_override if from_override else (yesterday - timedelta(days=days_back)).strftime("%Y-%m-%d")
         to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
         
     print(f"Date range resolved: fromDate={from_date_str}, toDate={to_date_str}")
@@ -748,82 +749,77 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                  
                 # --- NEW: Scrape GDM Print Layouts for Active GDMs ---
                 if gdms:
-                    print(f"Scraping print layouts for {len(gdms)} active GDMs...", flush=True)
+                    print(f"Scraping print layouts for {len(gdms)} active GDMs using Playwright...", flush=True)
                     gdm_details = {}
-                    
-                    # Extract cookies to use with requests for fast fetching
-                    session = requests.Session()
-                    for cookie in context.cookies():
-                        session.cookies.set(cookie['name'], cookie['value'], domain=cookie['domain'])
                     
                     for gdm_no in sorted(list(gdms)):
                         gdm_url = f"https://eff.aadhocc.in/eff_2021/main/effdespatch/view/{gdm_no}"
                         print(f"  Scraping GDM {gdm_no} print layout: {gdm_url}...", flush=True)
                         try:
-                            res = session.get(gdm_url, timeout=15)
-                            if res.status_code == 200:
-                                from bs4 import BeautifulSoup
-                                soup = BeautifulSoup(res.text, "html.parser")
-                                table = soup.find("table")
-                                if table:
-                                    rows = table.find_all("tr")
-                                    lr_entries = []
-                                    t_headers = []
-                                    if len(rows) > 0:
-                                        t_headers = [th.get_text(strip=True).upper() for th in rows[0].find_all(["td", "th"])]
-                                    
-                                    lr_no_idx = 1
-                                    consignor_idx = 2
-                                    consignee_idx = 3
-                                    dest_idx = 4
-                                    acc_pay_idx = 6
-                                    topay_idx = 7
-                                    paid_idx = 8
-                                    boxes_idx = 10
-                                    
-                                    if t_headers:
-                                        lr_no_idx = next((i for i, h in enumerate(t_headers) if "LRNO" in h or "LR NO" in h or "LR_NO" in h), 1)
-                                        consignor_idx = next((i for i, h in enumerate(t_headers) if "CONSIGNOR" in h), 2)
-                                        consignee_idx = next((i for i, h in enumerate(t_headers) if "CONSIGNEE" in h), 3)
-                                        dest_idx = next((i for i, h in enumerate(t_headers) if "DESTINATION" in h), 4)
-                                        acc_pay_idx = next((i for i, h in enumerate(t_headers) if "ACCOUNT PAY" in h or "ACCOUNT_PAY" in h), 6)
-                                        topay_idx = next((i for i, h in enumerate(t_headers) if "TOPAY" in h or "TO PAY" in h or "TO_PAY" in h), 7)
-                                        paid_idx = next((i for i, h in enumerate(t_headers) if "PAID" in h), 8)
-                                        boxes_idx = next((i for i, h in enumerate(t_headers) if "BOXES" in h or "BOX" in h), 10)
-                                    
-                                    for row in rows[1:]:
-                                        cells = [td.get_text(strip=True) for td in row.find_all(["td", "th"])]
-                                        if len(cells) > max(lr_no_idx, topay_idx, paid_idx):
-                                            lr_no = cells[lr_no_idx].strip()
-                                            if lr_no and not lr_no.upper().startswith("TOTAL"):
-                                                try:
-                                                    topay_val = float(cells[topay_idx].replace(",", "")) if cells[topay_idx] else 0.0
-                                                    paid_val = float(cells[paid_idx].replace(",", "")) if cells[paid_idx] else 0.0
-                                                    acc_pay_val = float(cells[acc_pay_idx].replace(",", "")) if cells[acc_pay_idx] else 0.0
-                                                    boxes_val = float(cells[boxes_idx].replace(",", "")) if cells[boxes_idx] else 0.0
-                                                except ValueError:
-                                                    topay_val = 0.0
-                                                    paid_val = 0.0
-                                                    acc_pay_val = 0.0
-                                                    boxes_val = 0.0
-                                                    
-                                                lr_entries.append({
-                                                    "lr_no": lr_no,
-                                                    "consignor": cells[consignor_idx] if len(cells) > consignor_idx else "",
-                                                    "consignee": cells[consignee_idx] if len(cells) > consignee_idx else "",
-                                                    "destination": cells[dest_idx] if len(cells) > dest_idx else "",
-                                                    "account_pay": acc_pay_val,
-                                                    "topay": topay_val,
-                                                    "paid": paid_val,
-                                                    "boxes": boxes_val
-                                                })
-                                    
-                                    gdm_details[gdm_no] = lr_entries
-                                    print(f"    Scraped GDM {gdm_no} successfully: {len(lr_entries)} LRs found.", flush=True)
-                                else:
-                                    print(f"    No table found on view page for GDM {gdm_no}.", flush=True)
+                            page.goto(gdm_url)
+                            page.wait_for_load_state("load")
+                            html_content = page.content()
+                            
+                            from bs4 import BeautifulSoup
+                            soup = BeautifulSoup(html_content, "html.parser")
+                            table = soup.find("table")
+                            if table:
+                                rows = table.find_all("tr")
+                                lr_entries = []
+                                t_headers = []
+                                if len(rows) > 0:
+                                    t_headers = [th.get_text(strip=True).upper() for th in rows[0].find_all(["td", "th"])]
+                                
+                                lr_no_idx = 1
+                                consignor_idx = 2
+                                consignee_idx = 3
+                                dest_idx = 4
+                                acc_pay_idx = 6
+                                topay_idx = 7
+                                paid_idx = 8
+                                boxes_idx = 10
+                                
+                                if t_headers:
+                                    lr_no_idx = next((i for i, h in enumerate(t_headers) if "LRNO" in h or "LR NO" in h or "LR_NO" in h), 1)
+                                    consignor_idx = next((i for i, h in enumerate(t_headers) if "CONSIGNOR" in h), 2)
+                                    consignee_idx = next((i for i, h in enumerate(t_headers) if "CONSIGNEE" in h), 3)
+                                    dest_idx = next((i for i, h in enumerate(t_headers) if "DESTINATION" in h), 4)
+                                    acc_pay_idx = next((i for i, h in enumerate(t_headers) if "ACCOUNT PAY" in h or "ACCOUNT_PAY" in h), 6)
+                                    topay_idx = next((i for i, h in enumerate(t_headers) if "TOPAY" in h or "TO PAY" in h or "TO_PAY" in h), 7)
+                                    paid_idx = next((i for i, h in enumerate(t_headers) if "PAID" in h), 8)
+                                    boxes_idx = next((i for i, h in enumerate(t_headers) if "BOXES" in h or "BOX" in h), 10)
+                                
+                                for row in rows[1:]:
+                                    cells = [td.get_text(strip=True) for td in row.find_all(["td", "th"])]
+                                    if len(cells) > max(lr_no_idx, topay_idx, paid_idx):
+                                        lr_no = cells[lr_no_idx].strip()
+                                        if lr_no and not lr_no.upper().startswith("TOTAL"):
+                                            try:
+                                                topay_val = float(cells[topay_idx].replace(",", "")) if cells[topay_idx] else 0.0
+                                                paid_val = float(cells[paid_idx].replace(",", "")) if cells[paid_idx] else 0.0
+                                                acc_pay_val = float(cells[acc_pay_idx].replace(",", "")) if cells[acc_pay_idx] else 0.0
+                                                boxes_val = float(cells[boxes_idx].replace(",", "")) if cells[boxes_idx] else 0.0
+                                            except ValueError:
+                                                topay_val = 0.0
+                                                paid_val = 0.0
+                                                acc_pay_val = 0.0
+                                                boxes_val = 0.0
+                                                
+                                            lr_entries.append({
+                                                "lr_no": lr_no,
+                                                "consignor": cells[consignor_idx] if len(cells) > consignor_idx else "",
+                                                "consignee": cells[consignee_idx] if len(cells) > consignee_idx else "",
+                                                "destination": cells[dest_idx] if len(cells) > dest_idx else "",
+                                                "account_pay": acc_pay_val,
+                                                "topay": topay_val,
+                                                "paid": paid_val,
+                                                "boxes": boxes_val
+                                            })
+                                
+                                gdm_details[gdm_no] = lr_entries
+                                print(f"    Scraped GDM {gdm_no} successfully: {len(lr_entries)} LRs found.", flush=True)
                             else:
-                                print(f"    Failed to fetch GDM {gdm_no}: Status {res.status_code}", flush=True)
+                                print(f"    No table found on view page for GDM {gdm_no}.", flush=True)
                         except Exception as gdm_err:
                             print(f"    Error scraping GDM {gdm_no}: {gdm_err}", flush=True)
                             

@@ -707,7 +707,7 @@ def main():
                 except ValueError:
                     continue
                     
-                if gdm_no in gdm_scraped_db:
+                if gdm_no in gdm_scraped_db and len(gdm_scraped_db[gdm_no]) > 0:
                     lr_list = gdm_scraped_db[gdm_no]
                     
                     base_to_pay_sum = sum(item["topay"] for item in lr_list)
