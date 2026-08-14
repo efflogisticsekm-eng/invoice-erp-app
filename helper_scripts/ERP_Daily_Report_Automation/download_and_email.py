@@ -818,6 +818,11 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                                 
                                 gdm_details[gdm_no] = lr_entries
                                 print(f"    Scraped GDM {gdm_no} successfully: {len(lr_entries)} LRs found.", flush=True)
+                                if len(lr_entries) == 0:
+                                    body = soup.find("body")
+                                    body_text = body.get_text() if body else ""
+                                    body_clean = " ".join(body_text.split())
+                                    print(f"    [DEBUG] GDM {gdm_no} Body text: {body_clean[:1000]}", flush=True)
                             else:
                                 print(f"    No table found on view page for GDM {gdm_no}.", flush=True)
                         except Exception as gdm_err:
