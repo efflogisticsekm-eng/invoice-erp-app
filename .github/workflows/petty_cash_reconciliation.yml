@@ -35,21 +35,20 @@ jobs:
         mkdir -p "ERP nxt Data collection/Invoice_Extractor_Tool"
         echo "$GOOGLE_CREDENTIALS_JSON" > "ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
 
-    - name: Test Search All Consignors
+    - name: Inspect GDM Print Links
       env:
         ERP_USERNAME: ${{ secrets.ERP_USERNAME }}
         ERP_PASSWORD: ${{ secrets.ERP_PASSWORD }}
       run: |
-        python helper_scripts/ERP_Daily_Report_Automation/test_search_all.py
+        python helper_scripts/ERP_Daily_Report_Automation/inspect_effdespatch_links.py
 
-    - name: Upload Search Results
+    - name: Upload GDM Search Screenshot
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: bill-clear-search-results
+        name: gdm-search-results
         path: |
-          bill_clear_all_populated.xlsx
-          bill_clear_search_results.png
+          effdespatch_search_35530.png
 
     - name: Download Raw ERP Reports
       env:
