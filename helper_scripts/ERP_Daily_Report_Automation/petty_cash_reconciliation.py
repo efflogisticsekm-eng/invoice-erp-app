@@ -18,7 +18,7 @@ from email.mime.image import MIMEImage
 from email.encoders import encode_base64
 
 # Define directories and credentials path
-BASE_DIR = "/Users/anwar/Desktop/Antigravity-Related"
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CREDENTIALS_PATH = os.path.join(BASE_DIR, "ERP nxt Data collection", "Invoice_Extractor_Tool", "credentials.json")
 DOWNLOAD_DIR = os.path.expanduser("~/Downloads/erp_temp_downloads")
 
