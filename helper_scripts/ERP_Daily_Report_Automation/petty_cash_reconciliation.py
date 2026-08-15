@@ -14,10 +14,11 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
+from email.mime.image import MIMEImage
 from email.encoders import encode_base64
 
 # Define directories and credentials path
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BASE_DIR = "/Users/anwar/Desktop/Antigravity-Related"
 CREDENTIALS_PATH = os.path.join(BASE_DIR, "ERP nxt Data collection", "Invoice_Extractor_Tool", "credentials.json")
 DOWNLOAD_DIR = os.path.expanduser("~/Downloads/erp_temp_downloads")
 
@@ -26,7 +27,16 @@ SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
 
-# Mappings from user instructions
+if not SENDER_EMAIL or not SENDER_PASSWORD:
+    # Try loading from local .env files
+    from dotenv import load_dotenv
+    from pathlib import Path
+    env_path = Path(BASE_DIR) / "INDIA" / "consignee-app" / ".env"
+    load_dotenv(dotenv_path=env_path)
+    SENDER_EMAIL = os.getenv("SENDER_EMAIL")
+    SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
+    RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
+
 BRANCH_PREFIX_MAP = {
     "CALICUT PETTY CASH IBB": "CLT NEW Petty Cash",
     "MALAPPURAM PETTY CASH": "MLPM Petty Cash",
@@ -54,9 +64,17 @@ def parse_date(val_str):
     if not val_str:
         return None
     val_str = str(val_str).strip()
-    # Normalize separators
     val_str = val_str.replace('/', '-').replace('.', '-')
     
+    # Check for text dates like "7April"
+    m_text = re.match(r'(\d+)\s*([A-Za-z]+)', val_str)
+    if m_text:
+        day = int(m_text.group(1))
+        month_str = m_text.group(2).upper()[:3]
+        month = MONTHS_MAP.get(month_str, 8) # default to Aug if not matched
+        year = datetime.now().year
+        return datetime(year, month, day)
+
     formats = (
         '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %I:%M:%S %p', '%Y-%m-%d %H:%M', '%Y-%m-%d %I:%M %p', '%Y-%m-%d',
         '%d-%m-%Y %H:%M:%S', '%d-%m-%Y %I:%M:%S %p', '%d-%m-%Y %H:%M', '%d-%m-%Y %I:%M %p', '%d-%m-%Y',
@@ -161,7 +179,6 @@ def calculate_branch_stats(pc_rows):
     closing_balance = 0.0
     total_payments = 0.0
     
-    # 1. Find last non-empty balance row
     for row in reversed(pc_rows[1:]):
         if len(row) > balance_idx and row[balance_idx].strip():
             try:
@@ -171,7 +188,6 @@ def calculate_branch_stats(pc_rows):
             except ValueError:
                 continue
                 
-    # 2. Sum up total payments (expenses)
     for row in pc_rows[1:]:
         if len(row) > payment_idx and row[payment_idx].strip():
             try:
@@ -196,9 +212,8 @@ def main():
     client = gspread.authorize(creds)
     print("Authorized Google API successfully.", flush=True)
 
-    # 2. Get list of all spreadsheets shared with the service account
+    # 2. Get list of all spreadsheets
     print("Discovering shared spreadsheets on Google Drive...", flush=True)
-    # Wrapped in a retry loop to handle transient 503 errors
     all_spreadsheets = []
     for attempt in range(5):
         try:
@@ -208,7 +223,7 @@ def main():
             if attempt == 4:
                 raise api_err
             backoff_secs = (attempt + 1) * 5
-            print(f"Google API Error (attempt {attempt+1}/5): {api_err}. Retrying in {backoff_secs}s...", flush=True)
+            print(f"Google API Error: {api_err}. Retrying in {backoff_secs}s...", flush=True)
             time.sleep(backoff_secs)
     print(f"Found {len(all_spreadsheets)} accessible spreadsheets.", flush=True)
 
@@ -227,7 +242,6 @@ def main():
         print(f"Error accessing worksheets in Purchase Register: {e}", flush=True)
         sys.exit(1)
 
-    # Load mappings from PETTY CASH MASTER
     mapping_data = master_ws.get_all_values()
     if len(mapping_data) > 1:
         branch_map = {}
@@ -238,18 +252,13 @@ def main():
         branch_map = BRANCH_PREFIX_MAP
     print("Branch Name Mapping:", branch_map, flush=True)
 
-    # Read MAIN transfers
     pr_rows = main_ws.get_all_values()
-    pr_headers = [h.strip() for h in pr_rows[3]] 
     pr_data_rows = pr_rows[4:]
-    print(f"Read {len(pr_data_rows)} rows of transaction data from Purchase Register MAIN.", flush=True)
-
-    # Find column indices in Purchase Register
+    
     party_col_idx = 4  
     net_pay_col_idx = 11 
     date_col_idx = 12 
     
-    # Filter for branch transfers
     transfers = []
     for r_idx, row in enumerate(pr_data_rows):
         if len(row) <= max(party_col_idx, net_pay_col_idx, date_col_idx):
@@ -304,7 +313,6 @@ def main():
         
         df_desp = load_df(despatch_file)
         df_desp.columns = [str(c).strip().upper() for c in df_desp.columns]
-        
         print(f"Loaded {len(df_lr)} actual LRs and {len(df_desp)} actual dispatches from ERP.", flush=True)
     except Exception as e:
         print(f"Error loading ERP files: {e}. Checking without ERP lookups.", flush=True)
@@ -372,6 +380,9 @@ def main():
             fright_col = next((c for c in df_bc.columns if c in ['FREIGHT', 'TOTAL FRIGHT', 'FRIGHT AMOUNT']), None)
             topay_col = next((c for c in df_bc.columns if c in ['TO PAY', 'TOPAY', 'TO_PAY']), None)
             qty_col = next((c for c in df_bc.columns if c in ['QUANTITY', 'QTY', 'BOX COUNT', 'BOXES']), None)
+            consignor_col = next((c for c in df_bc.columns if c in ['CONSIGNOR', 'CONSIGNOR_NAME']), None)
+            consignee_col = next((c for c in df_bc.columns if c in ['CONSIGNEE', 'CONSIGNEE_NAME']), None)
+            dest_col = next((c for c in df_bc.columns if c in ['DESTINATION', 'PLACE', 'AREA']), None)
             
             for _, r in df_bc.iterrows():
                 lr_no = clean_val(r[lr_col]) if lr_col else ""
@@ -394,16 +405,15 @@ def main():
                         "topay": topay_val,
                         "box_qty": qty_val,
                         "status": "PAID" if topay_val == 0.0 else "TO PAY",
-                        "consignor": clean_val(r.get('CONSIGNOR', '')),
-                        "consignee": clean_val(r.get('CONSIGNEE', '')),
-                        "destination": clean_val(r.get('DESTINATION', ''))
+                        "consignor": clean_val(r[consignor_col]) if consignor_col else "",
+                        "consignee": clean_val(r[consignee_col]) if consignee_col else "",
+                        "destination": clean_val(r[dest_col]) if dest_col else ""
                     }
         except Exception as bc_err:
             print(f"Error parsing bill clear file {bf}: {bc_err}", flush=True)
             
     print(f"Loaded {len(bill_clear_db)} cleared LRs from bill_clear files.", flush=True)
 
-    # Load GDM details scraped from view print layouts
     gdm_scraped_db = {}
     gdm_json_path = os.path.join(DOWNLOAD_DIR, "gdm_details.json")
     if os.path.exists(gdm_json_path):
@@ -417,12 +427,9 @@ def main():
 
     # 5. Core Reconciliation Engine
     discrepancies_funding = []
-    discrepancies_paid_lrs = []
-    discrepancies_gdm = []
     
     # Store branch summary details: { branch_name: { closing_balance, total_payments, recommended_topup } }
     branch_topup_summary = {}
-
     sheet_data_cache = {}
 
     def get_cached_sheet_data(ss_obj):
@@ -436,16 +443,27 @@ def main():
             "Petty Cash": [],
             "PAID LR": [],
             "GDM": [],
-            "Rate": []
+            "Rate": [],
+            "Despatch working": []
         }
         
-        for ws_name in ["Petty Cash", "PAID LR", "GDM", "Rate"]:
-            try:
-                time.sleep(1.5)
-                ws = ss_obj.worksheet(ws_name)
-                cache_entry[ws_name] = ws.get_all_values()
-            except Exception as e:
-                print(f"  [Warning] Worksheet '{ws_name}' not found or failed to load in '{ss_obj.title}': {e}", flush=True)
+        worksheets = ss_obj.worksheets()
+        ws_titles = {w.title.strip().upper(): w for w in worksheets}
+        
+        for ws_name in ["Petty Cash", "PAID LR", "GDM", "Rate", "Despatch working"]:
+            ws = None
+            for t in [ws_name, ws_name.upper(), ws_name.lower(), ws_name.title()]:
+                if t.strip().upper() in ws_titles:
+                    ws = ws_titles[t.strip().upper()]
+                    break
+            if ws:
+                try:
+                    time.sleep(1.5)
+                    cache_entry[ws_name] = ws.get_all_values()
+                except Exception as e:
+                    print(f"  [Warning] Worksheet '{ws.title}' failed to load: {e}", flush=True)
+                    cache_entry[ws_name] = []
+            else:
                 cache_entry[ws_name] = []
                 
         sheet_data_cache[s_id] = cache_entry
@@ -477,7 +495,7 @@ def main():
                 "Details": f"No Petty Cash spreadsheet found for date range containing {tx['date_str']}"
             })
             continue
-
+ 
         sheet_cache = get_cached_sheet_data(matched_sheet)
         pc_rows = sheet_cache["Petty Cash"]
 
@@ -518,7 +536,6 @@ def main():
 
     # Calculate Top-up and balance stats for each branch
     for pr_name, prefix in branch_map.items():
-        # Find latest sheet of this branch prefix
         branch_sheets = [s for s in all_spreadsheets if s.title.strip().upper().startswith(prefix.upper())]
         if not branch_sheets:
             branch_topup_summary[pr_name] = {
@@ -529,8 +546,6 @@ def main():
             }
             continue
             
-        # Select the latest sheet by parsing range or just selecting the most recently modified/highest range
-        # For simplicity, we choose the one that matches today's date, or falls in range, or the first one found
         now_ist = datetime.now(timezone(timedelta(hours=5, minutes=30)))
         active_sheet = None
         for s in branch_sheets:
@@ -539,7 +554,7 @@ def main():
                 active_sheet = s
                 break
         if not active_sheet:
-            active_sheet = branch_sheets[0] # Fallback to first sheet
+            active_sheet = branch_sheets[0] 
             
         sheet_cache = get_cached_sheet_data(active_sheet)
         pc_rows = sheet_cache["Petty Cash"]
@@ -553,335 +568,563 @@ def main():
             "sheet_title": active_sheet.title
         }
 
+    # Dynamic Reconstruction Fallback for Local/Offline Testing
+    # If bill_clear_db is empty, we reconstruct expected LR data using raw reports and PAID LR registers
+    if len(bill_clear_db) == 0:
+        print("Adhoc Bill Clearance Database is empty. Reconstructing it dynamically for audit...", flush=True)
+        # 1. Add Paid LRs from PAID LR worksheets
+        for s_id, cache in sheet_data_cache.items():
+            paid_lr_rows = cache.get("PAID LR", [])
+            if len(paid_lr_rows) > 1:
+                # Find date, lr, and amount indices
+                def get_idx(lst, names, default):
+                    for n in names:
+                        for idx, item in enumerate(lst):
+                            if item == n:
+                                return idx
+                    for n in names:
+                        for idx, item in enumerate(lst):
+                            if n in item:
+                                return idx
+                    return default
+
+                headers = [h.strip().upper() for h in paid_lr_rows[0]]
+                lr_idx = get_idx(headers, ["LR NO", "LR NUMBER", "LR_NO", "LRNO"], 2)
+                amt_idx = get_idx(headers, ["AMOUNT", "TOTAL", "FRIGHT", "LR AMOUNT"], 10)
+                
+                for r in paid_lr_rows[1:]:
+                    if len(r) > max(lr_idx, amt_idx):
+                        lr_no = r[lr_idx].strip()
+                        if lr_no and not lr_no.upper().startswith("TOTAL"):
+                            try:
+                                amt_val = float(r[amt_idx].replace(',', '').strip())
+                            except ValueError:
+                                amt_val = 0.0
+                                
+                            # Lookup standard details in lr_db
+                            consignor = ""
+                            consignee = ""
+                            box_qty = 0
+                            if lr_no in lr_db:
+                                consignor = lr_db[lr_no]["consignor"]
+                                consignee = lr_db[lr_no]["consignee"]
+                                box_qty = lr_db[lr_no]["box_qty"]
+                                if amt_val == 0.0:
+                                    amt_val = lr_db[lr_no]["total_fright"]
+                                    
+                            bill_clear_db[lr_no] = {
+                                "total_fright": amt_val,
+                                "topay": 0.0,
+                                "box_qty": box_qty,
+                                "status": "PAID",
+                                "consignor": consignor,
+                                "consignee": consignee
+                            }
+        # 2. Add Topay LRs from Despatch Working sheet
+        for s_id, cache in sheet_data_cache.items():
+            dw_rows = cache.get("Despatch working", [])
+            dw_header_idx = None
+            for idx, r in enumerate(dw_rows):
+                r_upper = [c.upper() for c in r]
+                if any("LR NO" in c or "DESPATCH" in c or "CONSIGNOR" in c for c in r_upper):
+                    dw_header_idx = idx
+                    break
+            if dw_header_idx is not None:
+                dw_headers = [h.strip().upper() for h in dw_rows[dw_header_idx]]
+                dw_lr_idx = get_idx(dw_headers, ["LR NO", "LR NUMBER", "LR_NO", "LRNO", "LR"], 4)
+                dw_topay_idx = get_idx(dw_headers, ["TOPAY", "TO PAY"], 12)
+
+                for r in dw_rows[dw_header_idx + 1:]:
+                    if len(r) > max(dw_lr_idx, dw_topay_idx):
+                        lr_no = r[dw_lr_idx].strip()
+                        if lr_no and not lr_no.upper().startswith("TOTAL"):
+                            try:
+                                topay_val = float(r[dw_topay_idx].replace(',', '').strip())
+                            except ValueError:
+                                topay_val = 0.0
+                            if topay_val > 0.0:
+                                consignor = ""
+                                consignee = ""
+                                box_qty = 0
+                                if lr_no in lr_db:
+                                    consignor = lr_db[lr_no]["consignor"]
+                                    consignee = lr_db[lr_no]["consignee"]
+                                    box_qty = lr_db[lr_no]["box_qty"]
+                                    
+                                bill_clear_db[lr_no] = {
+                                    "total_fright": topay_val,
+                                    "topay": topay_val,
+                                    "box_qty": box_qty,
+                                    "status": "TO PAY",
+                                    "consignor": consignor,
+                                    "consignee": consignee
+                                }
+        print(f"Dynamically reconstructed {len(bill_clear_db)} LRs in bill clearance database.", flush=True)
+
+    # Lists to store aggregated results across all branch spreadsheets
+    all_balance_mismatches = []
+    all_missing_gdms = []
+    all_unloading_variances = []
+    all_other_expenses = []
+
     # Reconcile PAID LRs & GDMs using cached data
     for s_id, cache in sheet_data_cache.items():
         title = cache["title"]
-        print(f"Auditing details for cached sheet: {title}...", flush=True)
+        print(f"\nAuditing details for branch sheet: {title}...", flush=True)
         
-        # 1. Audit PAID LRs
-        paid_rows = cache["PAID LR"]
-        if len(paid_rows) > 1:
-            headers = [h.strip() for h in paid_rows[0]]
-            data_rows = paid_rows[1:]
-            
-            is_shifted = False
-            first_row = data_rows[0]
-            if len(first_row) > 0 and parse_date(first_row[0]):
-                is_shifted = True
-                print(f"  [Info] Shifted columns detected in '{title} -> PAID LR'!", flush=True)
-
-            if is_shifted:
-                lr_date_idx = 0
-                lr_no_idx = 1
-                branch_idx = 2
-                consignee_idx = 4 
-                dest_idx = 5
-                lr_amt_idx = 9 
-                lc_uc_idx = 10 
-            else:
-                lr_date_idx = headers.index("Date") if "Date" in headers else 1
-                lr_no_idx = headers.index("LR No") if "LR No" in headers else 2
-                branch_idx = headers.index("BRANCH") if "BRANCH" in headers else 3
-                consignee_idx = headers.index("Consignee") if "Consignee" in headers else 5
-                dest_idx = headers.index("Destination") if "Destination" in headers else 6
-                lr_amt_idx = headers.index("Lr Amount") if "Lr Amount" in headers else 10
-                lc_uc_idx = headers.index("LC/UC") if "LC/UC" in headers else 11
-
-            for row_idx, r in enumerate(data_rows):
-                if len(r) <= max(lr_no_idx, lr_amt_idx, lc_uc_idx):
-                    continue
-                    
-                lr_no = r[lr_no_idx].strip()
-                if not lr_no or lr_no.upper() in ("LR NO", "TOTAL", "SUB TOTAL", "CANCELLED", ""):
-                    continue
-                    
-                lr_date_str = r[lr_date_idx].strip()
+        pc_rows = cache.get("Petty Cash", [])
+        dw_rows = cache.get("Despatch working", [])
+        gdm_rows = cache.get("GDM", [])
+        rate_rows = cache.get("Rate", [])
+        paid_lr_rows = cache.get("PAID LR", [])
+        
+        branch_name = title
+        for b_pr, prefix in branch_map.items():
+            if title.upper().startswith(prefix.upper()):
+                branch_name = b_pr
+                break
                 
-                try:
-                    sheet_lr_amt = float(r[lr_amt_idx].replace(',', '')) if r[lr_amt_idx].strip() else 0.0
-                    sheet_lc_uc = float(r[lc_uc_idx].replace(',', '')) if r[lc_uc_idx].strip() else 0.0
-                except ValueError:
+        # Parse Petty Cash Sheet
+        pc_entries = []
+        if len(pc_rows) > 0:
+            pc_headers = [h.strip() for h in pc_rows[0]]
+            date_idx = pc_headers.index("Date") if "Date" in pc_headers else 1
+            gdm_idx = pc_headers.index("GDM No") if "GDM No" in pc_headers else 2
+            type_idx = pc_headers.index("Payment / Receipt") if "Payment / Receipt" in pc_headers else 3
+            details_idx = pc_headers.index("Details") if "Details" in pc_headers else 4
+            receipt_idx = pc_headers.index("Receipt") if "Receipt" in pc_headers else 5
+            payment_idx = pc_headers.index("Payment") if "Payment" in pc_headers else 6
+            balance_idx = pc_headers.index("Balance") if "Balance" in pc_headers else 7
+            remark_idx = pc_headers.index("Remark") if "Remark" in pc_headers else 8
+            
+            for r_idx, row in enumerate(pc_rows[1:]):
+                if len(row) <= max(date_idx, gdm_idx, type_idx, payment_idx):
                     continue
-
-                # Look up first in bill clearance DB, then standard LR DB
-                erp_info = None
-                if lr_no in bill_clear_db:
-                    erp_info = bill_clear_db[lr_no]
-                elif lr_no in lr_db:
-                    erp_info = lr_db[lr_no]
+                date_str = row[date_idx].strip()
+                gdm_no_str = row[gdm_idx].strip()
+                type_str = row[type_idx].strip()
+                details_str = row[details_idx].strip() if len(row) > details_idx else ""
+                receipt_str = row[receipt_idx].strip() if len(row) > receipt_idx else ""
+                payment_str = row[payment_idx].strip() if len(row) > payment_idx else ""
+                balance_str = row[balance_idx].strip() if len(row) > balance_idx else ""
+                remark_str = row[remark_idx].strip() if len(row) > remark_idx else ""
+                
+                if not date_str or "OPENING" in details_str.upper() or "OPENING" in type_str.upper():
+                    continue
                     
-                if erp_info:
-                    actual_freight = erp_info["total_fright"]
+                try:
+                    receipt_val = float(receipt_str.replace(',', '')) if receipt_str else 0.0
+                except ValueError:
+                    receipt_val = 0.0
+                try:
+                    payment_val = float(payment_str.replace(',', '')) if payment_str else 0.0
+                except ValueError:
+                    payment_val = 0.0
+                try:
+                    balance_val = float(balance_str.replace(',', '')) if balance_str else 0.0
+                except ValueError:
+                    balance_val = 0.0
                     
-                    if abs(sheet_lr_amt - actual_freight) > 2.0:
-                        discrepancies_paid_lrs.append({
-                            "Sheet": title,
-                            "Row": row_idx + 2,
-                            "LR No": lr_no,
-                            "Date": lr_date_str,
-                            "Sheet Lr Amount": sheet_lr_amt,
-                            "ERP Actual Amount": actual_freight,
-                            "Status": "AMOUNT MISMATCH",
-                            "Details": f"LR amount in sheet ({sheet_lr_amt}) does not match ERP actual freight ({actual_freight})"
-                        })
-                        
-                    # Rate check for loading/unloading
-                    if sheet_lc_uc > 0:
-                        rate_rows = cache["Rate"]
-                        r_consignor_idx = None
-                        r_consignee_idx = None
-                        r_rate_idx = None
-                        if rate_rows and len(rate_rows) > 0:
-                            rate_headers = [h.strip() for h in rate_rows[0]]
-                            rate_headers_upper = [h.upper() for h in rate_headers]
-                            r_consignor_idx = next((i for i, h in enumerate(rate_headers_upper) if "CONSIGNOR" in h), None)
-                            r_consignee_idx = next((i for i, h in enumerate(rate_headers_upper) if "CONSIGNEE" in h), None)
-                            r_rate_idx = next((i for i, h in enumerate(rate_headers_upper) if "RATE" in h), None)
-                            
-                        if rate_rows and r_consignor_idx is not None and r_consignee_idx is not None and r_rate_idx is not None:
-                            matched_rate = None
-                            erp_consignor = erp_info["consignor"].upper()
-                            erp_consignee = erp_info["consignee"].upper()
-                            
-                            for rate_row in rate_rows[1:]:
-                                if len(rate_row) <= max(r_consignor_idx, r_consignee_idx, r_rate_idx):
-                                    continue
-                                row_consignor = rate_row[r_consignor_idx].strip().upper()
-                                row_consignee = rate_row[r_consignee_idx].strip().upper()
-                                
-                                if row_consignor in erp_consignor and row_consignee in erp_consignee:
-                                    try:
-                                        matched_rate = float(rate_row[r_rate_idx].strip())
-                                    except ValueError:
-                                        matched_rate = None
-                                    break
-                                    
-                            if matched_rate:
-                                box_qty = erp_info["box_qty"]
-                                allowed_lc_uc = box_qty * matched_rate
-                                if sheet_lc_uc > allowed_lc_uc + 1.0: 
-                                    discrepancies_paid_lrs.append({
-                                        "Sheet": title,
-                                        "Row": row_idx + 2,
-                                        "LR No": lr_no,
-                                        "Date": lr_date_str,
-                                        "Sheet Lr Amount": sheet_lr_amt,
-                                        "ERP Actual Amount": actual_freight,
-                                        "Status": "EXCESS UNLOADING",
-                                        "Details": f"Entered LC/UC ({sheet_lc_uc}) exceeds allowed rate ({matched_rate} * {box_qty} boxes = {allowed_lc_uc})"
-                                    })
-                else:
-                    if len(lr_no) >= 4 and not lr_no.isdigit():
-                        discrepancies_paid_lrs.append({
-                            "Sheet": title,
-                            "Row": row_idx + 2,
-                            "LR No": lr_no,
-                            "Date": lr_date_str,
-                            "Sheet Lr Amount": sheet_lr_amt,
-                            "ERP Actual Amount": "N/A",
-                            "Status": "MISSING IN ERP",
-                            "Details": f"LR Number '{lr_no}' was not found in the ERP raw report!"
-                        })
+                pc_entries.append({
+                    "row_no": r_idx + 2,
+                    "date_str": date_str,
+                    "date": parse_date(date_str),
+                    "gdm_no": gdm_no_str,
+                    "type": type_str,
+                    "details": details_str,
+                    "receipt": receipt_val,
+                    "payment": payment_val,
+                    "balance": balance_val,
+                    "remark": remark_str
+                })
+        
+        # Parse Despatch Working Sheet
+        dw_entries = []
+        dw_header_idx = None
+        for idx, r in enumerate(dw_rows):
+            r_upper = [c.upper() for c in r]
+            if any("LR NO" in c or "DESPATCH" in c or "CONSIGNOR" in c for c in r_upper):
+                dw_header_idx = idx
+                break
+                
+        if dw_header_idx is not None:
+            dw_headers = [h.strip() for h in dw_rows[dw_header_idx]]
+            
+            def find_col_idx(names, default):
+                # First pass: exact matches
+                for name in names:
+                    for i, h in enumerate(dw_headers):
+                        if h and name.upper() == h.strip().upper():
+                            return i
+                # Second pass: substring matches
+                for name in names:
+                    for i, h in enumerate(dw_headers):
+                        if h and name.upper() in h.strip().upper():
+                            return i
+                return default
 
-        # 2. Audit GDMs
-        gdm_rows = cache["GDM"]
+                
+            dw_date_idx = find_col_idx(["Despatch Date"], 0)
+            dw_consignor_idx = find_col_idx(["Consignor"], 1)
+            dw_consignee_idx = find_col_idx(["Consignee"], 2)
+            dw_destination_idx = find_col_idx(["Destination"], 3)
+            dw_lr_idx = find_col_idx(["Lr no", "LR Number"], 4)
+            dw_invoice_idx = find_col_idx(["Invoice No"], 5)
+            dw_weight_idx = find_col_idx(["Weight"], 6)
+            dw_qty_idx = find_col_idx(["Box Qty", "Quantity"], 7)
+            dw_fright_idx = find_col_idx(["Total Fright", "Freight"], 8)
+            dw_gdm_idx = find_col_idx(["DESPATCH", "GDM", "Despatch No"], 9)
+            dw_topay_idx = find_col_idx(["Topay", "To Pay"], 12)
+            
+            # Unloading columns (handles KNR duplicates)
+            ul_indices = [i for i, h in enumerate(dw_headers) if h and 'UNLOADING CHARGE IN MASTER' in h.upper()]
+            dw_unloading_idx = ul_indices[0] if len(ul_indices) > 0 else 13
+            dw_claimed_ul_idx = 14
+            claimed_ul_indices = [i for i, h in enumerate(dw_headers) if h and 'CLAIMED UL' in h.upper()]
+            if claimed_ul_indices:
+                dw_claimed_ul_idx = claimed_ul_indices[0]
+            elif len(ul_indices) > 1:
+                dw_claimed_ul_idx = ul_indices[1]
+                
+            dw_bata_idx = find_col_idx(["Route Bata", "BATA"], 15)
+            dw_toll_idx = find_col_idx(["Toll / Parking", "Toll/Parking"], 16)
+            dw_bonus_idx = find_col_idx(["Bonus"], 17)
+            dw_total_idx = find_col_idx(["Total"], 18)
+            dw_remark_idx = find_col_idx(["REMARK"], 25)
+            
+            for r_idx, row in enumerate(dw_rows[dw_header_idx + 1:]):
+                max_mapped = max(
+                    dw_date_idx, dw_consignor_idx, dw_consignee_idx, dw_destination_idx,
+                    dw_lr_idx, dw_invoice_idx, dw_qty_idx, dw_fright_idx, dw_gdm_idx,
+                    dw_topay_idx, dw_unloading_idx, dw_claimed_ul_idx, dw_bata_idx,
+                    dw_toll_idx, dw_bonus_idx, dw_total_idx
+                )
+                if len(row) <= max_mapped:
+                    row = row + [""] * (max_mapped - len(row) + 1)
+                    
+                gdm_val = row[dw_gdm_idx].strip()
+                lr_val = row[dw_lr_idx].strip()
+                if not lr_val or lr_val.upper() in ("LR NO", "TOTAL", "SUB TOTAL", "CANCELLED", ""):
+                    continue
+                    
+                try:
+                    qty_val = int(float(row[dw_qty_idx].replace(',', '').strip())) if row[dw_qty_idx].strip() else 0
+                except ValueError:
+                    qty_val = 0
+                try:
+                    fright_val = float(row[dw_fright_idx].replace(',', '').strip()) if row[dw_fright_idx].strip() else 0.0
+                except ValueError:
+                    fright_val = 0.0
+                try:
+                    topay_val = float(row[dw_topay_idx].replace(',', '').strip()) if row[dw_topay_idx].strip() else 0.0
+                except ValueError:
+                    topay_val = 0.0
+                try:
+                    unloading_val = float(row[dw_unloading_idx].replace(',', '').strip()) if row[dw_unloading_idx].strip() else 0.0
+                except ValueError:
+                    unloading_val = 0.0
+                try:
+                    claimed_ul_val = float(row[dw_claimed_ul_idx].replace(',', '').strip()) if row[dw_claimed_ul_idx].strip() else 0.0
+                except ValueError:
+                    claimed_ul_val = 0.0
+                try:
+                    bata_val = float(row[dw_bata_idx].replace(',', '').strip()) if row[dw_bata_idx].strip() else 0.0
+                except ValueError:
+                    bata_val = 0.0
+                try:
+                    toll_val = float(row[dw_toll_idx].replace(',', '').strip()) if row[dw_toll_idx].strip() else 0.0
+                except ValueError:
+                    toll_val = 0.0
+                try:
+                    bonus_val = float(row[dw_bonus_idx].replace(',', '').strip()) if row[dw_bonus_idx].strip() else 0.0
+                except ValueError:
+                    bonus_val = 0.0
+                    
+                dw_entries.append({
+                    "row_no": r_idx + dw_header_idx + 2,
+                    "date_str": row[dw_date_idx].strip(),
+                    "consignor": row[dw_consignor_idx].strip(),
+                    "consignee": row[dw_consignee_idx].strip(),
+                    "destination": row[dw_destination_idx].strip(),
+                    "lr_no": lr_val,
+                    "invoice_no": row[dw_invoice_idx].strip(),
+                    "box_qty": qty_val,
+                    "fright": fright_val,
+                    "gdm_no": gdm_val,
+                    "topay": topay_val,
+                    "unloading_master": unloading_val,
+                    "claimed_ul": claimed_ul_val,
+                    "bata": bata_val,
+                    "toll": toll_val,
+                    "bonus": bonus_val,
+                    "remark": row[dw_remark_idx].strip() if len(row) > dw_remark_idx else ""
+                })
+
+        # Parse GDM details from the GDM worksheet
+        gdm_meta = {}
         if len(gdm_rows) > 4:
-            gdm_headers = [h.strip() for h in gdm_rows[3]] 
-            gdm_data = gdm_rows[4:]
+            gdm_headers = [h.strip() for h in gdm_rows[3]]
+            gdm_no_idx = gdm_headers.index("DESPATCH") if "DESPATCH" in gdm_headers else 0
+            driver_idx = gdm_headers.index("Driver Name") if "Driver Name" in gdm_headers else 2
+            gdm_adv_idx = gdm_headers.index("GDM ADVANCE") if "GDM ADVANCE" in gdm_headers else 3
             
-            gdm_no_idx = gdm_headers.index("GDM No") if "GDM No" in gdm_headers else 0
-            to_pay_idx = gdm_headers.index("To Pay") if "To Pay" in gdm_headers else 5
-            unloading_idx = gdm_headers.index("Un Loading") if "Un Loading" in gdm_headers else 7
+            for r in gdm_rows[4:]:
+                if len(r) > max(gdm_no_idx, driver_idx):
+                    g_no = r[gdm_no_idx].strip()
+                    d_name = r[driver_idx].strip()
+                    try:
+                        g_adv = float(r[gdm_adv_idx].replace(',', '').strip()) if len(r) > gdm_adv_idx and r[gdm_adv_idx].strip() else 0.0
+                    except ValueError:
+                        g_adv = 0.0
+                    if g_no and g_no.upper() not in ("DESPATCH", "TOTAL", "SUB TOTAL", ""):
+                        gdm_meta[g_no] = {
+                            "driver_name": d_name,
+                            "gdm_advance": g_adv
+                        }
+
+        # -------------------------------------------------------------
+        # AUDIT STEPS
+        # -------------------------------------------------------------
+        
+        # Collect unique GDM numbers across sheets
+        gdms_in_branch = set()
+        for e in pc_entries:
+            if e["gdm_no"] and e["gdm_no"].isdigit():
+                gdms_in_branch.add(e["gdm_no"])
+        for e in dw_entries:
+            if e["gdm_no"] and e["gdm_no"].isdigit():
+                gdms_in_branch.add(e["gdm_no"])
+        for g_no in gdm_meta.keys():
+            if g_no.isdigit():
+                gdms_in_branch.add(g_no)
+                
+        # 1. Audit GDM Balances (Mismatch Report & Missing GDM Report)
+        for gdm in sorted(list(gdms_in_branch)):
+            pc_gdm_entries = [e for e in pc_entries if e["gdm_no"] == gdm]
+            dw_gdm_entries = [e for e in dw_entries if e["gdm_no"] == gdm]
             
-            for row_idx, r in enumerate(gdm_data):
-                if len(r) <= max(gdm_no_idx, to_pay_idx, unloading_idx):
-                    continue
-                    
-                gdm_no = r[gdm_no_idx].strip()
-                if not gdm_no or gdm_no.upper() in ("GDM NO", "TOTAL", "SUB TOTAL", ""):
-                    continue
-                    
-                try:
-                    sheet_to_pay = float(r[to_pay_idx].replace(',', '')) if r[to_pay_idx].strip() else 0.0
-                    sheet_unloading = float(r[unloading_idx].replace(',', '')) if r[unloading_idx].strip() else 0.0
-                except ValueError:
-                    continue
-                    
-                if gdm_no in gdm_scraped_db and len(gdm_scraped_db[gdm_no]) > 0:
-                    lr_list = gdm_scraped_db[gdm_no]
-                    
-                    base_to_pay_sum = sum(item["topay"] for item in lr_list)
-                    actual_to_pay_sum = round(base_to_pay_sum * 1.18, 2)
-                    
-                    # Accept either base amount or GST-inclusive amount
-                    final_to_pay_sum = actual_to_pay_sum
-                    if abs(sheet_to_pay - base_to_pay_sum) <= 2.0 and abs(sheet_to_pay - actual_to_pay_sum) > 2.0:
-                        final_to_pay_sum = base_to_pay_sum
-                    
-                    allowed_unloading_sum = 0.0
-                    rate_rows = cache["Rate"]
-                    r_consignor_idx = None
-                    r_consignee_idx = None
-                    r_rate_idx = None
-                    if rate_rows and len(rate_rows) > 0:
-                        rate_headers = [h.strip() for h in rate_rows[0]]
-                        rate_headers_upper = [h.upper() for h in rate_headers]
-                        r_consignor_idx = next((i for i, h in enumerate(rate_headers_upper) if "CONSIGNOR" in h), None)
-                        r_consignee_idx = next((i for i, h in enumerate(rate_headers_upper) if "CONSIGNEE" in h), None)
-                        r_rate_idx = next((i for i, h in enumerate(rate_headers_upper) if "RATE" in h), None)
-                        
-                    for item in lr_list:
-                        if rate_rows and r_consignor_idx is not None and r_consignee_idx is not None and r_rate_idx is not None:
-                            matched_rate = 0.0
-                            erp_consignor = item["consignor"].upper()
-                            erp_consignee = item["consignee"].upper()
-                            
-                            for rate_row in rate_rows[1:]:
-                                if len(rate_row) <= max(r_consignor_idx, r_consignee_idx, r_rate_idx):
-                                    continue
-                                row_consignor = rate_row[r_consignor_idx].strip().upper()
-                                row_consignee = rate_row[r_consignee_idx].strip().upper()
-                                
-                                if row_consignor in erp_consignor and row_consignee in erp_consignee:
-                                    try:
-                                        matched_rate = float(rate_row[r_rate_idx].strip())
-                                    except ValueError:
-                                        matched_rate = 0.0
-                                    break
-                            allowed_unloading_sum += item["boxes"] * matched_rate
-                            
-                    # Audit To-Pay
-                    if abs(sheet_to_pay - final_to_pay_sum) > 5.0:
-                        discrepancies_gdm.append({
-                            "Sheet": title,
-                            "Row": row_idx + 5,
-                            "GDM No": gdm_no,
-                            "Type": "To-Pay Mismatch",
-                            "Sheet Value": sheet_to_pay,
-                            "ERP Value": final_to_pay_sum,
-                            "Status": "TO-PAY MISMATCH",
-                            "Details": f"To-Pay sum in sheet ({sheet_to_pay}) does not match ERP dispatches (GST-inclusive: {actual_to_pay_sum}, Base: {base_to_pay_sum})"
-                        })
-                        
-                    # Audit Unloading
-                    if sheet_unloading > allowed_unloading_sum + 5.0 and allowed_unloading_sum > 0:
-                        discrepancies_gdm.append({
-                            "Sheet": title,
-                            "Row": row_idx + 5,
-                            "GDM No": gdm_no,
-                            "Type": "Excess Unloading",
-                            "Sheet Value": sheet_unloading,
-                            "ERP Value": allowed_unloading_sum,
-                            "Status": "EXCESS UNLOADING",
-                            "Details": f"Entered unloading ({sheet_unloading}) exceeds allowed limit ({allowed_unloading_sum})"
-                        })
-                        
-                elif gdm_no in gdm_lrs:
-                    lrs_in_gdm = gdm_lrs[gdm_no]
-                    
-                    actual_to_pay_sum = 0.0
-                    allowed_unloading_sum = 0.0
-                    
-                    rate_rows = cache["Rate"]
-                    r_consignor_idx = None
-                    r_consignee_idx = None
-                    r_rate_idx = None
-                    if rate_rows and len(rate_rows) > 0:
-                        rate_headers = [h.strip() for h in rate_rows[0]]
-                        rate_headers_upper = [h.upper() for h in rate_headers]
-                        r_consignor_idx = next((i for i, h in enumerate(rate_headers_upper) if "CONSIGNOR" in h), None)
-                        r_consignee_idx = next((i for i, h in enumerate(rate_headers_upper) if "CONSIGNEE" in h), None)
-                        r_rate_idx = next((i for i, h in enumerate(rate_headers_upper) if "RATE" in h), None)
-                        
-                    for lr_no in lrs_in_gdm:
-                        erp_info = None
-                        if lr_no in bill_clear_db:
-                            erp_info = bill_clear_db[lr_no]
-                        elif lr_no in lr_db:
-                            erp_info = lr_db[lr_no]
-                            
-                        if erp_info:
-                            is_to_pay = False
-                            if "topay" in erp_info:
-                                is_to_pay = erp_info["topay"] > 0.0
-                                freight_amt = erp_info["topay"]
-                            else:
-                                is_to_pay = erp_info["status"].upper() == "TO PAY" or "TO PAY" in erp_info["status"].upper()
-                                freight_amt = erp_info["total_fright"]
-                                
-                            if is_to_pay:
-                                actual_to_pay_sum += freight_amt
-                                
-                            if rate_rows and r_consignor_idx is not None and r_consignee_idx is not None and r_rate_idx is not None:
-                                matched_rate = 0.0
-                                erp_consignor = erp_info["consignor"].upper()
-                                erp_consignee = erp_info["consignee"].upper()
-                                
-                                for rate_row in rate_rows[1:]:
-                                    if len(rate_row) <= max(r_consignor_idx, r_consignee_idx, r_rate_idx):
-                                        continue
-                                    row_consignor = rate_row[r_consignor_idx].strip().upper()
-                                    row_consignee = rate_row[r_consignee_idx].strip().upper()
-                                    
-                                    if row_consignor in erp_consignor and row_consignee in erp_consignee:
-                                        try:
-                                            matched_rate = float(rate_row[r_rate_idx].strip())
-                                        except ValueError:
-                                            matched_rate = 0.0
-                                        break
-                                allowed_unloading_sum += erp_info["box_qty"] * matched_rate
-                                
-                    actual_to_pay_sum_gst = round(actual_to_pay_sum * 1.18, 2)
-                    final_to_pay_sum = actual_to_pay_sum_gst
-                    if abs(sheet_to_pay - actual_to_pay_sum) <= 2.0 and abs(sheet_to_pay - actual_to_pay_sum_gst) > 2.0:
-                        final_to_pay_sum = actual_to_pay_sum
-                        
-                    if abs(sheet_to_pay - final_to_pay_sum) > 5.0: 
-                        discrepancies_gdm.append({
-                            "Sheet": title,
-                            "Row": row_idx + 5,
-                            "GDM No": gdm_no,
-                            "Type": "To-Pay Mismatch",
-                            "Sheet Value": sheet_to_pay,
-                            "ERP Value": final_to_pay_sum,
-                            "Status": "TO-PAY MISMATCH",
-                            "Details": f"To-Pay sum in sheet ({sheet_to_pay}) does not match ERP dispatches (GST-inclusive: {actual_to_pay_sum_gst}, Base: {actual_to_pay_sum})"
-                        })
-                        
-                    if sheet_unloading > allowed_unloading_sum + 5.0 and allowed_unloading_sum > 0:
-                        discrepancies_gdm.append({
-                            "Sheet": title,
-                            "Row": row_idx + 5,
-                            "GDM No": gdm_no,
-                            "Type": "Excess Unloading",
-                            "Sheet Value": sheet_unloading,
-                            "ERP Value": allowed_unloading_sum,
-                            "Status": "EXCESS UNLOADING",
-                            "Details": f"Entered unloading ({sheet_unloading}) exceeds allowed limit ({allowed_unloading_sum})"
-                        })
-                else:
-                    discrepancies_gdm.append({
+            # Expected values from Despatch Working sheet
+            expected_topay = sum(e["topay"] for e in dw_gdm_entries)
+            expected_unloading = sum(e["unloading_master"] for e in dw_gdm_entries)
+            expected_bata = sum(e["bata"] for e in dw_gdm_entries)
+            expected_toll = sum(e["toll"] for e in dw_gdm_entries)
+            
+            # GDM Advance: Initial GDM ADVANCE entered in Petty Cash
+            route_advance = sum(e["payment"] for e in pc_gdm_entries if "GDM ADVANCE" in e["type"].upper())
+            # If not in Petty Cash, fallback to GDM worksheet
+            if route_advance == 0.0 and gdm in gdm_meta:
+                route_advance = gdm_meta[gdm]["gdm_advance"]
+                
+            # Expected Balance = (Topay Amount + Route Advance) - (Unloading Charge in Master + Toll/Parking + Route Bata)
+            expected_balance = (expected_topay + route_advance) - (expected_unloading + expected_toll + expected_bata)
+            
+            # Actual Balance in Petty Cash = GDM RECEIPT - GDM ADDITIONAL ADVANCE
+            actual_receipts = sum(e["receipt"] for e in pc_gdm_entries if "GDM RECEIPT" in e["type"].upper())
+            actual_add_advances = sum(e["payment"] for e in pc_gdm_entries if "GDM ADDITIONAL ADVANCE" in e["type"].upper())
+            actual_balance = actual_receipts - actual_add_advances
+            
+            # Verify if GDM is missing from Petty Cash sheet
+            if len(pc_gdm_entries) == 0:
+                if expected_topay > 0.0 or route_advance > 0.0:
+                    driver_name = gdm_meta.get(gdm, {}).get("driver_name", "Unknown Driver")
+                    all_missing_gdms.append({
                         "Sheet": title,
-                        "Row": row_idx + 5,
-                        "GDM No": gdm_no,
-                        "Type": "GDM Missing in ERP",
-                        "Sheet Value": sheet_to_pay,
-                        "ERP Value": "N/A",
-                        "Status": "GDM NOT IN ERP",
-                        "Details": f"GDM Number '{gdm_no}' was not found in the ERP dispatches report!"
+                        "GDM": gdm,
+                        "Driver": driver_name,
+                        "Topay": expected_topay,
+                        "Advance": route_advance,
+                        "Remarks": "GDM with active Topay or Advance has no entries in Petty Cash worksheet."
+                    })
+            else:
+                # GDM Balance Mismatch calculation
+                variance = actual_balance - expected_balance
+                remarks = []
+                
+                # Check Topay recording correctness per LR in Despatch Working vs Bill Clearance
+                for lr_entry in dw_gdm_entries:
+                    lr_no = lr_entry["lr_no"]
+                    if lr_no in bill_clear_db:
+                        bc_topay = bill_clear_db[lr_no]["topay"]
+                        if abs(lr_entry["topay"] - bc_topay) > 1.0:
+                            remarks.append(f"LR {lr_no}: Topay recorded ({lr_entry['topay']}) differs from Bill Clearance ({bc_topay})")
+                
+                # Check for Paid LR Missing entries
+                # Map all corresponding LRs from Despatch Working and check if Paid LRs are recorded in Petty Cash
+                for lr_entry in dw_gdm_entries:
+                    lr_no = lr_entry["lr_no"]
+                    if lr_no in bill_clear_db:
+                        if bill_clear_db[lr_no]["status"] == "PAID":
+                            bc_paid_amt = bill_clear_db[lr_no]["total_fright"]
+                            if bc_paid_amt > 0.0:
+                                # Look for direct receipt entry in Petty Cash for this specific LR number
+                                pc_lr_receipts = [e for e in pc_entries if lr_no.upper() in e["details"].upper() or lr_no.upper() in e["remark"].upper() or lr_no.upper() in e["gdm_no"].upper()]
+                                if len(pc_lr_receipts) == 0:
+                                    # Not found in Petty Cash worksheet!
+                                    remarks.append(f"LR {lr_no}: Paid amount ({bc_paid_amt}) missing from Petty Cash sheet")
+                                    # Also report as an individual row in Balance Mismatch Report
+                                    all_balance_mismatches.append({
+                                        "Sheet": title,
+                                        "GDM": f"Paid LR {lr_no}",
+                                        "Expected": bc_paid_amt,
+                                        "Actual": 0.0,
+                                        "Variance": -bc_paid_amt,
+                                        "Remarks": f"LR {lr_no} marked as Paid in Bill Clearance but has no direct entry in Petty Cash sheet."
+                                    })
+                                else:
+                                    pc_lr_paid = sum(e["receipt"] for e in pc_lr_receipts)
+                                    if abs(pc_lr_paid - bc_paid_amt) > 1.0:
+                                        remarks.append(f"LR {lr_no}: Paid amount in Petty Cash ({pc_lr_paid}) differs from Bill Clearance ({bc_paid_amt})")
+                                        all_balance_mismatches.append({
+                                            "Sheet": title,
+                                            "GDM": f"Paid LR {lr_no}",
+                                            "Expected": bc_paid_amt,
+                                            "Actual": pc_lr_paid,
+                                            "Variance": pc_lr_paid - bc_paid_amt,
+                                            "Remarks": f"LR {lr_no} receipt amount mismatch: expected {bc_paid_amt}, entered {pc_lr_paid}"
+                                        })
+                
+                # Verify GDM balance mismatch
+                if abs(variance) > 2.0 or remarks:
+                    desc_remarks = "Matched" if abs(variance) <= 2.0 else f"Balance mismatch of {variance:,.2f}"
+                    if remarks:
+                        desc_remarks += ". " + "; ".join(remarks)
+                    all_balance_mismatches.append({
+                        "Sheet": title,
+                        "GDM": gdm,
+                        "Expected": expected_balance,
+                        "Actual": actual_balance,
+                        "Variance": variance,
+                        "Remarks": desc_remarks
                     })
 
-    # 6. Generate Excel Audit Report
+        # 2. Audit Unloading Rate Variance (Unloading Rate Variance Report)
+        # For each LR in Despatch working, match against Master Rate worksheet
+        if dw_header_idx is not None:
+            for lr_entry in dw_entries:
+                lr_no = lr_entry["lr_no"]
+                consignor = lr_entry["consignor"]
+                consignee = lr_entry["consignee"]
+                box_qty = lr_entry["box_qty"]
+                claimed_ul = lr_entry["claimed_ul"]
+                
+                if not lr_no or box_qty == 0:
+                    continue
+                    
+                # Clean Names for flexible matching
+                c_consignor = consignor.strip().upper()
+                c_consignee = consignee.strip().upper()
+                
+                # Determine Box Type/Description
+                box_desc = "Standard Box"
+                # Look up box type description in PAID LR or LR worksheets
+                for ws_rows in [paid_lr_rows, cache.get("LR", [])]:
+                    if len(ws_rows) > 1:
+                        headers_ws = [h.strip().upper() for h in ws_rows[0]]
+                        lr_ws_idx = next((i for i, h in enumerate(headers_ws) if "LR NO" in h or "LR" in h), 2)
+                        boxes_ws_idx = next((i for i, h in enumerate(headers_ws) if "BOXES" in h or "BOX COUNT" in h), 9)
+                        for r_ws in ws_rows[1:]:
+                            if len(r_ws) > max(lr_ws_idx, boxes_ws_idx) and r_ws[lr_ws_idx].strip().upper() == lr_no.upper():
+                                box_desc = r_ws[boxes_ws_idx].strip()
+                                break
+                        if box_desc != "Standard Box":
+                            break
+                            
+                # Fallback to ERP lr_db description
+                if box_desc == "Standard Box" and lr_no in lr_db:
+                    box_desc = lr_db[lr_no].get("status", "Standard Box")
+                    
+                # Match standard rate in Rate worksheet
+                matched_rate = None
+                rate_remarks = ""
+                if len(rate_rows) > 0:
+                    # Rate Worksheet structure: [Consignor, Consignee, Rate, Sack, Drum]
+                    # Consignor is in column A (index 0), Consignee in column B (index 1)
+                    for rate_row in rate_rows[1:]:
+                        if len(rate_row) >= 3:
+                            r_consignor = rate_row[0].strip().upper()
+                            r_consignee = rate_row[1].strip().upper()
+                            
+                            # Flexible mapping match
+                            if (r_consignor in c_consignor or c_consignor in r_consignor) and (r_consignee in c_consignee or c_consignee in r_consignee):
+                                try:
+                                    std_rate = float(rate_row[2].strip()) if rate_row[2].strip() else 0.0
+                                except ValueError:
+                                    std_rate = 0.0
+                                try:
+                                    sack_rate = float(rate_row[3].strip()) if len(rate_row) > 3 and rate_row[3].strip() else 0.0
+                                except ValueError:
+                                    sack_rate = 0.0
+                                try:
+                                    drum_rate = float(rate_row[4].strip()) if len(rate_row) > 4 and rate_row[4].strip() else 0.0
+                                except ValueError:
+                                    drum_rate = 0.0
+                                    
+                                if "SACK" in box_desc.upper():
+                                    matched_rate = sack_rate if sack_rate > 0.0 else std_rate
+                                    rate_remarks = f"Sack rate applied ({matched_rate})"
+                                elif "DRUM" in box_desc.upper():
+                                    matched_rate = drum_rate if drum_rate > 0.0 else std_rate
+                                    rate_remarks = f"Drum rate applied ({matched_rate})"
+                                else:
+                                    matched_rate = std_rate
+                                    rate_remarks = f"Standard rate applied ({matched_rate})"
+                                break
+                                
+                if matched_rate is None:
+                    # Default rate fallback
+                    matched_rate = 0.0
+                    rate_remarks = "No rate row found in Master Rate Sheet"
+                    
+                # Despatch Working rate paid per box
+                despatch_rate = round(claimed_ul / box_qty, 2)
+                rate_diff = despatch_rate - matched_rate
+                
+                # If there's a discrepancy, report it
+                if abs(rate_diff) > 0.01:
+                    all_unloading_variances.append({
+                        "Sheet": title,
+                        "Consignor": consignor,
+                        "Consignee": consignee,
+                        "BoxType": box_desc,
+                        "MasterRate": matched_rate,
+                        "DespatchRate": despatch_rate,
+                        "Difference": rate_diff,
+                        "Remarks": f"LR {lr_no}: Total claimed {claimed_ul} for {box_qty} boxes. {rate_remarks}."
+                    })
+
+        # 3. Daily Other Expenses Breakdown
+        # Collect daily payments that are NOT GDM-related and NOT HO CASH receipts
+        for pc_e in pc_entries:
+            if pc_e["payment"] > 0:
+                type_upper = pc_e["type"].upper()
+                details_upper = pc_e["details"].upper()
+                
+                is_gdm = "GDM" in type_upper or "GDM" in details_upper or pc_e["gdm_no"] != ""
+                is_ho = "HO" in type_upper or "CASH" in type_upper or "FUND" in details_upper
+                
+                if not is_gdm and not is_ho:
+                    all_other_expenses.append({
+                        "Sheet": title,
+                        "Date": pc_e["date_str"],
+                        "Category": pc_e["type"] if pc_e["type"] else "Other Payment",
+                        "Details": pc_e["details"],
+                        "Amount": pc_e["payment"],
+                        "Remark": pc_e["remark"]
+                    })
+
+    # 6. Generate Excel Audit Report with premium styles
     report_file_name = f"Petty_Cash_Audit_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
     report_path = os.path.join(BASE_DIR, report_file_name)
     
-    print(f"Generating audit report Excel at {report_path}...", flush=True)
+    print(f"\nGenerating upgraded Excel audit report at {report_path}...", flush=True)
     wb_out = openpyxl.Workbook()
     
+    # Stylings
     header_fill = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
     header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
     data_font = Font(name="Calibri", size=11)
     title_font = Font(name="Calibri", size=14, bold=True, color="1F497D")
+    section_font = Font(name="Calibri", size=12, bold=True)
     
     mismatch_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid") 
     missing_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid") 
@@ -889,26 +1132,27 @@ def main():
     border_side = Side(style='thin', color='D9D9D9')
     cell_border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
     
-    # 6a. Overview Sheet
+    # 6a. Overview Dashboard Sheet
     ws_dash = wb_out.active
     ws_dash.title = "Overview Dashboard"
     ws_dash.views.sheetView[0].showGridLines = True
     
     ws_dash.append([])
-    ws_dash.append(["PETTY CASH AUDITING SYSTEM - DAILY REPORT"])
+    ws_dash.append(["PETTY CASH RECONCILIATION & AUDIT SYSTEM - DAILY SUMMARY"])
     ws_dash.cell(2, 1).font = title_font
     ws_dash.append([f"Report Generated: {datetime.now().strftime('%Y-%m-%d %I:%M %p')}"])
     ws_dash.append([])
     
-    # Add Branch Top-up Summary Table
-    ws_dash.append(["Branch Fund Status & Top-up Summary"])
-    ws_dash.cell(5, 1).font = Font(name="Calibri", size=12, bold=True)
+    # Add Branch Float Summary
+    ws_dash.append(["Branch Petty Cash Float & Top-up Summary"])
+    ws_dash.cell(ws_dash.max_row, 1).font = section_font
     
-    topup_headers = ["Branch Name", "Active Sheet", "Closing Balance", "Total Payments (Spent)", "Recommended Top-up"]
-    ws_dash.append(topup_headers)
-    for col in range(1, len(topup_headers) + 1):
-        ws_dash.cell(6, col).fill = header_fill
-        ws_dash.cell(6, col).font = header_font
+    float_headers = ["Branch Name", "Active sheet", "Closing Balance", "Total Payments (Spent)", "Recommended Top-up"]
+    ws_dash.append(float_headers)
+    curr_row = ws_dash.max_row
+    for col in range(1, len(float_headers) + 1):
+        ws_dash.cell(curr_row, col).fill = header_fill
+        ws_dash.cell(curr_row, col).font = header_font
         
     for b_name, stats in branch_topup_summary.items():
         active_title = stats.get("sheet_title", stats.get("status", ""))
@@ -919,138 +1163,169 @@ def main():
             stats["total_payments"],
             stats["recommended_topup"]
         ])
-        curr_row = ws_dash.max_row
-        ws_dash.cell(curr_row, 3).number_format = '#,##0.00'
-        ws_dash.cell(curr_row, 4).number_format = '#,##0.00'
-        ws_dash.cell(curr_row, 5).number_format = '#,##0.00'
-        # Highlight top-up required in red bold
+        curr_r = ws_dash.max_row
+        ws_dash.cell(curr_r, 3).number_format = '#,##0.00'
+        ws_dash.cell(curr_r, 4).number_format = '#,##0.00'
+        ws_dash.cell(curr_r, 5).number_format = '#,##0.00'
         if stats["recommended_topup"] > 0:
-            ws_dash.cell(curr_row, 5).font = Font(name="Calibri", size=11, bold=True, color="C00000")
+            ws_dash.cell(curr_r, 5).font = Font(name="Calibri", size=11, bold=True, color="C00000")
             
     ws_dash.append([])
     
-    ws_dash.append(["Summary of Discrepancies Found"])
-    ws_dash.cell(ws_dash.max_row, 1).font = Font(name="Calibri", size=12, bold=True)
+    # Add Discrepancy counts
+    ws_dash.append(["Summary of Audit Exceptions Found"])
+    ws_dash.cell(ws_dash.max_row, 1).font = section_font
     
-    ws_dash.append(["Category", "Number of Issues Found", "Status"])
-    curr_header_row = ws_dash.max_row
+    summary_headers = ["Audit Checklist Category", "Exceptions Count", "Review Priority"]
+    ws_dash.append(summary_headers)
+    curr_row = ws_dash.max_row
     for col in range(1, 4):
-        ws_dash.cell(curr_header_row, col).fill = header_fill
-        ws_dash.cell(curr_header_row, col).font = header_font
+        ws_dash.cell(curr_row, col).fill = header_fill
+        ws_dash.cell(curr_row, col).font = header_font
         
-    dash_stats = [
-        ("Unbooked/Incorrect Branch Funding", len(discrepancies_funding), "Requires Review" if len(discrepancies_funding) > 0 else "Clear"),
-        ("Paid LRs Mismatches/Missing", len(discrepancies_paid_lrs), "Requires Review" if len(discrepancies_paid_lrs) > 0 else "Clear"),
-        ("GDM To-Pay/Unloading Mismatches", len(discrepancies_gdm), "Requires Review" if len(discrepancies_gdm) > 0 else "Clear"),
+    audit_stats = [
+        ("Petty Cash Balance Mismatch Issues (Section 1)", len(all_balance_mismatches), "HIGH" if len(all_balance_mismatches) > 0 else "NORMAL"),
+        ("Missing / Unrecorded GDMs (Section 2)", len(all_missing_gdms), "MEDIUM" if len(all_missing_gdms) > 0 else "NORMAL"),
+        ("Unloading Rate Variances (Section 3)", len(all_unloading_variances), "LOW" if len(all_unloading_variances) > 0 else "NORMAL"),
+        ("Other Payments / Expenses Logged (Section 4)", len(all_other_expenses), "INFO")
     ]
-    
-    for row_val in dash_stats:
+    for row_val in audit_stats:
         ws_dash.append(row_val)
-        curr_row = ws_dash.max_row
-        ws_dash.cell(curr_row, 1).font = data_font
-        ws_dash.cell(curr_row, 2).font = data_font
-        ws_dash.cell(curr_row, 3).font = Font(name="Calibri", size=11, bold=True)
-        if row_val[1] > 0:
-            ws_dash.cell(curr_row, 3).font = Font(name="Calibri", size=11, bold=True, color="FF0000")
+        curr_r = ws_dash.max_row
+        ws_dash.cell(curr_r, 1).font = data_font
+        ws_dash.cell(curr_r, 2).font = data_font
+        ws_dash.cell(curr_r, 3).font = Font(name="Calibri", size=11, bold=True)
+        if row_val[1] > 0 and row_val[2] in ("HIGH", "MEDIUM"):
+            ws_dash.cell(curr_r, 3).font = Font(name="Calibri", size=11, bold=True, color="FF0000")
             
     for col in ws_dash.columns:
         max_len = max(len(str(cell.value or '')) for cell in col)
         col_letter = openpyxl.utils.get_column_letter(col[0].column)
         ws_dash.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
-    # 6b. Funding Sheet
-    ws_fund = wb_out.create_sheet("Branch Funding Audit")
-    ws_fund.views.sheetView[0].showGridLines = True
-    
-    fund_headers = ["Date", "Branch Name", "Transfer Amount", "Status", "Details"]
-    ws_fund.append(fund_headers)
-    for col in range(1, len(fund_headers) + 1):
-        ws_fund.cell(1, col).fill = header_fill
-        ws_fund.cell(1, col).font = header_font
+    # 6b. Section 1 Sheet: Petty Cash Balance Mismatch
+    ws_s1 = wb_out.create_sheet("Balance Mismatch Report")
+    ws_s1.views.sheetView[0].showGridLines = True
+    s1_headers = ["Branch Sheet", "GDM / LR No", "Expected Balance", "Actual Balance in PC", "Variance", "Remarks"]
+    ws_s1.append(s1_headers)
+    for col in range(1, len(s1_headers) + 1):
+        ws_s1.cell(1, col).fill = header_fill
+        ws_s1.cell(1, col).font = header_font
         
-    for issue in discrepancies_funding:
-        ws_fund.append([issue["Date"], issue["Branch"], issue["Transfer Amount"], issue["Status"], issue["Details"]])
-        curr_row = ws_fund.max_row
-        ws_fund.cell(curr_row, 3).number_format = '#,##0.00'
-        fill = mismatch_fill if issue["Status"] == "UNBOOKED FUND" else missing_fill
-        for c in range(1, len(fund_headers) + 1):
-            ws_fund.cell(curr_row, c).fill = fill
-            ws_fund.cell(curr_row, c).border = cell_border
+    for issue in all_balance_mismatches:
+        ws_s1.append([issue["Sheet"], issue["GDM"], issue["Expected"], issue["Actual"], issue["Variance"], issue["Remarks"]])
+        curr_r = ws_s1.max_row
+        ws_s1.cell(curr_r, 3).number_format = '#,##0.00'
+        ws_s1.cell(curr_r, 4).number_format = '#,##0.00'
+        ws_s1.cell(curr_r, 5).number_format = '#,##0.00'
+        
+        # Highlight in orange
+        fill = mismatch_fill
+        for c in range(1, len(s1_headers) + 1):
+            ws_s1.cell(curr_r, c).fill = fill
+            ws_s1.cell(curr_r, c).border = cell_border
             
-    for col in ws_fund.columns:
+    for col in ws_s1.columns:
         max_len = max(len(str(cell.value or '')) for cell in col)
         col_letter = openpyxl.utils.get_column_letter(col[0].column)
-        ws_fund.column_dimensions[col_letter].width = max(max_len + 3, 12)
+        ws_s1.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
-    # 6c. Paid LRs Sheet
-    ws_paid = wb_out.create_sheet("Paid LRs Audit")
-    ws_paid.views.sheetView[0].showGridLines = True
-    
-    paid_headers = ["Sheet Name", "Row No", "LR Number", "Date", "Sheet Amount", "ERP Actual Amount", "Status", "Details"]
-    ws_paid.append(paid_headers)
-    for col in range(1, len(paid_headers) + 1):
-        ws_paid.cell(1, col).fill = header_fill
-        ws_paid.cell(1, col).font = header_font
+    # 6c. Section 2 Sheet: Missing GDM Report
+    ws_s2 = wb_out.create_sheet("Missing GDM Report")
+    ws_s2.views.sheetView[0].showGridLines = True
+    s2_headers = ["Branch Sheet", "GDM Number", "Driver Name", "Expected Topay", "Route Advance", "Remarks"]
+    ws_s2.append(s2_headers)
+    for col in range(1, len(s2_headers) + 1):
+        ws_s2.cell(1, col).fill = header_fill
+        ws_s2.cell(1, col).font = header_font
         
-    for issue in discrepancies_paid_lrs:
-        ws_paid.append([issue["Sheet"], issue["Row"], issue["LR No"], issue["Date"], issue["Sheet Lr Amount"], issue["ERP Actual Amount"], issue["Status"], issue["Details"]])
-        curr_row = ws_paid.max_row
-        ws_paid.cell(curr_row, 5).number_format = '#,##0.00'
-        if isinstance(issue["ERP Actual Amount"], (int, float)):
-            ws_paid.cell(curr_row, 6).number_format = '#,##0.00'
-        fill = mismatch_fill if issue["Status"] == "AMOUNT MISMATCH" else missing_fill
-        for c in range(1, len(paid_headers) + 1):
-            ws_paid.cell(curr_row, c).fill = fill
-            ws_paid.cell(curr_row, c).border = cell_border
+    for issue in all_missing_gdms:
+        ws_s2.append([issue["Sheet"], issue["GDM"], issue["Driver"], issue["Topay"], issue["Advance"], issue["Remarks"]])
+        curr_r = ws_s2.max_row
+        ws_s2.cell(curr_r, 4).number_format = '#,##0.00'
+        ws_s2.cell(curr_r, 5).number_format = '#,##0.00'
+        
+        # Highlight in yellow
+        fill = missing_fill
+        for c in range(1, len(s2_headers) + 1):
+            ws_s2.cell(curr_r, c).fill = fill
+            ws_s2.cell(curr_r, c).border = cell_border
             
-    for col in ws_paid.columns:
+    for col in ws_s2.columns:
         max_len = max(len(str(cell.value or '')) for cell in col)
         col_letter = openpyxl.utils.get_column_letter(col[0].column)
-        ws_paid.column_dimensions[col_letter].width = max(max_len + 3, 12)
+        ws_s2.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
-    # 6d. GDM Sheet
-    ws_gdm = wb_out.create_sheet("GDMs Audit")
-    ws_gdm.views.sheetView[0].showGridLines = True
-    
-    gdm_headers = ["Sheet Name", "Row No", "GDM Number", "Discrepancy Type", "Sheet Value", "ERP Value", "Status", "Details"]
-    ws_gdm.append(gdm_headers)
-    for col in range(1, len(gdm_headers) + 1):
-        ws_gdm.cell(1, col).fill = header_fill
-        ws_gdm.cell(1, col).font = header_font
+    # 6d. Section 3 Sheet: Unloading Rate Variance Report
+    ws_s3 = wb_out.create_sheet("Unloading Rate Variance")
+    ws_s3.views.sheetView[0].showGridLines = True
+    s3_headers = ["Branch Sheet", "Consignor", "Consignee", "Box Type", "Master Rate", "Despatch Working Rate", "Difference", "Remarks"]
+    ws_s3.append(s3_headers)
+    for col in range(1, len(s3_headers) + 1):
+        ws_s3.cell(1, col).fill = header_fill
+        ws_s3.cell(1, col).font = header_font
         
-    for issue in discrepancies_gdm:
-        ws_gdm.append([issue["Sheet"], issue["Row"], issue["GDM No"], issue["Type"], issue["Sheet Value"], issue["ERP Value"], issue["Status"], issue["Details"]])
-        curr_row = ws_gdm.max_row
-        if isinstance(issue["Sheet Value"], (int, float)):
-            ws_gdm.cell(curr_row, 5).number_format = '#,##0.00'
-        if isinstance(issue["ERP Value"], (int, float)):
-            ws_gdm.cell(curr_row, 6).number_format = '#,##0.00'
-        fill = mismatch_fill if "MISMATCH" in issue["Status"] or "EXCESS" in issue["Status"] else missing_fill
-        for c in range(1, len(gdm_headers) + 1):
-            ws_gdm.cell(curr_row, c).fill = fill
-            ws_gdm.cell(curr_row, c).border = cell_border
+    for issue in all_unloading_variances:
+        ws_s3.append([issue["Sheet"], issue["Consignor"], issue["Consignee"], issue["BoxType"], issue["MasterRate"], issue["DespatchRate"], issue["Difference"], issue["Remarks"]])
+        curr_r = ws_s3.max_row
+        ws_s3.cell(curr_r, 5).number_format = '#,##0.00'
+        ws_s3.cell(curr_r, 6).number_format = '#,##0.00'
+        ws_s3.cell(curr_r, 7).number_format = '#,##0.00'
+        
+        # Color highlighting
+        fill = mismatch_fill
+        for c in range(1, len(s3_headers) + 1):
+            ws_s3.cell(curr_r, c).fill = fill
+            ws_s3.cell(curr_r, c).border = cell_border
             
-    for col in ws_gdm.columns:
+    for col in ws_s3.columns:
         max_len = max(len(str(cell.value or '')) for cell in col)
         col_letter = openpyxl.utils.get_column_letter(col[0].column)
-        ws_gdm.column_dimensions[col_letter].width = max(max_len + 3, 12)
+        ws_s3.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
-    # Save Report
+    # 6e. Section 4 Sheet: Daily Categorized Other Expenses
+    ws_s4 = wb_out.create_sheet("Daily Other Expenses")
+    ws_s4.views.sheetView[0].showGridLines = True
+    s4_headers = ["Branch Sheet", "Date", "Category", "Details", "Amount", "Remark"]
+    ws_s4.append(s4_headers)
+    for col in range(1, len(s4_headers) + 1):
+        ws_s4.cell(1, col).fill = header_fill
+        ws_s4.cell(1, col).font = header_font
+        
+    # Sort expenses by date
+    try:
+        sorted_expenses = sorted(all_other_expenses, key=lambda x: parse_date(x["Date"]) or datetime.min)
+    except Exception:
+        sorted_expenses = all_other_expenses
+        
+    for exp in sorted_expenses:
+        ws_s4.append([exp["Sheet"], exp["Date"], exp["Category"], exp["Details"], exp["Amount"], exp["Remark"]])
+        curr_r = ws_s4.max_row
+        ws_s4.cell(curr_r, 5).number_format = '#,##0.00'
+        for c in range(1, len(s4_headers) + 1):
+            ws_s4.cell(curr_r, c).font = data_font
+            ws_s4.cell(curr_r, c).border = cell_border
+            
+    for col in ws_s4.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws_s4.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+    # Save workbook
     wb_out.save(report_path)
-    print(f"Excel report generated successfully at: {report_path}", flush=True)
+    print(f"Upgraded audit report generated at: {report_path}", flush=True)
 
     # 7. Print Terminal Summary
     print("\n" + "="*50, flush=True)
-    print("RECONCILE SUMMARY:", flush=True)
-    print(f" - Unbooked Funding Issues: {len(discrepancies_funding)}", flush=True)
-    print(f" - Paid LRs Issues: {len(discrepancies_paid_lrs)}", flush=True)
-    print(f" - GDM To-Pay/Unloading Issues: {len(discrepancies_gdm)}", flush=True)
+    print("RECONCILE SUMMARY (UPGRADED):", flush=True)
+    print(f" - Petty Cash Balance Mismatches: {len(all_balance_mismatches)}", flush=True)
+    print(f" - Missing GDM Exceptions: {len(all_missing_gdms)}", flush=True)
+    print(f" - Unloading Rate Variances: {len(all_unloading_variances)}", flush=True)
+    print(f" - Daily Other Expenses Logged: {len(all_other_expenses)}", flush=True)
     print("="*50 + "\n", flush=True)
 
-    # 8. Send Email Report to Anwar and recipients list
-    print("Preparing email report...", flush=True)
-    
-    # Compile recipients
+    # 8. Send Email Report
+    print("Preparing daily email report...", flush=True)
     recipients = ["anwar@efflogistics.biz"]
     if RECEIVER_EMAIL:
         for r in RECEIVER_EMAIL.split(","):
@@ -1059,35 +1334,37 @@ def main():
                 recipients.append(email_clean)
                 
     if not SENDER_EMAIL or not SENDER_PASSWORD:
-        print("Warning: SENDER_EMAIL or SENDER_PASSWORD environment variables not set. Skipping email dispatch.", flush=True)
+        print("Warning: SENDER_EMAIL or SENDER_PASSWORD not set. Skipping email dispatch.", flush=True)
         return
         
     msg = MIMEMultipart()
     msg["From"] = SENDER_EMAIL
     msg["To"] = ", ".join(recipients)
-    msg["Subject"] = f"Daily Petty Cash Audit & Top-up Report - {datetime.now().strftime('%Y-%m-%d')}"
+    msg["Subject"] = f"Daily Petty Cash Audit & Exceptions Report - {datetime.now().strftime('%Y-%m-%d')}"
     
-    # HTML Body
     html_body = f"""
     <html>
     <head>
         <style>
             body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
             h2 {{ color: #1F497D; border-bottom: 2px solid #1F497D; padding-bottom: 5px; }}
+            h3 {{ color: #1F497D; margin-top: 25px; }}
             table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
             th, td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
             th {{ background-color: #1F497D; color: white; }}
             tr:nth-child(even) {{ background-color: #f2f2f2; }}
             .highlight-red {{ color: #C00000; font-weight: bold; }}
+            .highlight-orange {{ background-color: #FCE4D6; }}
+            .highlight-yellow {{ background-color: #FFF2CC; }}
             .card {{ background-color: #f9f9f9; border: 1px solid #e0e0e0; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
         </style>
     </head>
     <body>
-        <h2>Daily Petty Cash Audit & Top-up Report</h2>
+        <h2>Daily Petty Cash Audit & Exceptions Report</h2>
         <p>Hi Anwar,</p>
-        <p>Please find the automated Petty Cash Audit and Branch Top-up report for today below. The complete detail worksheets are attached as an Excel report.</p>
+        <p>Please find the automated Petty Cash Reconciliation and Audit report summary for today. The complete detailed worksheets are attached as an Excel report.</p>
         
-        <h3>1. Branch Float & Top-up Summary</h3>
+        <h3>1. Branch Petty Cash Float & Top-up Summary</h3>
         <table>
             <thead>
                 <tr>
@@ -1119,12 +1396,13 @@ def main():
             </tbody>
         </table>
         
-        <h3>2. Audit Mismatches Summary</h3>
+        <h3>2. Audit Exceptions Summary</h3>
         <div class="card">
             <ul>
-                <li><strong>Unbooked/Incorrect Branch Funding (Purchase Register MAIN vs Branch Sheets):</strong> {len(discrepancies_funding)} issues</li>
-                <li><strong>Paid LRs Amount/Status Mismatches (ERP vs Branch Sheets):</strong> {len(discrepancies_paid_lrs)} issues</li>
-                <li><strong>GDM To-Pay and Unloading Mismatches (ERP vs Branch Sheets):</strong> {len(discrepancies_gdm)} issues</li>
+                <li><strong>Petty Cash Balance Mismatch Issues (Section 1):</strong> {len(all_balance_mismatches)} issues found</li>
+                <li><strong>Missing / Unrecorded GDMs in Petty Cash (Section 2):</strong> {len(all_missing_gdms)} issues found</li>
+                <li><strong>Unloading Rate Variances (Section 3):</strong> {len(all_unloading_variances)} issues found</li>
+                <li><strong>Daily Other Expenses Breakdown (Section 4):</strong> {len(all_other_expenses)} payments logged</li>
             </ul>
         </div>
         
@@ -1146,9 +1424,9 @@ def main():
                 f"attachment; filename= {report_file_name}",
             )
             msg.attach(part)
-            print(f"Attached report to email: {report_file_name}", flush=True)
+            print(f"Attached Excel report to email: {report_file_name}", flush=True)
     except Exception as att_err:
-        print(f"Error attaching file: {att_err}", flush=True)
+        print(f"Error attaching Excel file: {att_err}", flush=True)
         
     # Send via SMTP
     try:
@@ -1158,7 +1436,7 @@ def main():
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
         server.quit()
-        print("🎉 Daily report email sent successfully!", flush=True)
+        print("🎉 Daily exceptions report email sent successfully!", flush=True)
     except Exception as mail_err:
         print(f"❌ Error sending email: {mail_err}", flush=True)
 
