@@ -350,19 +350,25 @@ def main():
                     "box_qty": box_val
                 }
 
-    # Pre-index GDM to LR mapping
+    # Pre-index GDM to LR mapping and supervisor
     gdm_lrs = {} 
+    gdm_supervisors = {}
     if not df_desp.empty:
         desp_no_col = next((c for c in df_desp.columns if c in ['DESPATCH NO', 'DISPATCH NO', 'DESPATCH_NO']), None)
         lr_no_col = next((c for c in df_desp.columns if c in ['LR NO', 'LRNO', 'LR_NUMBER', 'LR_NO']), None)
+        sup_col = next((c for c in df_desp.columns if c in ['LD SUPERVISOR', 'SUPERVISOR', 'LD_SUPERVISOR']), None)
         
         for _, r in df_desp.iterrows():
             gdm = clean_val(r[desp_no_col]) if desp_no_col else ""
             lr = clean_val(r[lr_no_col]) if lr_no_col else ""
-            if gdm and lr:
-                if gdm not in gdm_lrs:
-                    gdm_lrs[gdm] = []
-                gdm_lrs[gdm].append(lr)
+            sup = clean_val(r[sup_col]) if sup_col else ""
+            if gdm:
+                if lr:
+                    if gdm not in gdm_lrs:
+                        gdm_lrs[gdm] = []
+                    gdm_lrs[gdm].append(lr)
+                if sup:
+                    gdm_supervisors[gdm] = sup.strip().upper()
  
     # Load bill_clear exports
     bill_clear_db = {}
@@ -424,6 +430,38 @@ def main():
             print(f"Loaded {len(gdm_scraped_db)} scraped GDMs from gdm_details.json", flush=True)
         except Exception as json_err:
             print(f"Error loading gdm_details.json: {json_err}", flush=True)
+
+    # Fetch supervisor mappings from Supabase for GDM branch filtering
+    import requests
+    supervisor_map = {}
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_KEY")
+    if supabase_url and supabase_key:
+        try:
+            print("Fetching supervisor mappings from Supabase for GDM branch filtering...", flush=True)
+            url = f"{supabase_url}/rest/v1/supervisor_branch_mapping?select=*"
+            headers = {"apikey": supabase_key, "Authorization": f"Bearer {supabase_key}"}
+            r = requests.get(url, headers=headers, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            for item in data:
+                sup_name = item.get("supervisor_name")
+                branch_name = item.get("branch")
+                if sup_name and branch_name:
+                    norm_sup = sup_name.strip().upper()
+                    b_code = "N/A"
+                    b_upper = branch_name.strip().upper()
+                    if "KANNUR" in b_upper: b_code = "KNR"
+                    elif "KOLLAM" in b_upper: b_code = "KLM"
+                    elif "CALICUT" in b_upper: b_code = "CLT"
+                    elif "MALAPPURAM" in b_upper: b_code = "MLPM"
+                    elif "KASARGODE" in b_upper or "KANHANGAD" in b_upper: b_code = "KSD"
+                    elif "EDATHALA" in b_upper: b_code = "EDATHALA"
+                    elif "KOTTAYAM" in b_upper: b_code = "KOTTAYAM"
+                    supervisor_map[norm_sup] = b_code
+            print(f"Loaded {len(supervisor_map)} supervisor-to-branch mappings.", flush=True)
+        except Exception as e:
+            print(f"Warning: Failed to fetch supervisor mappings from Supabase: {e}", flush=True)
 
     # 5. Core Reconciliation Engine
     discrepancies_funding = []
@@ -900,6 +938,28 @@ def main():
                 
         # 1. Audit GDM Balances (Mismatch Report & Missing GDM Report)
         for gdm in sorted(list(gdms_in_branch)):
+            # Resolve the branch code for the current sheet
+            branch_code = None
+            for b_pr, prefix_val in branch_map.items():
+                if title.upper().startswith(prefix_val.upper()):
+                    if "KANNUR" in b_pr.upper() or "KNR" in prefix_val.upper(): branch_code = "KNR"
+                    elif "KOLLAM" in b_pr.upper() or "KLM" in prefix_val.upper(): branch_code = "KLM"
+                    elif "CALICUT" in b_pr.upper() or "CLT" in prefix_val.upper(): branch_code = "CLT"
+                    elif "MALAPPURAM" in b_pr.upper() or "MLPM" in prefix_val.upper(): branch_code = "MLPM"
+                    elif "KANHANGAD" in b_pr.upper() or "KSD" in prefix_val.upper(): branch_code = "KSD"
+                    elif "EDATHALA" in b_pr.upper() or "EDATHALA" in prefix_val.upper(): branch_code = "EDATHALA"
+                    elif "KOTTAYAM" in b_pr.upper() or "KOTTAYAM" in prefix_val.upper(): branch_code = "KOTTAYAM"
+                    break
+
+            # Filter GDM by resolved branch code from raw ERP despatch report/Supabase mappings
+            if branch_code and gdm in gdm_supervisors:
+                gdm_sup = gdm_supervisors[gdm]
+                gdm_resolved_branch = supervisor_map.get(gdm_sup)
+                if gdm_resolved_branch and gdm_resolved_branch != "N/A":
+                    if gdm_resolved_branch != branch_code:
+                        print(f"[{title}] GDM {gdm} resolved to branch {gdm_resolved_branch} via supervisor {gdm_sup}. Current sheet branch is {branch_code}. Skipping GDM from this branch's audit.", flush=True)
+                        continue
+
             pc_gdm_entries = [e for e in pc_entries if e["gdm_no"] == gdm]
             dw_gdm_entries = [e for e in dw_entries if e["gdm_no"] == gdm]
             
