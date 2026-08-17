@@ -60,6 +60,26 @@ def clean_val(val, default=""):
         return default
     return s
 
+def clean_branch_display_name(raw_name):
+    if not raw_name:
+        return ""
+    raw_upper = str(raw_name).strip().upper()
+    if "KANNUR" in raw_upper or "KNR" in raw_upper:
+        return "KANNUR Petty Cash"
+    elif "CALICUT" in raw_upper or "CLT" in raw_upper:
+        return "CALICUT Petty Cash"
+    elif "EDATHALA" in raw_upper or "OFFICE" in raw_upper:
+        return "EDATHALA Petty Cash"
+    elif "MALAPPURAM" in raw_upper or "MLPM" in raw_upper:
+        return "MALAPPURAM Petty Cash"
+    elif "KANHANGAD" in raw_upper or "KSD" in raw_upper:
+        return "KANHANGAD Petty Cash"
+    elif "KOLLAM" in raw_upper or "KLM" in raw_upper:
+        return "KOLLAM Petty Cash"
+    elif "KOTTAYAM" in raw_upper:
+        return "KOTTAYAM Petty Cash"
+    return raw_name
+
 def parse_date(val_str):
     if not val_str:
         return None
@@ -1506,7 +1526,7 @@ def main():
         top_style = "class='highlight-red'" if rec_top > 0 else ""
         html_body += f"""
                 <tr>
-                    <td>{b_name}</td>
+                    <td>{clean_branch_display_name(b_name)}</td>
                     <td>{active_title}</td>
                     <td>{stats['closing_balance']:,.2f}</td>
                     <td>{stats['total_payments']:,.2f}</td>
@@ -1536,9 +1556,10 @@ def main():
         expenses_by_branch = {}
         for exp in sorted_expenses:
             b = exp.get("Branch", exp["Sheet"])
-            if b not in expenses_by_branch:
-                expenses_by_branch[b] = []
-            expenses_by_branch[b].append(exp)
+            b_clean = clean_branch_display_name(b)
+            if b_clean not in expenses_by_branch:
+                expenses_by_branch[b_clean] = []
+            expenses_by_branch[b_clean].append(exp)
             
         for b_name in sorted(expenses_by_branch.keys()):
             branch_exps = expenses_by_branch[b_name]
