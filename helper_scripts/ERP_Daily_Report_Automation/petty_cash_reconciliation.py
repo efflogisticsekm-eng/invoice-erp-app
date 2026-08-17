@@ -118,6 +118,19 @@ def parse_date_range_from_title(title):
             return start_day, start_month, end_day, end_month
     return None
 
+def get_sheet_start_date(title, ref_date):
+    dr = parse_date_range_from_title(title)
+    if not dr:
+        return datetime.min
+    start_day, start_month, end_day, end_month = dr
+    year = ref_date.year
+    if start_month > ref_date.month + 3:
+        year -= 1
+    try:
+        return datetime(year, start_month, start_day)
+    except Exception:
+        return datetime.min
+
 def date_falls_in_range(tx_date, start_day, start_month, end_day, end_month):
     year = tx_date.year
     start_date = datetime(year, start_month, start_day)
@@ -573,6 +586,7 @@ def main():
             })
 
     # Calculate Top-up and balance stats for each branch
+    active_sheet_ids = set()
     for pr_name, prefix in branch_map.items():
         branch_sheets = [s for s in all_spreadsheets if s.title.strip().upper().startswith(prefix.upper())]
         if not branch_sheets:
@@ -585,6 +599,14 @@ def main():
             continue
             
         now_ist = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+        
+        # Sort branch sheets descending by their start date to ensure branch_sheets[0] is the latest
+        branch_sheets = sorted(
+            branch_sheets,
+            key=lambda s: get_sheet_start_date(s.title, now_ist),
+            reverse=True
+        )
+        
         active_sheet = None
         for s in branch_sheets:
             dr = parse_date_range_from_title(s.title)
@@ -595,6 +617,8 @@ def main():
             active_sheet = branch_sheets[0] 
             
         sheet_cache = get_cached_sheet_data(active_sheet)
+        active_sheet_ids.add(active_sheet.id)
+        
         pc_rows = sheet_cache["Petty Cash"]
         c_bal, t_pay, r_top = calculate_branch_stats(pc_rows)
         
@@ -705,8 +729,38 @@ def main():
     all_unloading_variances = []
     all_other_expenses = []
 
-    # Reconcile PAID LRs & GDMs using cached data
+    # Build a map of GDM numbers that are actually recorded in Petty Cash of active sheets
+    gdm_to_active_sheets = {}
+    for s_id in active_sheet_ids:
+        if s_id not in sheet_data_cache:
+            continue
+        cache = sheet_data_cache[s_id]
+        t = cache["title"]
+        pc_rows = cache.get("Petty Cash", [])
+        if len(pc_rows) > 0:
+            pc_headers = [h.strip() for h in pc_rows[0]]
+            gdm_idx = pc_headers.index("GDM No") if "GDM No" in pc_headers else 2
+            details_idx = pc_headers.index("Details") if "Details" in pc_headers else 4
+            type_idx = pc_headers.index("Payment / Receipt") if "Payment / Receipt" in pc_headers else 3
+            
+            for row in pc_rows[1:]:
+                if len(row) <= max(gdm_idx, type_idx):
+                    continue
+                gdm_no_str = row[gdm_idx].strip()
+                details_str = row[details_idx].strip() if len(row) > details_idx else ""
+                type_str = row[type_idx].strip()
+                
+                if "OPENING" in details_str.upper() or "OPENING" in type_str.upper():
+                    continue
+                if gdm_no_str and gdm_no_str.isdigit():
+                    if gdm_no_str not in gdm_to_active_sheets:
+                        gdm_to_active_sheets[gdm_no_str] = []
+                    gdm_to_active_sheets[gdm_no_str].append(t)
+
+    # Reconcile PAID LRs & GDMs using cached data (Active sheets only)
     for s_id, cache in sheet_data_cache.items():
+        if s_id not in active_sheet_ids:
+            continue
         title = cache["title"]
         print(f"\nAuditing details for branch sheet: {title}...", flush=True)
         
@@ -951,13 +1005,20 @@ def main():
                     elif "KOTTAYAM" in b_pr.upper() or "KOTTAYAM" in prefix_val.upper(): branch_code = "KOTTAYAM"
                     break
 
-            # Filter GDM by resolved branch code from raw ERP despatch report/Supabase mappings
-            if branch_code and gdm in gdm_supervisors:
+            # Check Method A: If GDM is recorded in any active Petty Cash sheet
+            if gdm in gdm_to_active_sheets:
+                recorded_sheets = gdm_to_active_sheets[gdm]
+                if title not in recorded_sheets:
+                    print(f"[{title}] GDM {gdm} is recorded in Petty Cash of {recorded_sheets}. Skipping from this sheet's audit (Method A).", flush=True)
+                    continue
+
+            # Check Method B (Fallback): Filter GDM by resolved branch code from raw ERP despatch report/Supabase mappings
+            elif branch_code and gdm in gdm_supervisors:
                 gdm_sup = gdm_supervisors[gdm]
                 gdm_resolved_branch = supervisor_map.get(gdm_sup)
                 if gdm_resolved_branch and gdm_resolved_branch != "N/A":
                     if gdm_resolved_branch != branch_code:
-                        print(f"[{title}] GDM {gdm} resolved to branch {gdm_resolved_branch} via supervisor {gdm_sup}. Current sheet branch is {branch_code}. Skipping GDM from this branch's audit.", flush=True)
+                        print(f"[{title}] GDM {gdm} resolved to branch {gdm_resolved_branch} via supervisor {gdm_sup}. Current sheet branch is {branch_code}. Skipping GDM from this branch's audit (Method B).", flush=True)
                         continue
 
             pc_gdm_entries = [e for e in pc_entries if e["gdm_no"] == gdm]
@@ -1165,6 +1226,7 @@ def main():
                 if not is_gdm and not is_ho:
                     all_other_expenses.append({
                         "Sheet": title,
+                        "Branch": branch_name,
                         "Date": pc_e["date_str"],
                         "Category": pc_e["type"] if pc_e["type"] else "Other Payment",
                         "Details": pc_e["details"],
@@ -1466,6 +1528,61 @@ def main():
             </ul>
         </div>
         
+        <h3>3. Daily Other Expenses Breakdown (Section 4)</h3>
+        <p>Click on each branch below to expand and view the detailed daily other expenses.</p>
+    """
+    
+    if all_other_expenses:
+        expenses_by_branch = {}
+        for exp in sorted_expenses:
+            b = exp.get("Branch", exp["Sheet"])
+            if b not in expenses_by_branch:
+                expenses_by_branch[b] = []
+            expenses_by_branch[b].append(exp)
+            
+        for b_name in sorted(expenses_by_branch.keys()):
+            branch_exps = expenses_by_branch[b_name]
+            total_amt = sum(e["Amount"] for e in branch_exps)
+            count = len(branch_exps)
+            
+            html_body += f"""
+        <details style="margin-bottom: 12px; border: 1px solid #ddd; border-radius: 5px; background-color: #fcfcfc;">
+            <summary style="font-weight: bold; cursor: pointer; color: #1F497D; padding: 12px; background-color: #f2f5f9; outline: none; border-bottom: 1px solid #ddd;">
+                {b_name} &mdash; Total: {total_amt:,.2f} Rs ({count} items)
+            </summary>
+            <div style="padding: 12px; overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin: 0; border: 1px solid #ddd;">
+                    <thead>
+                        <tr style="background-color: #1F497D; color: white;">
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Date</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Category</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Details</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Amount (Rs)</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Remark</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            """
+            for e in branch_exps:
+                html_body += f"""
+                        <tr>
+                            <td style="padding: 8px; border: 1px solid #ddd;">{e['Date']}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd;">{e['Category']}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd;">{e['Details']}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">{e['Amount']:,.2f}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd;">{e['Remark']}</td>
+                        </tr>
+                """
+            html_body += """
+                    </tbody>
+                </table>
+            </div>
+        </details>
+            """
+    else:
+        html_body += "<div class='card'><p>No other expenses logged today.</p></div>"
+        
+    html_body += """
         <p>Regards,<br><strong>EFF Logistics Auto-Scheduler</strong></p>
     </body>
     </html>
