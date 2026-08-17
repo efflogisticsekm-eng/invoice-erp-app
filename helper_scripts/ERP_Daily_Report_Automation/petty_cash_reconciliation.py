@@ -235,6 +235,58 @@ def calculate_branch_stats(pc_rows):
 def main():
     print("Initializing Petty Cash Auditing & Reconciliation System...", flush=True)
     
+    # Sunday & Holiday skipping check
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(ist_tz)
+    today_str = now_ist.strftime("%Y-%m-%d")
+
+    # Sunday is 6
+    if now_ist.weekday() == 6:
+        print(f"Today ({today_str}) is Sunday. Skipping Petty Cash Reconciliation gracefully.", flush=True)
+        sys.exit(0)
+
+    # Fetch holidays from Supabase to check if today is a holiday
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_KEY")
+    holidays = []
+    if supabase_url and supabase_key:
+        try:
+            import requests
+            print("Checking if today is a holiday in Supabase...", flush=True)
+            url = f"{supabase_url}/rest/v1/holidays?select=*"
+            headers = {"apikey": supabase_key, "Authorization": f"Bearer {supabase_key}"}
+            r = requests.get(url, headers=headers, timeout=10)
+            r.raise_for_status()
+            holidays_data = r.json()
+            holidays = [item.get("date").strip() for item in holidays_data if item.get("date")]
+            if today_str in holidays:
+                print(f"Today ({today_str}) is a marked holiday. Skipping Petty Cash Reconciliation gracefully.", flush=True)
+                sys.exit(0)
+            else:
+                print("Today is not a marked holiday. Proceeding...", flush=True)
+        except Exception as e:
+            print(f"Warning: Failed to fetch holidays from Supabase ({e}). Proceeding anyway...", flush=True)
+    else:
+        print("Warning: Supabase credentials not found. Skipping holiday check...", flush=True)
+
+    # Calculate the last working day (skipping Sundays and holidays)
+    def get_last_working_day(ref_date, holidays_list):
+        curr = ref_date - timedelta(days=1)
+        while True:
+            if curr.weekday() == 6: # Sunday is 6
+                curr -= timedelta(days=1)
+                continue
+            curr_str = curr.strftime("%Y-%m-%d")
+            if curr_str in holidays_list:
+                curr -= timedelta(days=1)
+                continue
+            break
+        return datetime(curr.year, curr.month, curr.day)
+
+    last_working_day = get_last_working_day(now_ist, holidays)
+    print(f"Daily cutoff period start: {last_working_day.strftime('%Y-%m-%d')} (Last working day) 00:00:00", flush=True)
+    print(f"Daily cutoff period end: {now_ist.strftime('%Y-%m-%d')} (Today) 15:30:00", flush=True)
+
     # 1. Authorize Google Sheets API
     if not os.path.exists(CREDENTIALS_PATH):
         print(f"Error: Google Service Account credentials not found at {CREDENTIALS_PATH}", flush=True)
@@ -1025,6 +1077,16 @@ def main():
                     elif "KOTTAYAM" in b_pr.upper() or "KOTTAYAM" in prefix_val.upper(): branch_code = "KOTTAYAM"
                     break
 
+            pc_gdm_entries = [e for e in pc_entries if e["gdm_no"] == gdm]
+            dw_gdm_entries = [e for e in dw_entries if e["gdm_no"] == gdm]
+
+            # Resolve GDM Date
+            gdm_date_str = ""
+            if dw_gdm_entries:
+                gdm_date_str = dw_gdm_entries[0]["date_str"]
+            if not gdm_date_str and pc_gdm_entries:
+                gdm_date_str = pc_gdm_entries[0]["date_str"]
+
             # Check Method A: If GDM is recorded in any active Petty Cash sheet
             if gdm in gdm_to_active_sheets:
                 recorded_sheets = gdm_to_active_sheets[gdm]
@@ -1041,9 +1103,6 @@ def main():
                         print(f"[{title}] GDM {gdm} resolved to branch {gdm_resolved_branch} via supervisor {gdm_sup}. Current sheet branch is {branch_code}. Skipping GDM from this branch's audit (Method B).", flush=True)
                         continue
 
-            pc_gdm_entries = [e for e in pc_entries if e["gdm_no"] == gdm]
-            dw_gdm_entries = [e for e in dw_entries if e["gdm_no"] == gdm]
-            
             # Expected values from Despatch Working sheet
             expected_topay = sum(e["topay"] for e in dw_gdm_entries)
             expected_unloading = sum(e["unloading_master"] for e in dw_gdm_entries)
@@ -1074,7 +1133,8 @@ def main():
                         "Driver": driver_name,
                         "Topay": expected_topay,
                         "Advance": route_advance,
-                        "Remarks": "GDM with active Topay or Advance has no entries in Petty Cash worksheet."
+                        "Remarks": "GDM with active Topay or Advance has no entries in Petty Cash worksheet.",
+                        "Date": gdm_date_str
                     })
             else:
                 # GDM Balance Mismatch calculation
@@ -1109,7 +1169,8 @@ def main():
                                         "Expected": bc_paid_amt,
                                         "Actual": 0.0,
                                         "Variance": -bc_paid_amt,
-                                        "Remarks": f"LR {lr_no} marked as Paid in Bill Clearance but has no direct entry in Petty Cash sheet."
+                                        "Remarks": f"LR {lr_no} marked as Paid in Bill Clearance but has no direct entry in Petty Cash sheet.",
+                                        "DateStr": lr_entry["date_str"]
                                     })
                                 else:
                                     pc_lr_paid = sum(e["receipt"] for e in pc_lr_receipts)
@@ -1121,7 +1182,8 @@ def main():
                                             "Expected": bc_paid_amt,
                                             "Actual": pc_lr_paid,
                                             "Variance": pc_lr_paid - bc_paid_amt,
-                                            "Remarks": f"LR {lr_no} receipt amount mismatch: expected {bc_paid_amt}, entered {pc_lr_paid}"
+                                            "Remarks": f"LR {lr_no} receipt amount mismatch: expected {bc_paid_amt}, entered {pc_lr_paid}",
+                                            "DateStr": lr_entry["date_str"]
                                         })
                 
                 # Verify GDM balance mismatch
@@ -1135,7 +1197,8 @@ def main():
                         "Expected": expected_balance,
                         "Actual": actual_balance,
                         "Variance": variance,
-                        "Remarks": desc_remarks
+                        "Remarks": desc_remarks,
+                        "DateStr": gdm_date_str
                     })
 
         # 2. Audit Unloading Rate Variance (Unloading Rate Variance Report)
@@ -1230,7 +1293,8 @@ def main():
                         "MasterRate": matched_rate,
                         "DespatchRate": despatch_rate,
                         "Difference": rate_diff,
-                        "Remarks": f"LR {lr_no}: Total claimed {claimed_ul} for {box_qty} boxes. {rate_remarks}."
+                        "Remarks": f"LR {lr_no}: Total claimed {claimed_ul} for {box_qty} boxes. {rate_remarks}.",
+                        "Date": lr_entry["date_str"]
                     })
 
         # 3. Daily Other Expenses Breakdown
@@ -1254,6 +1318,40 @@ def main():
                         "Remark": pc_e["remark"]
                     })
 
+    # Filter daily lists (date >= last_working_day)
+    daily_balance_mismatches = []
+    for issue in all_balance_mismatches:
+        d_str = issue.get("DateStr", "")
+        d = parse_date(d_str) if d_str else None
+        if d and d >= last_working_day:
+            daily_balance_mismatches.append(issue)
+            
+    daily_missing_gdms = []
+    for issue in all_missing_gdms:
+        d_str = issue.get("Date", "")
+        d = parse_date(d_str) if d_str else None
+        if d and d >= last_working_day:
+            daily_missing_gdms.append(issue)
+            
+    daily_unloading_variances = []
+    for issue in all_unloading_variances:
+        d_str = issue.get("Date", "")
+        d = parse_date(d_str) if d_str else None
+        if d and d >= last_working_day:
+            daily_unloading_variances.append(issue)
+            
+    daily_other_expenses_list = []
+    for exp in all_other_expenses:
+        d_str = exp.get("Date", "")
+        d = parse_date(d_str) if d_str else None
+        if d and d >= last_working_day:
+            daily_other_expenses_list.append(exp)
+
+    try:
+        daily_other_expenses_list = sorted(daily_other_expenses_list, key=lambda x: parse_date(x["Date"]) or datetime.min)
+    except Exception:
+        pass
+
     # 6. Generate Excel Audit Report with premium styles
     report_file_name = f"Petty_Cash_Audit_Report_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
     report_path = os.path.join(BASE_DIR, report_file_name)
@@ -1274,9 +1372,67 @@ def main():
     border_side = Side(style='thin', color='D9D9D9')
     cell_border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
     
+    # 6_first. Daily Report Sheet (Cutoff: Last Working Day to Today)
+    ws_daily = wb_out.active
+    ws_daily.title = "Daily Report"
+    ws_daily.views.sheetView[0].showGridLines = True
+
+    ws_daily.append([])
+    ws_daily.append([f"DAILY PETTY CASH AUDIT REPORT ({last_working_day.strftime('%d-%b-%Y')} to {now_ist.strftime('%d-%b-%Y')} 3:30 PM)"])
+    ws_daily.cell(2, 1).font = title_font
+    ws_daily.append([])
+
+    def write_section(ws, section_title, headers, rows_data, format_cols=None, fill_color=None):
+        ws.append([])
+        ws.append([section_title])
+        ws.cell(ws.max_row, 1).font = section_font
+        
+        ws.append(headers)
+        h_row = ws.max_row
+        for col in range(1, len(headers) + 1):
+            ws.cell(h_row, col).fill = header_fill
+            ws.cell(h_row, col).font = header_font
+            
+        for row in rows_data:
+            ws.append(row)
+            curr_r = ws.max_row
+            for col in range(1, len(headers) + 1):
+                ws.cell(curr_r, col).font = data_font
+                ws.cell(curr_r, col).border = cell_border
+                if fill_color:
+                    ws.cell(curr_r, col).fill = fill_color
+            if format_cols:
+                for col_idx, fmt in format_cols.items():
+                    ws.cell(curr_r, col_idx).number_format = fmt
+
+    # Section 1: Daily Driver Shortage & Excess
+    s1_headers = ["Branch Sheet", "GDM / LR No", "Expected Balance", "Actual Balance in PC", "Variance", "Remarks"]
+    s1_rows = [[issue["Sheet"], issue["GDM"], issue["Expected"], issue["Actual"], issue["Variance"], issue["Remarks"]] for issue in daily_balance_mismatches]
+    write_section(ws_daily, "1. Daily Driver Shortage & Excess Issues", s1_headers, s1_rows, {3: '#,##0.00', 4: '#,##0.00', 5: '#,##0.00'}, mismatch_fill)
+
+    # Section 2: Daily Missing GDMs
+    s2_headers = ["Branch Sheet", "GDM Number", "Driver Name", "Expected Topay", "Route Advance", "Remarks"]
+    s2_rows = [[issue["Sheet"], issue["GDM"], issue["Driver"], issue["Topay"], issue["Advance"], issue["Remarks"]] for issue in daily_missing_gdms]
+    write_section(ws_daily, "2. Daily Missing / Unrecorded GDMs", s2_headers, s2_rows, {4: '#,##0.00', 5: '#,##0.00'}, missing_fill)
+
+    # Section 3: Daily Unloading Rate Variances
+    s3_headers = ["Branch Sheet", "Consignor", "Consignee", "Box Type", "Master Rate", "Despatch Working Rate", "Difference", "Remarks"]
+    s3_rows = [[issue["Sheet"], issue["Consignor"], issue["Consignee"], issue["BoxType"], issue["MasterRate"], issue["DespatchRate"], issue["Difference"], issue["Remarks"]] for issue in daily_unloading_variances]
+    write_section(ws_daily, "3. Daily Unloading Rate Variances", s3_headers, s3_rows, {5: '#,##0.00', 6: '#,##0.00', 7: '#,##0.00'}, mismatch_fill)
+
+    # Section 4: Daily Other Expenses
+    s4_headers = ["Branch Sheet", "Date", "Category", "Details", "Amount", "Remark"]
+    s4_rows = [[exp["Sheet"], exp["Date"], exp["Category"], exp["Details"], exp["Amount"], exp["Remark"]] for exp in daily_other_expenses_list]
+    write_section(ws_daily, "4. Daily Other Payments & Expenses", s4_headers, s4_rows, {5: '#,##0.00'})
+
+    # Auto-adjust column widths for ws_daily
+    for col in ws_daily.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws_daily.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
     # 6a. Overview Dashboard Sheet
-    ws_dash = wb_out.active
-    ws_dash.title = "Overview Dashboard"
+    ws_dash = wb_out.create_sheet("Overview Dashboard")
     ws_dash.views.sheetView[0].showGridLines = True
     
     ws_dash.append([])
@@ -1315,7 +1471,7 @@ def main():
     ws_dash.append([])
     
     # Add Discrepancy counts
-    ws_dash.append(["Summary of Audit Exceptions Found"])
+    ws_dash.append(["Summary of Audit Exceptions Found (Full Active Period)"])
     ws_dash.cell(ws_dash.max_row, 1).font = section_font
     
     summary_headers = ["Audit Checklist Category", "Exceptions Count", "Review Priority"]
@@ -1326,7 +1482,7 @@ def main():
         ws_dash.cell(curr_row, col).font = header_font
         
     audit_stats = [
-        ("Petty Cash Balance Mismatch Issues (Section 1)", len(all_balance_mismatches), "HIGH" if len(all_balance_mismatches) > 0 else "NORMAL"),
+        ("Driver Shortage & Excess Issues (Section 1)", len(all_balance_mismatches), "HIGH" if len(all_balance_mismatches) > 0 else "NORMAL"),
         ("Missing / Unrecorded GDMs (Section 2)", len(all_missing_gdms), "MEDIUM" if len(all_missing_gdms) > 0 else "NORMAL"),
         ("Unloading Rate Variances (Section 3)", len(all_unloading_variances), "LOW" if len(all_unloading_variances) > 0 else "NORMAL"),
         ("Other Payments / Expenses Logged (Section 4)", len(all_other_expenses), "INFO")
@@ -1345,8 +1501,8 @@ def main():
         col_letter = openpyxl.utils.get_column_letter(col[0].column)
         ws_dash.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
-    # 6b. Section 1 Sheet: Petty Cash Balance Mismatch
-    ws_s1 = wb_out.create_sheet("Balance Mismatch Report")
+    # 6b. Section 1 Sheet: Driver Shortage & Excess (Full)
+    ws_s1 = wb_out.create_sheet("Driver Shortage & Excess")
     ws_s1.views.sheetView[0].showGridLines = True
     s1_headers = ["Branch Sheet", "GDM / LR No", "Expected Balance", "Actual Balance in PC", "Variance", "Remarks"]
     ws_s1.append(s1_headers)
@@ -1372,7 +1528,7 @@ def main():
         col_letter = openpyxl.utils.get_column_letter(col[0].column)
         ws_s1.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
-    # 6c. Section 2 Sheet: Missing GDM Report
+    # 6c. Section 2 Sheet: Missing GDM Report (Full)
     ws_s2 = wb_out.create_sheet("Missing GDM Report")
     ws_s2.views.sheetView[0].showGridLines = True
     s2_headers = ["Branch Sheet", "GDM Number", "Driver Name", "Expected Topay", "Route Advance", "Remarks"]
@@ -1398,7 +1554,7 @@ def main():
         col_letter = openpyxl.utils.get_column_letter(col[0].column)
         ws_s2.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
-    # 6d. Section 3 Sheet: Unloading Rate Variance Report
+    # 6d. Section 3 Sheet: Unloading Rate Variance (Full)
     ws_s3 = wb_out.create_sheet("Unloading Rate Variance")
     ws_s3.views.sheetView[0].showGridLines = True
     s3_headers = ["Branch Sheet", "Consignor", "Consignee", "Box Type", "Master Rate", "Despatch Working Rate", "Difference", "Remarks"]
@@ -1425,7 +1581,7 @@ def main():
         col_letter = openpyxl.utils.get_column_letter(col[0].column)
         ws_s3.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
-    # 6e. Section 4 Sheet: Daily Categorized Other Expenses
+    # 6e. Section 4 Sheet: Daily Categorized Other Expenses (Full)
     ws_s4 = wb_out.create_sheet("Daily Other Expenses")
     ws_s4.views.sheetView[0].showGridLines = True
     s4_headers = ["Branch Sheet", "Date", "Category", "Details", "Amount", "Remark"]
@@ -1460,11 +1616,59 @@ def main():
     # 7. Print Terminal Summary
     print("\n" + "="*50, flush=True)
     print("RECONCILE SUMMARY (UPGRADED):", flush=True)
-    print(f" - Petty Cash Balance Mismatches: {len(all_balance_mismatches)}", flush=True)
-    print(f" - Missing GDM Exceptions: {len(all_missing_gdms)}", flush=True)
-    print(f" - Unloading Rate Variances: {len(all_unloading_variances)}", flush=True)
-    print(f" - Daily Other Expenses Logged: {len(all_other_expenses)}", flush=True)
+    print(f" - Driver Shortage & Excess (Full): {len(all_balance_mismatches)} (Daily: {len(daily_balance_mismatches)})", flush=True)
+    print(f" - Missing GDMs (Full): {len(all_missing_gdms)} (Daily: {len(daily_missing_gdms)})", flush=True)
+    print(f" - Unloading Rate Variances (Full): {len(all_unloading_variances)} (Daily: {len(daily_unloading_variances)})", flush=True)
+    print(f" - Other Expenses Logged (Full): {len(all_other_expenses)} (Daily: {len(daily_other_expenses_list)})", flush=True)
     print("="*50 + "\n", flush=True)
+
+    # Compute daily head-wise expenses
+    daily_head_wise_expenses = {}
+    for s_id, cache in sheet_data_cache.items():
+        if s_id not in active_sheet_ids:
+            continue
+        title = cache["title"]
+        branch_name = title
+        for b_pr, prefix in branch_map.items():
+            if title.upper().startswith(prefix.upper()):
+                branch_name = b_pr
+                break
+        
+        clean_name = clean_branch_display_name(branch_name)
+        if clean_name not in daily_head_wise_expenses:
+            daily_head_wise_expenses[clean_name] = {}
+            
+        pc_rows = cache.get("Petty Cash", [])
+        if len(pc_rows) > 0:
+            pc_headers = [h.strip() for h in pc_rows[0]]
+            date_idx = pc_headers.index("Date") if "Date" in pc_headers else 1
+            type_idx = pc_headers.index("Payment / Receipt") if "Payment / Receipt" in pc_headers else 3
+            details_idx = pc_headers.index("Details") if "Details" in pc_headers else 4
+            payment_idx = pc_headers.index("Payment") if "Payment" in pc_headers else 6
+            
+            for row in pc_rows[1:]:
+                if len(row) <= max(date_idx, type_idx, payment_idx):
+                    continue
+                date_str = row[date_idx].strip()
+                type_str = row[type_idx].strip()
+                details_str = row[details_idx].strip() if len(row) > details_idx else ""
+                payment_str = row[payment_idx].strip()
+                
+                if not date_str or "OPENING" in details_str.upper() or "OPENING" in type_str.upper():
+                    continue
+                    
+                tx_date = parse_date(date_str)
+                if tx_date and tx_date >= last_working_day:
+                    try:
+                        pay_val = float(payment_str.replace(',', '')) if payment_str else 0.0
+                    except ValueError:
+                        pay_val = 0.0
+                        
+                    if pay_val > 0.0:
+                        cat = type_str if type_str else "Other Expense"
+                        if cat not in daily_head_wise_expenses[clean_name]:
+                            daily_head_wise_expenses[clean_name][cat] = 0.0
+                        daily_head_wise_expenses[clean_name][cat] += pay_val
 
     # 8. Send Email Report
     print("Preparing daily email report...", flush=True)
@@ -1538,70 +1742,64 @@ def main():
             </tbody>
         </table>
         
-        <h3>2. Audit Exceptions Summary</h3>
+        <h3>2. Daily Activity & Exceptions Summary (Period: {last_working_day.strftime('%d-%b-%Y')} to {now_ist.strftime('%d-%b-%Y')} 3:30 PM)</h3>
         <div class="card">
             <ul>
-                <li><strong>Petty Cash Balance Mismatch Issues (Section 1):</strong> {len(all_balance_mismatches)} issues found</li>
-                <li><strong>Missing / Unrecorded GDMs in Petty Cash (Section 2):</strong> {len(all_missing_gdms)} issues found</li>
-                <li><strong>Unloading Rate Variances (Section 3):</strong> {len(all_unloading_variances)} issues found</li>
-                <li><strong>Daily Other Expenses Breakdown (Section 4):</strong> {len(all_other_expenses)} payments logged</li>
+                <li><strong>Daily Driver Shortage & Excess:</strong> {len(daily_balance_mismatches)} issues found</li>
+                <li><strong>Daily Missing / Unrecorded GDMs:</strong> {len(daily_missing_gdms)} issues found</li>
+                <li><strong>Daily Unloading Rate Variances:</strong> {len(daily_unloading_variances)} issues found</li>
+                <li><strong>Daily Other Payments & Expenses:</strong> {len(daily_other_expenses_list)} payments logged</li>
             </ul>
+            <p style="font-size: 12px; color: #666; margin: 5px 0 0 0;">Note: Detailed worksheets covering the entire active period are attached in the Excel report.</p>
         </div>
         
-        <h3>3. Daily Other Expenses Breakdown (Section 4)</h3>
-        <p>Click on each branch below to expand and view the detailed daily other expenses.</p>
+        <h3>3. Branch Cash Balances & Daily Head-wise Expenses</h3>
+        <p>Click on each branch below to expand and view yesterday's head-wise expense breakdown.</p>
     """
     
-    if all_other_expenses:
-        expenses_by_branch = {}
-        for exp in sorted_expenses:
-            b = exp.get("Branch", exp["Sheet"])
-            b_clean = clean_branch_display_name(b)
-            if b_clean not in expenses_by_branch:
-                expenses_by_branch[b_clean] = []
-            expenses_by_branch[b_clean].append(exp)
-            
-        for b_name in sorted(expenses_by_branch.keys()):
-            branch_exps = expenses_by_branch[b_name]
-            total_amt = sum(e["Amount"] for e in branch_exps)
-            count = len(branch_exps)
-            
-            html_body += f"""
+    for b_name, stats in branch_topup_summary.items():
+        clean_name = clean_branch_display_name(b_name)
+        closing_balance = stats["closing_balance"]
+        hw_exps = daily_head_wise_expenses.get(clean_name, {})
+        total_daily_spent = sum(hw_exps.values())
+        
+        html_body += f"""
         <details style="margin-bottom: 12px; border: 1px solid #ddd; border-radius: 5px; background-color: #fcfcfc;">
             <summary style="font-weight: bold; cursor: pointer; color: #1F497D; padding: 12px; background-color: #f2f5f9; outline: none; border-bottom: 1px solid #ddd;">
-                {b_name} &mdash; Total: {total_amt:,.2f} Rs ({count} items)
+                {clean_name} &mdash; Cash Balance: {closing_balance:,.2f} Rs (Daily Spent: {total_daily_spent:,.2f} Rs)
             </summary>
             <div style="padding: 12px; overflow-x: auto;">
+        """
+        
+        if hw_exps:
+            html_body += """
                 <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin: 0; border: 1px solid #ddd;">
                     <thead>
                         <tr style="background-color: #1F497D; color: white;">
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Date</th>
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Category</th>
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Details</th>
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Amount (Rs)</th>
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Remark</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Expense Head (Category)</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Amount Spent (Rs)</th>
                         </tr>
                     </thead>
                     <tbody>
             """
-            for e in branch_exps:
+            for cat, amt in sorted(hw_exps.items(), key=lambda x: x[1], reverse=True):
                 html_body += f"""
                         <tr>
-                            <td style="padding: 8px; border: 1px solid #ddd;">{e['Date']}</td>
-                            <td style="padding: 8px; border: 1px solid #ddd;">{e['Category']}</td>
-                            <td style="padding: 8px; border: 1px solid #ddd;">{e['Details']}</td>
-                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">{e['Amount']:,.2f}</td>
-                            <td style="padding: 8px; border: 1px solid #ddd;">{e['Remark']}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd;">{cat}</td>
+                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">{amt:,.2f}</td>
                         </tr>
                 """
             html_body += """
                     </tbody>
                 </table>
+            """
+        else:
+            html_body += "<p style='margin: 0; color: #666; font-style: italic;'>No payments or expenses recorded for this daily period.</p>"
+            
+        html_body += """
             </div>
         </details>
-            """
-    else:
-        html_body += "<div class='card'><p>No other expenses logged today.</p></div>"
+        """
         
     html_body += """
         <p>Regards,<br><strong>EFF Logistics Auto-Scheduler</strong></p>
