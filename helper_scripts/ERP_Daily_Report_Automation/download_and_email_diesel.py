@@ -16,66 +16,66 @@ from playwright.async_api import async_playwright
 
 # Master Vehicle List transcribed from user screenshot
 VEHICLE_MASTER = [
-    {"sno": 57, "vehicle_no": "KL41T0343", "branch": "ASIAN KOLLAM", "type": "BOLERO 1.7 TON - 4 WHEEL"},
-    {"sno": 51, "vehicle_no": "KL41T0349", "branch": "ASIAN KOLLAM", "type": "BOLERO 1.7 TON - 4 WHEEL"},
-    {"sno": 31, "vehicle_no": "KL41V5396", "branch": "ASIAN KOLLAM", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 21, "vehicle_no": "KL41W2362", "branch": "ASIAN KOLLAM", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 20, "vehicle_no": "KL41W2402", "branch": "ASIAN KOLLAM", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 44, "vehicle_no": "KL41T6290", "branch": "ASIAN KOLLAM", "type": "EICHER 2095 17 FT - 6 WHEEL"},
-    {"sno": 59, "vehicle_no": "KL41R1049", "branch": "ASIAN KOLLAM", "type": "TATA 407 - 4 WHEEL"},
-    {"sno": 53, "vehicle_no": "KL41T0305", "branch": "ASIAN THRISSUR", "type": "BOLERO 1.7 TON - 4 WHEEL"},
-    {"sno": 49, "vehicle_no": "KL41T0308", "branch": "ASIAN THRISSUR", "type": "BOLERO 1.7 TON - 4 WHEEL"},
-    {"sno": 52, "vehicle_no": "KL41T0318", "branch": "ASIAN THRISSUR", "type": "BOLERO 1.7 TON - 4 WHEEL"},
-    {"sno": 50, "vehicle_no": "KL41T0325", "branch": "ASIAN THRISSUR", "type": "BOLERO 1.7 TON - 4 WHEEL"},
-    {"sno": 30, "vehicle_no": "KL41V5310", "branch": "ASIAN THRISSUR", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 12, "vehicle_no": "KL41X3227", "branch": "ASIAN THRISSUR", "type": "EICHER 2075 14 FT - 6 WHEEL"},
-    {"sno": 3, "vehicle_no": "KL41X6713", "branch": "ASIAN THRISSUR", "type": "EICHER 2075 14 FT - 6 WHEEL"},
-    {"sno": 48, "vehicle_no": "KL41R0872", "branch": "ASIAN THRISSUR", "type": "TATA 407 - 4 WHEEL"},
-    {"sno": 60, "vehicle_no": "KL41R1047", "branch": "ASIAN THRISSUR", "type": "TATA 407 - 4 WHEEL"},
-    {"sno": 16, "vehicle_no": "KL41W2729", "branch": "CALICUT", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 39, "vehicle_no": "KL41V4310", "branch": "CALICUT", "type": "EICHER 2075 14 FT - 6 WHEEL"},
-    {"sno": 40, "vehicle_no": "KL41V4346", "branch": "CALICUT", "type": "EICHER 2075 14 FT - 6 WHEEL"},
-    {"sno": 5, "vehicle_no": "KL41X5914", "branch": "CALICUT", "type": "EICHER 2075 14 FT - 6 WHEEL"},
-    {"sno": 41, "vehicle_no": "KL41V4070", "branch": "CALICUT", "type": "EICHER 2075 17 FT - 6 WHEEL"},
-    {"sno": 25, "vehicle_no": "KL41V9406", "branch": "CALICUT", "type": "LEYLAND DOST - 4 WHEEL"},
-    {"sno": 55, "vehicle_no": "KL41T0365", "branch": "EDATHALA", "type": "BOLERO 1.7 TON - 4 WHEEL"},
-    {"sno": 32, "vehicle_no": "KL41V5385", "branch": "EDATHALA", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 22, "vehicle_no": "KL41W2358", "branch": "EDATHALA", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 19, "vehicle_no": "KL41W2479", "branch": "EDATHALA", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 14, "vehicle_no": "KL41W2763", "branch": "EDATHALA", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 15, "vehicle_no": "KL41W2783", "branch": "EDATHALA", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 13, "vehicle_no": "KL41W2797", "branch": "EDATHALA", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 2, "vehicle_no": "KL41S1218", "branch": "EDATHALA", "type": "EICHER 2059 - 4 WHEEL"},
-    {"sno": 1, "vehicle_no": "KL41S1324", "branch": "EDATHALA", "type": "EICHER 2059 - 4 WHEEL"},
-    {"sno": 4, "vehicle_no": "KL41X6268", "branch": "EDATHALA", "type": "EICHER 2075 14 FT - 6 WHEEL"},
-    {"sno": 42, "vehicle_no": "KL41V4364", "branch": "EDATHALA", "type": "EICHER 2075 17 FT - 6 WHEEL"},
-    {"sno": 37, "vehicle_no": "KL41V4853", "branch": "EDATHALA", "type": "EICHER 2075 17 FT - 6 WHEEL"},
-    {"sno": 28, "vehicle_no": "KL41V7229", "branch": "EDATHALA", "type": "EICHER 2075 17 FT - 6 WHEEL"},
-    {"sno": 46, "vehicle_no": "KL41T6165", "branch": "EDATHALA", "type": "EICHER 2095 17 FT - 6 WHEEL"},
-    {"sno": 43, "vehicle_no": "KL41T6195", "branch": "EDATHALA", "type": "EICHER 2095 17 FT - 6 WHEEL"},
-    {"sno": 45, "vehicle_no": "KL41T6122", "branch": "EDATHALA", "type": "EICHER 2095 20 FT - 6 WHEEL"},
-    {"sno": 24, "vehicle_no": "KL41T6286", "branch": "EDATHALA", "type": "EICHER 2095 20 FT - 6 WHEEL"},
-    {"sno": 33, "vehicle_no": "KL41V5130", "branch": "EDATHALA", "type": "EICHER 2095 20 FT - 6 WHEEL"},
-    {"sno": 34, "vehicle_no": "KL41V5174", "branch": "EDATHALA", "type": "EICHER 2095 22FT - 6 WHEEL"},
-    {"sno": 35, "vehicle_no": "KL41V4930", "branch": "EDATHALA", "type": "EICHER 2110 24FT - 6 WHEEL"},
-    {"sno": 36, "vehicle_no": "KL41V5019", "branch": "EDATHALA", "type": "EICHER 2110 24FT - 6 WHEEL"},
-    {"sno": 27, "vehicle_no": "KL41V7195", "branch": "EDATHALA", "type": "EICHER 2110 24FT - 6 WHEEL"},
-    {"sno": 26, "vehicle_no": "KL41V9571", "branch": "EDATHALA", "type": "LEYLAND DOST - 4 WHEEL"},
-    {"sno": 47, "vehicle_no": "KL41T6187", "branch": "EDATHALA", "type": "TATA ULTRA - 6 WHEEL"},
-    {"sno": 29, "vehicle_no": "KL41T0331", "branch": "KANNUR", "type": "BOLERO 1.7 TON - 4 WHEEL"},
-    {"sno": 17, "vehicle_no": "KL41W3221", "branch": "KANNUR", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 7, "vehicle_no": "KL41X4354", "branch": "KANNUR", "type": "EICHER 2075 14 FT - 6 WHEEL"},
-    {"sno": 38, "vehicle_no": "KL41V4560", "branch": "KANNUR", "type": "EICHER 2075 17 FT - 6 WHEEL"},
-    {"sno": 56, "vehicle_no": "KL41T0367", "branch": "KASARGOD", "type": "BOLERO 1.7 TON - 4 WHEEL"},
-    {"sno": 9, "vehicle_no": "KL41X4064", "branch": "KASARGOD", "type": "EICHER 2075 14 FT - 6 WHEEL"},
-    {"sno": 54, "vehicle_no": "KL41T0342", "branch": "KOLLAM", "type": "BOLERO 1.7 TON - 4 WHEEL"},
-    {"sno": 8, "vehicle_no": "KL41X4039", "branch": "KOLLAM", "type": "EICHER 2075 14 FT - 6 WHEEL"},
-    {"sno": 11, "vehicle_no": "KL41X4096", "branch": "KOLLAM", "type": "EICHER 2075 14 FT - 6 WHEEL"},
-    {"sno": 58, "vehicle_no": "KL41R0874", "branch": "KOLLAM", "type": "TATA 407 - 4 WHEEL"},
-    {"sno": 18, "vehicle_no": "KL41W2559", "branch": "MALAPPURAM", "type": "BOLERO 2 TON - 4 WHEEL"},
-    {"sno": 10, "vehicle_no": "KL41X4082", "branch": "MALAPPURAM", "type": "EICHER 2075 14 FT - 6 WHEEL"},
-    {"sno": 6, "vehicle_no": "KL41X5674", "branch": "MALAPPURAM", "type": "EICHER 2075 14 FT - 6 WHEEL"},
-    {"sno": 23, "vehicle_no": "KL65M3564", "branch": "wagonr", "type": "CAR"}
+    {"sno": 57, "vehicle_no": "KL41T0343", "branch": "ASIAN KOLLAM", "type": "BOLERO 1.7 TON - 4 WHEEL", "rqrd_mileage": 14.0},
+    {"sno": 51, "vehicle_no": "KL41T0349", "branch": "ASIAN KOLLAM", "type": "BOLERO 1.7 TON - 4 WHEEL", "rqrd_mileage": 14.0},
+    {"sno": 31, "vehicle_no": "KL41V5396", "branch": "ASIAN KOLLAM", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 21, "vehicle_no": "KL41W2362", "branch": "ASIAN KOLLAM", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 20, "vehicle_no": "KL41W2402", "branch": "ASIAN KOLLAM", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 44, "vehicle_no": "KL41T6290", "branch": "ASIAN KOLLAM", "type": "EICHER 2095 17 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 59, "vehicle_no": "KL41R1049", "branch": "ASIAN KOLLAM", "type": "TATA 407 - 4 WHEEL", "rqrd_mileage": 10.0},
+    {"sno": 53, "vehicle_no": "KL41T0305", "branch": "ASIAN THRISSUR", "type": "BOLERO 1.7 TON - 4 WHEEL", "rqrd_mileage": 14.0},
+    {"sno": 49, "vehicle_no": "KL41T0308", "branch": "ASIAN THRISSUR", "type": "BOLERO 1.7 TON - 4 WHEEL", "rqrd_mileage": 14.0},
+    {"sno": 52, "vehicle_no": "KL41T0318", "branch": "ASIAN THRISSUR", "type": "BOLERO 1.7 TON - 4 WHEEL", "rqrd_mileage": 14.0},
+    {"sno": 50, "vehicle_no": "KL41T0325", "branch": "ASIAN THRISSUR", "type": "BOLERO 1.7 TON - 4 WHEEL", "rqrd_mileage": 14.0},
+    {"sno": 30, "vehicle_no": "KL41V5310", "branch": "ASIAN THRISSUR", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 12, "vehicle_no": "KL41X3227", "branch": "ASIAN THRISSUR", "type": "EICHER 2075 14 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 3, "vehicle_no": "KL41X6713", "branch": "ASIAN THRISSUR", "type": "EICHER 2075 14 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 48, "vehicle_no": "KL41R0872", "branch": "ASIAN THRISSUR", "type": "TATA 407 - 4 WHEEL", "rqrd_mileage": 10.0},
+    {"sno": 60, "vehicle_no": "KL41R1047", "branch": "ASIAN THRISSUR", "type": "TATA 407 - 4 WHEEL", "rqrd_mileage": 10.0},
+    {"sno": 16, "vehicle_no": "KL41W2729", "branch": "CALICUT", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 39, "vehicle_no": "KL41V4310", "branch": "CALICUT", "type": "EICHER 2075 14 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 40, "vehicle_no": "KL41V4346", "branch": "CALICUT", "type": "EICHER 2075 14 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 5, "vehicle_no": "KL41X5914", "branch": "CALICUT", "type": "EICHER 2075 14 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 41, "vehicle_no": "KL41V4070", "branch": "CALICUT", "type": "EICHER 2075 17 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 25, "vehicle_no": "KL41V9406", "branch": "CALICUT", "type": "LEYLAND DOST - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 55, "vehicle_no": "KL41T0365", "branch": "EDATHALA", "type": "BOLERO 1.7 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 32, "vehicle_no": "KL41V5385", "branch": "EDATHALA", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 22, "vehicle_no": "KL41W2358", "branch": "EDATHALA", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 19, "vehicle_no": "KL41W2479", "branch": "EDATHALA", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 15, "vehicle_no": "KL41W2783", "branch": "EDATHALA", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 13, "vehicle_no": "KL41W2797", "branch": "EDATHALA", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 2, "vehicle_no": "KL41S1218", "branch": "NOT ASSIGNED", "type": "EICHER 2059 - 4 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 1, "vehicle_no": "KL41S1324", "branch": "EDATHALA", "type": "EICHER 2059 - 4 WHEEL", "rqrd_mileage": 9.0},
+    {"sno": 4, "vehicle_no": "KL41X6268", "branch": "EDATHALA", "type": "EICHER 2075 14 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 42, "vehicle_no": "KL41V4364", "branch": "EDATHALA", "type": "EICHER 2075 17 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 37, "vehicle_no": "KL41V4853", "branch": "EDATHALA", "type": "EICHER 2075 17 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 28, "vehicle_no": "KL41V7229", "branch": "EDATHALA", "type": "EICHER 2075 17 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 46, "vehicle_no": "KL41T6165", "branch": "EDATHALA", "type": "EICHER 2095 17 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 43, "vehicle_no": "KL41T6195", "branch": "EDATHALA", "type": "EICHER 2095 17 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 45, "vehicle_no": "KL41T6122", "branch": "EDATHALA", "type": "EICHER 2095 20 FT - 6 WHEEL", "rqrd_mileage": 7.5},
+    {"sno": 24, "vehicle_no": "KL41T6286", "branch": "EDATHALA", "type": "EICHER 2095 20 FT - 6 WHEEL", "rqrd_mileage": 7.5},
+    {"sno": 33, "vehicle_no": "KL41V5130", "branch": "EDATHALA", "type": "EICHER 2095 20 FT - 6 WHEEL", "rqrd_mileage": 7.5},
+    {"sno": 34, "vehicle_no": "KL41V5174", "branch": "EDATHALA", "type": "EICHER 2095 22FT - 6 WHEEL", "rqrd_mileage": 7.5},
+    {"sno": 35, "vehicle_no": "KL41V4930", "branch": "EDATHALA", "type": "EICHER 2110 24FT - 6 WHEEL", "rqrd_mileage": 7.0},
+    {"sno": 36, "vehicle_no": "KL41V5019", "branch": "EDATHALA", "type": "EICHER 2110 24FT - 6 WHEEL", "rqrd_mileage": 7.0},
+    {"sno": 27, "vehicle_no": "KL41V7195", "branch": "EDATHALA", "type": "EICHER 2110 24FT - 6 WHEEL", "rqrd_mileage": 7.0},
+    {"sno": 26, "vehicle_no": "KL41V9571", "branch": "EDATHALA", "type": "LEYLAND DOST - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 47, "vehicle_no": "KL41T6187", "branch": "EDATHALA", "type": "TATA ULTRA - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 29, "vehicle_no": "KL41T0331", "branch": "KANNUR", "type": "BOLERO 1.7 TON - 4 WHEEL", "rqrd_mileage": 14.0},
+    {"sno": 17, "vehicle_no": "KL41W3221", "branch": "KANNUR", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 7, "vehicle_no": "KL41X4354", "branch": "KANNUR", "type": "EICHER 2075 14 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 38, "vehicle_no": "KL41V4560", "branch": "KANNUR", "type": "EICHER 2075 17 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 56, "vehicle_no": "KL41T0367", "branch": "KASARGOD", "type": "BOLERO 1.7 TON - 4 WHEEL", "rqrd_mileage": 14.0},
+    {"sno": 9, "vehicle_no": "KL41X4064", "branch": "KASARGOD", "type": "EICHER 2075 14 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 54, "vehicle_no": "KL41T0342", "branch": "KOLLAM", "type": "BOLERO 1.7 TON - 4 WHEEL", "rqrd_mileage": 14.0},
+    {"sno": 8, "vehicle_no": "KL41X4039", "branch": "KOLLAM", "type": "EICHER 2075 14 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 11, "vehicle_no": "KL41X4096", "branch": "KOLLAM", "type": "EICHER 2075 14 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 14, "vehicle_no": "KL41W2763", "branch": "KOLLAM", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 58, "vehicle_no": "KL41R0874", "branch": "KOLLAM", "type": "TATA 407 - 4 WHEEL", "rqrd_mileage": 10.0},
+    {"sno": 18, "vehicle_no": "KL41W2559", "branch": "MALAPPURAM", "type": "BOLERO 2 TON - 4 WHEEL", "rqrd_mileage": 13.0},
+    {"sno": 10, "vehicle_no": "KL41X4082", "branch": "MALAPPURAM", "type": "EICHER 2075 14 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 6, "vehicle_no": "KL41X5674", "branch": "MALAPPURAM", "type": "EICHER 2075 14 FT - 6 WHEEL", "rqrd_mileage": 8.0},
+    {"sno": 23, "vehicle_no": "KL65M3564", "branch": "HO", "type": "CAR", "rqrd_mileage": None}
 ]
 
 # Helper lookup dictionaries
@@ -407,6 +407,55 @@ def generate_excel_report(processed_df, target_date, output_path):
     amount_grid_df.to_excel(writer, sheet_name="Daily Amount Summary", index=False)
     
     workbook = writer.book
+    
+    # Apply cell highlights for mileage shortage
+    from openpyxl.styles import PatternFill, Font
+    pink_fill = PatternFill(start_color="FFD2E2", end_color="FFD2E2", fill_type="solid")
+    red_font = Font(color="9C0006", bold=True)
+    
+    if "Daily Mileage Summary" in workbook.sheetnames:
+        ws = workbook["Daily Mileage Summary"]
+        headers = [cell.value for cell in ws[1]]
+        try:
+            veh_col_idx = headers.index("VEHICLENO.") + 1
+            avg_col_idx = headers.index("AVG") + 1
+        except ValueError:
+            veh_col_idx = 2
+            avg_col_idx = ws.max_column
+            
+        for r_idx in range(2, ws.max_row):
+            veh_no = ws.cell(row=r_idx, column=veh_col_idx).value
+            if not veh_no or str(veh_no).upper() in ("AVERAGE", "TOTAL"):
+                continue
+                
+            v_norm = normalize_vehicle(str(veh_no))
+            v_info = VEHICLE_INFO_LOOKUP.get(v_norm)
+            if v_info and v_info.get("rqrd_mileage") is not None:
+                rqrd = v_info["rqrd_mileage"]
+                
+                # Date columns (cols 5 to avg_col_idx - 1)
+                for c_idx in range(5, avg_col_idx):
+                    val = ws.cell(row=r_idx, column=c_idx).value
+                    try:
+                        if val != "" and val is not None:
+                            val_float = float(val)
+                            if val_float < rqrd:
+                                ws.cell(row=r_idx, column=c_idx).fill = pink_fill
+                                ws.cell(row=r_idx, column=c_idx).font = red_font
+                    except ValueError:
+                        pass
+                
+                # AVG column
+                val = ws.cell(row=r_idx, column=avg_col_idx).value
+                try:
+                    if val != "" and val is not None:
+                        val_float = float(val)
+                        if val_float < rqrd:
+                            ws.cell(row=r_idx, column=avg_col_idx).fill = pink_fill
+                            ws.cell(row=r_idx, column=avg_col_idx).font = red_font
+                except ValueError:
+                    pass
+                    
     for sheet_name in workbook.sheetnames:
         worksheet = workbook[sheet_name]
         for col in worksheet.columns:
@@ -496,6 +545,15 @@ def generate_email_body_html(processed_df, target_date):
             else:
                 txn_time = txn_time.split(" ")[-1] if " " in txn_time else txn_time
             
+            v_norm = normalize_vehicle(row["Vehicle No."])
+            v_info = VEHICLE_INFO_LOOKUP.get(v_norm)
+            rqrd_mileage = v_info.get("rqrd_mileage") if v_info else None
+            
+            mileage_style = "color: #2E6B34; background-color: #f7faf7;"
+            if rqrd_mileage is not None and not pd.isna(row["Mileage (km/L)"]):
+                if row["Mileage (km/L)"] < rqrd_mileage:
+                    mileage_style = "color: #9C0006; background-color: #FFD2E2;"
+                    
             rows_html += f"""
             <tr>
                 <td style="padding: 8px; border: 1px solid #ddd;">{row["Vehicle No."]}</td>
@@ -506,7 +564,7 @@ def generate_email_body_html(processed_df, target_date):
                 <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold; background-color: #fafafa;">{dist_val}</td>
                 <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">{row["Fuel Qty (Litres)"]:.2f}</td>
                 <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold; color: #1F497D;">Rs. {row["Amount (Rs)"]:,.2f}</td>
-                <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold; color: #2E6B34; background-color: #f7faf7;">{m_val}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold; {mileage_style}">{m_val}</td>
             </tr>
             """
             
