@@ -354,12 +354,12 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
         from_date_str = from_override if from_override else target_date.strftime("%Y-%m-%d")
         to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
     elif mode in ("daily_evening_report", "afternoon_open_lrs"):
-        # On Monday evenings (or when the target date is Monday), the report needs to span from Saturday to Monday (Sunday is not considered)
-        if mode == "daily_evening_report" and target_date.weekday() == 0:
-            default_start = target_date - timedelta(days=2) # Saturday
-        else:
-            default_start = target_date - timedelta(days=1) # Yesterday
-        from_date_str = from_override if from_override else default_start.strftime("%Y-%m-%d")
+        # Resolve dynamic lookback to find the last working day (non-Sunday, non-holiday)
+        holidays_list = fetch_holidays()
+        lookback_date = target_date - timedelta(days=1)
+        while lookback_date.weekday() == 6 or lookback_date.strftime("%Y-%m-%d") in holidays_list:
+            lookback_date -= timedelta(days=1)
+        from_date_str = from_override if from_override else lookback_date.strftime("%Y-%m-%d")
         to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
     else:
         yesterday = target_date - timedelta(days=1)
@@ -2301,7 +2301,33 @@ def main():
     args = parser.parse_args()
     
     print(f"[{datetime.now()}] Starting daily report automation runner in mode: {args.mode}")
-    
+
+    # Calculate target date for checking Sunday/holiday skipping
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(ist_tz)
+    if args.mode in ("daily_evening_report", "evening", "afternoon_open_lrs"):
+        if now_ist.hour < 12:
+            target_date = now_ist - timedelta(days=1)
+        else:
+            target_date = now_ist
+    elif args.mode == "morning":
+        target_date = now_ist - timedelta(days=1)
+    else:
+        target_date = now_ist
+
+    # Fetch holidays list
+    holidays_list = fetch_holidays()
+
+    # Auto-skip Sunday & Holidays if no date overrides are provided
+    if not args.from_date and not args.to_date:
+        target_date_str = target_date.strftime("%Y-%m-%d")
+        if target_date.weekday() == 6:
+            print(f"Target date {target_date_str} is Sunday. Skipping run gracefully.")
+            sys.exit(0)
+        if target_date_str in holidays_list:
+            print(f"Target date {target_date_str} is a marked holiday ({target_date_str}). Skipping run gracefully.")
+            sys.exit(0)
+
     # Fetch mappings
     supervisor_map = fetch_supervisor_mappings()
     
@@ -2326,10 +2352,11 @@ def main():
             
         today_str = target_date.strftime("%Y-%m-%d")
         # On Monday evenings (or when the target date is Monday), default starting date is Saturday (2 days ago)
-        if target_date.weekday() == 0:
-            yesterday_str = (target_date - timedelta(days=2)).strftime("%Y-%m-%d") # Saturday
-        else:
-            yesterday_str = (target_date - timedelta(days=1)).strftime("%Y-%m-%d")
+        # Resolve yesterday_str by looking back to find the last working day (non-Sunday, non-holiday)
+        lookback_date = target_date - timedelta(days=1)
+        while lookback_date.weekday() == 6 or lookback_date.strftime("%Y-%m-%d") in holidays_list:
+            lookback_date -= timedelta(days=1)
+        yesterday_str = lookback_date.strftime("%Y-%m-%d")
         
         if args.from_date:
             yesterday_str = args.from_date

@@ -10,6 +10,10 @@ export default function EFFPayrollAuditor({ onBack }) {
   const [fileName, setFileName] = useState('');
   const [workbook, setWorkbook] = useState(null);
   
+  // Dynamic Month States
+  const [availableMonths, setAvailableMonths] = useState([]);
+  const [selectedMonth, setSelectedMonth] = useState('');
+  
   // Audited calculations and data
   const [auditResults, setAuditResults] = useState(null);
   const [activeTab, setActiveTab] = useState('SUMMARY'); // 'SUMMARY', 'MATH_ERRORS', 'PT_OMISSIONS', 'BASIC_MISMATCH', 'ROSTER_SHIFTS'
@@ -19,6 +23,31 @@ export default function EFFPayrollAuditor({ onBack }) {
   useEffect(() => {
     loadFromWorkspace();
   }, []);
+
+  // Parse sheets matching MONTH YEAR pattern, sort chronological descending
+  const getMonthsInWorkbook = (wb) => {
+    const monthOrder = {
+      JANUARY: 0, FEBRUARY: 1, MARCH: 2, APRIL: 3, MAY: 4, JUNE: 5,
+      JULY: 6, AUGUST: 7, SEPTEMBER: 8, OCTOBER: 9, NOVEMBER: 10, DECEMBER: 11
+    };
+    const sheets = [];
+    wb.SheetNames.forEach(name => {
+      const clean = name.toUpperCase().trim();
+      const match = clean.match(/(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+(\d{4})/);
+      if (match) {
+        const month = match[1];
+        const year = parseInt(match[2], 10);
+        sheets.push({
+          sheetName: name,
+          month,
+          year,
+          label: `${month.charAt(0) + month.slice(1).toLowerCase()} ${year}`,
+          value: year * 12 + monthOrder[month]
+        });
+      }
+    });
+    return sheets.sort((a, b) => b.value - a.value);
+  };
 
   const loadFromWorkspace = async () => {
     setLoading(true);
@@ -33,7 +62,17 @@ export default function EFFPayrollAuditor({ onBack }) {
         const binaryString = atob(response.data.fileData);
         const wb = XLSX.read(binaryString, { type: 'binary', cellDates: true });
         setWorkbook(wb);
-        runAudit(wb);
+        
+        const monthsList = getMonthsInWorkbook(wb);
+        setAvailableMonths(monthsList);
+        
+        if (monthsList.length > 0) {
+          const defaultMonth = monthsList[0].sheetName;
+          setSelectedMonth(defaultMonth);
+          runAudit(wb, defaultMonth, monthsList);
+        } else {
+          runAudit(wb);
+        }
         setSuccessMessage("Loaded EFF Salary Payroll spreadsheet from workspace successfully!");
       }
     } catch (err) {
@@ -59,7 +98,17 @@ export default function EFFPayrollAuditor({ onBack }) {
         const bstr = event.target.result;
         const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
         setWorkbook(wb);
-        runAudit(wb);
+        
+        const monthsList = getMonthsInWorkbook(wb);
+        setAvailableMonths(monthsList);
+        
+        if (monthsList.length > 0) {
+          const defaultMonth = monthsList[0].sheetName;
+          setSelectedMonth(defaultMonth);
+          runAudit(wb, defaultMonth, monthsList);
+        } else {
+          runAudit(wb);
+        }
         setSuccessMessage("Uploaded spreadsheet parsed and audited successfully!");
       } catch (err) {
         console.error(err);
@@ -76,67 +125,87 @@ export default function EFFPayrollAuditor({ onBack }) {
   };
 
   // Main Audit Logic
-  const runAudit = (wb) => {
+  const runAudit = (wb, targetSheetName = null, monthsList = null) => {
     try {
       const sheetNames = wb.SheetNames;
-      const sheetJune = wb.SheetNames.find(n => n.toUpperCase().includes('JUNE 2026'));
-      const sheetMay = wb.SheetNames.find(n => n.toUpperCase().includes('MAY 2026'));
-      const sheetApril = wb.SheetNames.find(n => n.toUpperCase().includes('APRIL 2026'));
-
-      if (!sheetJune) {
-        throw new Error("Could not find 'JUNE 2026' sheet in the workbook.");
+      
+      // Determine sheets dynamically
+      let sheetTarget = targetSheetName;
+      let sheetPrev = null;
+      let sheetPrev2 = null;
+      
+      const mList = monthsList || getMonthsInWorkbook(wb);
+      
+      if (mList.length > 0) {
+        if (!sheetTarget) {
+          sheetTarget = mList[0].sheetName;
+        }
+        const targetIndex = mList.findIndex(m => m.sheetName === sheetTarget);
+        if (targetIndex !== -1) {
+          if (targetIndex + 1 < mList.length) sheetPrev = mList[targetIndex + 1].sheetName;
+          if (targetIndex + 2 < mList.length) sheetPrev2 = mList[targetIndex + 2].sheetName;
+        }
+      } else {
+        // Fallback to legacy June 2026 names if no dynamic months found
+        sheetTarget = wb.SheetNames.find(n => n.toUpperCase().includes('JUNE 2026'));
+        sheetPrev = wb.SheetNames.find(n => n.toUpperCase().includes('MAY 2026'));
+        sheetPrev2 = wb.SheetNames.find(n => n.toUpperCase().includes('APRIL 2026'));
       }
 
-      // 1. Extract Roster names from April & May
-      const namesApril = new Set();
-      if (sheetApril) {
-        const wsApril = wb.Sheets[sheetApril];
-        const jsonApril = XLSX.utils.sheet_to_json(wsApril, { header: 1 });
-        // April has data starting from Row 2 (index 1)
-        for (let r = 1; r < jsonApril.length; r++) {
-          const row = jsonApril[r];
+      if (!sheetTarget) {
+        throw new Error("Could not find a valid monthly payroll sheet in the workbook.");
+      }
+
+      // 1. Extract Roster names from second previous month
+      const namesPrev2 = new Set();
+      if (sheetPrev2) {
+        const wsPrev2 = wb.Sheets[sheetPrev2];
+        const jsonPrev2 = XLSX.utils.sheet_to_json(wsPrev2, { header: 1 });
+        // Start from Row 2 (index 1)
+        for (let r = 1; r < jsonPrev2.length; r++) {
+          const row = jsonPrev2[r];
           if (row && typeof row[0] === 'number' && row[1]) {
-            namesApril.add(String(row[1]).trim().toUpperCase());
+            namesPrev2.add(String(row[1]).trim().toUpperCase());
           }
         }
       }
 
-      const namesMay = new Set();
-      const maySalaries = {};
-      if (sheetMay) {
-        const wsMay = wb.Sheets[sheetMay];
-        const jsonMay = XLSX.utils.sheet_to_json(wsMay, { header: 1 });
+      const namesPrev = new Set();
+      const prevSalaries = {};
+      if (sheetPrev) {
+        const wsPrev = wb.Sheets[sheetPrev];
+        const jsonPrev = XLSX.utils.sheet_to_json(wsPrev, { header: 1 });
         
         // Find indexes dynamically for Name, Gross Basic, Gross Salary
-        const mayHeaders = jsonMay[3] || [];
-        const mNameIdx = 2; // Default Col 3
-        const mBasicIdx = 13; // Default Col 14
-        const mGrossIdx = 19; // Default Col 20
+        const prevHeaders = jsonPrev[3] || [];
+        const pNameIdx = 2; // Default Col 3
+        const pBasicIdx = 13; // Default Col 14
+        const pGrossIdx = 19; // Default Col 20
         
-        for (let r = 4; r < jsonMay.length; r++) {
-          const row = jsonMay[r];
-          if (row && row[0] && row[mNameIdx]) { // Sl No and Name
-            const nameClean = String(row[mNameIdx]).trim().toUpperCase();
+        for (let r = 4; r < jsonPrev.length; r++) {
+          const row = jsonPrev[r];
+          if (row && row[0] && row[pNameIdx]) { // Sl No and Name
+            const nameClean = String(row[pNameIdx]).trim().toUpperCase();
             if (!String(row[0]).startsWith('Total') && !nameClean.startsWith('Total')) {
-              namesMay.add(nameClean);
+              namesPrev.add(nameClean);
               const cleanNum = (val) => {
                 if (val === undefined || val === null || String(val).trim() === '' || String(val).trim() === '-') return 0;
                 return Number(String(val).replace(/,/g, '').trim()) || 0;
               };
-              maySalaries[nameClean] = {
-                basic: cleanNum(row[mBasicIdx]),
-                gross: cleanNum(row[mGrossIdx])
+              prevSalaries[nameClean] = {
+                basic: cleanNum(row[pBasicIdx]),
+                gross: cleanNum(row[pGrossIdx])
               };
             }
           }
         }
       }
 
-      // 2. Parse and Audit June Sheet
-      const wsJune = wb.Sheets[sheetJune];
-      const jsonJune = XLSX.utils.sheet_to_json(wsJune, { header: 1 });
+      // 2. Parse and Audit Target Month Sheet
+      const wsTarget = wb.Sheets[sheetTarget];
+      const jsonTarget = XLSX.utils.sheet_to_json(wsTarget, { header: 1 });
       
-      const juneRows = [];
+      const targetRows = [];
       const mathErrors = [];
       const ptOmissions = [];
       const basicMismatches = [];
@@ -145,10 +214,9 @@ export default function EFFPayrollAuditor({ onBack }) {
       let totalMathErrorsAmount = 0;
       let totalOverpayment = 0;
 
-      // June data rows range: row 5 (index 4) to row 157 (index 156)
-      // Row 158 (index 157) is the Total sum row.
-      for (let r = 4; r < jsonJune.length; r++) {
-        const row = jsonJune[r];
+      // Data rows range: row 5 (index 4) onwards
+      for (let r = 4; r < jsonTarget.length; r++) {
+        const row = jsonTarget[r];
         if (!row || row[0] === undefined) continue;
 
         const slNo = String(row[0]).trim();
@@ -243,7 +311,7 @@ export default function EFFPayrollAuditor({ onBack }) {
         }
 
         // C. Net Salary math error check
-        // Correct Net Salary: Gross Salary After LOP + Other Allowance (Col AC) - Corrected Deductions (or sheet deductions if PT omission is separate)
+        // Correct Net Salary: Gross Salary After LOP + Other Allowance (Col AC) - Corrected Deductions
         const expectedNetFromSheetDed = grossSalaryAfterLopSheet + otherAllowanceCol29 - totalDeductionSheet;
         const netMathError = Math.abs(netSalarySheet - expectedNetFromSheetDed) > 1.0;
         if (netMathError) {
@@ -270,7 +338,7 @@ export default function EFFPayrollAuditor({ onBack }) {
           totalOverpayment += individualOverpayment;
         }
 
-        juneRows.push({
+        targetRows.push({
           rowNum,
           name: name.toUpperCase(),
           designation,
@@ -292,13 +360,13 @@ export default function EFFPayrollAuditor({ onBack }) {
       }
 
       // 3. Compare Rosters
-      const juneNames = new Set(juneRows.map(r => r.name));
+      const targetNames = new Set(targetRows.map(r => r.name));
       const addedEmployees = [];
       const missingEmployees = [];
       
-      // Look for new in June
-      juneRows.forEach(emp => {
-        if (namesMay.size > 0 && !namesMay.has(emp.name)) {
+      // Look for new in target month
+      targetRows.forEach(emp => {
+        if (namesPrev.size > 0 && !namesPrev.has(emp.name)) {
           addedEmployees.push({
             name: emp.name,
             branch: emp.branch,
@@ -307,52 +375,56 @@ export default function EFFPayrollAuditor({ onBack }) {
         }
       });
 
-      // Look for missing from May
-      if (sheetMay) {
-        const wsMay = wb.Sheets[sheetMay];
-        const jsonMay = XLSX.utils.sheet_to_json(wsMay, { header: 1 });
-        for (let r = 4; r < jsonMay.length; r++) {
-          const row = jsonMay[r];
+      // Look for missing from previous month
+      if (sheetPrev) {
+        const wsPrev = wb.Sheets[sheetPrev];
+        const jsonPrev = XLSX.utils.sheet_to_json(wsPrev, { header: 1 });
+        for (let r = 4; r < jsonPrev.length; r++) {
+          const row = jsonPrev[r];
           if (row && row[0] && row[2]) {
-            const nameMayClean = String(row[2]).trim().toUpperCase();
-            if (!String(row[0]).startsWith('Total') && !nameMayClean.startsWith('Total') && !juneNames.has(nameMayClean)) {
+            const namePrevClean = String(row[2]).trim().toUpperCase();
+            if (!String(row[0]).startsWith('Total') && !namePrevClean.startsWith('Total') && !targetNames.has(namePrevClean)) {
               missingEmployees.push({
-                name: nameMayClean,
-                branch: String(row[5] || '').trim(), // Branch is Col 6 in May
-                designation: String(row[3] || '').trim() // Designation is Col 4 in May
+                name: namePrevClean,
+                branch: String(row[5] || '').trim(), // Branch is Col 6 in prev sheet
+                designation: String(row[3] || '').trim() // Designation is Col 4 in prev sheet
               });
             }
           }
         }
       }
 
-      // 4. Compare Salary Rates (May -> June)
+      // 4. Compare Salary Rates (Prev -> Target)
       const salaryChanges = [];
-      juneRows.forEach(juneEmp => {
-        const nameUpper = juneEmp.name;
-        if (maySalaries[nameUpper]) {
-          const mayData = maySalaries[nameUpper];
-          const basicDiff = juneEmp.grossBasic - mayData.basic;
-          const grossDiff = juneEmp.grossSalary - mayData.gross;
+      targetRows.forEach(targetEmp => {
+        const nameUpper = targetEmp.name;
+        if (prevSalaries[nameUpper]) {
+          const prevData = prevSalaries[nameUpper];
+          const basicDiff = targetEmp.grossBasic - prevData.basic;
+          const grossDiff = targetEmp.grossSalary - prevData.gross;
           
           if (Math.abs(basicDiff) > 1.0 || Math.abs(grossDiff) > 1.0) {
             salaryChanges.push({
-              name: juneEmp.name,
-              branch: juneEmp.branch,
-              designation: juneEmp.designation,
-              mayBasic: mayData.basic,
-              juneBasic: juneEmp.grossBasic,
+              name: targetEmp.name,
+              branch: targetEmp.branch,
+              designation: targetEmp.designation,
+              mayBasic: prevData.basic,
+              juneBasic: targetEmp.grossBasic,
               basicDiff,
-              mayGross: mayData.gross,
-              juneGross: juneEmp.grossSalary,
+              mayGross: prevData.gross,
+              juneGross: targetEmp.grossSalary,
               grossDiff
             });
           }
         }
       });
 
+      // Get month-year labels for UI display context
+      const currentMonthLabel = sheetTarget.toUpperCase().replace(' 2026', '');
+      const prevMonthLabel = sheetPrev ? sheetPrev.toUpperCase().replace(' 2026', '') : 'PREV';
+
       setAuditResults({
-        totalEmployees: juneRows.length,
+        totalEmployees: targetRows.length,
         mathErrors,
         ptOmissions,
         basicMismatches,
@@ -362,7 +434,9 @@ export default function EFFPayrollAuditor({ onBack }) {
         totalPtOmittedAmount,
         totalMathErrorsAmount,
         totalOverpayment: totalPtOmittedAmount + totalMathErrorsAmount + 102.06, // adding rounding diffs
-        juneRows
+        juneRows: targetRows,
+        currentMonthLabel,
+        prevMonthLabel
       });
 
     } catch (err) {
@@ -373,12 +447,11 @@ export default function EFFPayrollAuditor({ onBack }) {
 
   // Export Corrected Spreadsheet
   const handleExportCorrected = () => {
-    if (!workbook || !auditResults) return;
+    if (!workbook || !auditResults || !selectedMonth) return;
 
     try {
-      const sheetJuneName = workbook.SheetNames.find(n => n.toUpperCase().includes('JUNE 2026'));
-      const ws = workbook.Sheets[sheetJuneName];
-      const jsonJune = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      const ws = workbook.Sheets[selectedMonth];
+      const jsonTarget = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
       // Build map of row edits
       const rowEdits = {};
@@ -393,17 +466,16 @@ export default function EFFPayrollAuditor({ onBack }) {
         }
       });
 
-      // We modify cells in the worksheet object
-      // Col 47 (AU) = index 46, Col 48 (AV) = index 47
+      // Modify cells in the worksheet object
       let sumDeductions = 0;
       let sumNetSalary = 0;
 
-      for (let r = 4; r < jsonJune.length; r++) {
+      for (let r = 4; r < jsonTarget.length; r++) {
         const rowNum = r + 1;
         const slNo = ws[`A${rowNum}`]?.v;
 
         if (slNo && String(slNo).trim().startsWith('Total')) {
-          // This is the SUM row (Row 158)
+          // This is the SUM row
           const cellDeductionRef = `AU${rowNum}`;
           const cellNetRef = `AV${rowNum}`;
 
@@ -422,7 +494,7 @@ export default function EFFPayrollAuditor({ onBack }) {
             ws[cellDeductionRef].v = Math.round(edit.correctedDeductions * 100) / 100;
             // Highlight corrected cell in light yellow
             ws[cellDeductionRef].s = {
-              fill: { fgColor: { rgb: "FEF08A" } }, // Tailwind yellow-200
+              fill: { fgColor: { rgb: "FEF08A" } },
               font: { bold: true, name: "Calibri", sz: 10 }
             };
           }
@@ -430,7 +502,7 @@ export default function EFFPayrollAuditor({ onBack }) {
             ws[cellNetRef].v = Math.round(edit.correctedNetSalary);
             // Highlight corrected cell in light green
             ws[cellNetRef].s = {
-              fill: { fgColor: { rgb: "BBF7D0" } }, // Tailwind green-200
+              fill: { fgColor: { rgb: "BBF7D0" } },
               font: { bold: true, name: "Calibri", sz: 10 }
             };
           }
@@ -462,12 +534,13 @@ export default function EFFPayrollAuditor({ onBack }) {
       const blob = new Blob([s2ab(wbout)], { type: "application/octet-stream" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = `Corrected_EFF_Salary_Payroll_JUNE_2026.xlsx`;
+      const cleanMonth = selectedMonth.toUpperCase().replace(/\s+/g, '_');
+      link.download = `Corrected_EFF_Salary_Payroll_${cleanMonth}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
 
-      setSuccessMessage("Corrected Excel sheet downloaded successfully! Fixed cells are highlighted.");
+      setSuccessMessage(`Corrected Excel sheet for ${selectedMonth} downloaded successfully! Fixed cells are highlighted.`);
     } catch (err) {
       console.error(err);
       setError("Failed to export corrected sheet: " + err.message);
@@ -507,12 +580,14 @@ export default function EFFPayrollAuditor({ onBack }) {
               FY 2026-2027
             </span>
             <span className="text-slate-500 text-sm font-semibold">|</span>
-            <span className="text-slate-400 text-xs font-bold font-mono">JUNE 2026 AUDITOR</span>
+            <span className="text-slate-400 text-xs font-bold font-mono">
+              {selectedMonth ? selectedMonth.toUpperCase() : 'SALARY'} AUDITOR
+            </span>
           </div>
           <div className="space-y-2">
             <h2 className="text-3xl font-black text-white tracking-tight">EFF Salary Payroll Auditor</h2>
             <p className="text-slate-400 max-w-xl text-sm leading-relaxed">
-              Verify statutory compliance, identify arithmetic slip-ups, and compare employee rosters for the newly created June-26 payroll working.
+              Verify statutory compliance, identify arithmetic slip-ups, and compare employee rosters for the newly created {selectedMonth || 'June-26'} payroll working.
             </p>
           </div>
           
@@ -523,6 +598,28 @@ export default function EFFPayrollAuditor({ onBack }) {
             >
               <span>Back to Menu</span>
             </button>
+
+            {availableMonths.length > 0 && (
+              <div className="flex items-center space-x-2 bg-slate-800 border border-slate-700 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300">
+                <span className="text-slate-450 font-medium">Audit Month:</span>
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => {
+                    const newMonth = e.target.value;
+                    setSelectedMonth(newMonth);
+                    runAudit(workbook, newMonth, availableMonths);
+                  }}
+                  className="bg-transparent text-white font-bold font-mono outline-none border-none cursor-pointer focus:ring-0 focus:outline-none p-0 pr-6"
+                >
+                  {availableMonths.map(m => (
+                    <option key={m.sheetName} value={m.sheetName} className="bg-slate-900 text-white">
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <button 
               onClick={loadFromWorkspace}
               disabled={loading}
@@ -638,7 +735,11 @@ export default function EFFPayrollAuditor({ onBack }) {
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Basic Pay Mismatches</span>
               <div className="space-y-1">
                 <span className="text-2xl font-black text-blue-400">{auditResults.basicMismatches.length} Row</span>
-                <p className="text-[10px] text-slate-500">Row 41 (MOHAMMED RIYAS V T) ₹3,000 mismatch</p>
+                <p className="text-[10px] text-slate-500">
+                  {selectedMonth && selectedMonth.toUpperCase().includes('JUNE 2026') 
+                    ? "Row 41 (MOHAMMED RIYAS V T) ₹3,000 mismatch"
+                    : `${auditResults.basicMismatches.length} driver basic pay discrepancies`}
+                </p>
               </div>
             </div>
           </div>
@@ -647,10 +748,10 @@ export default function EFFPayrollAuditor({ onBack }) {
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 text-xs text-amber-400 leading-relaxed space-y-2">
             <div className="flex items-center space-x-2 font-bold">
               <AlertTriangle size={16} />
-              <span>Critical Findings for June-26 working:</span>
+              <span>Critical Findings for {selectedMonth || 'June-26'} working:</span>
             </div>
             <p>
-              The Professional Tax (PT) column has been populated but completely omitted from the <code>Total Deduction</code> cell formulas in June. {auditResults.mathErrors.length > 0 ? `Furthermore, ${auditResults.mathErrors.length} employees had critical Net Salary arithmetic slip-ups.` : ''} This results in a statutory omission and overpayment of <strong>₹{auditResults.totalOverpayment.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>.
+              The Professional Tax (PT) column has been populated but completely omitted from the <code>Total Deduction</code> cell formulas in {auditResults.currentMonthLabel || 'June'}. {auditResults.mathErrors.length > 0 ? `Furthermore, ${auditResults.mathErrors.length} employees had critical Net Salary arithmetic slip-ups.` : ''} This results in a statutory omission and overpayment of <strong>₹{auditResults.totalOverpayment.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>.
             </p>
           </div>
 
@@ -878,7 +979,7 @@ export default function EFFPayrollAuditor({ onBack }) {
                 <div className="space-y-1">
                   <h4 className="text-sm font-bold text-white">Month-over-Month Salary Rate Changes</h4>
                   <p className="text-xs text-slate-400">
-                    Employees whose Gross Basic or Gross Salary changed in June 2026 compared to May 2026.
+                    Employees whose Gross Basic or Gross Salary changed in {auditResults.currentMonthLabel || 'June'} compared to {auditResults.prevMonthLabel || 'May'}.
                   </p>
                 </div>
 
@@ -888,11 +989,11 @@ export default function EFFPayrollAuditor({ onBack }) {
                       <tr className="border-b border-slate-800 bg-slate-950 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                         <th className="p-4">Name</th>
                         <th className="p-4">Branch / Designation</th>
-                        <th className="p-4 text-right">May Basic</th>
-                        <th className="p-4 text-right">June Basic</th>
+                        <th className="p-4 text-right">{auditResults.prevMonthLabel || 'May'} Basic</th>
+                        <th className="p-4 text-right">{auditResults.currentMonthLabel || 'June'} Basic</th>
                         <th className="p-4 text-right font-bold">Basic Diff</th>
-                        <th className="p-4 text-right">May Gross</th>
-                        <th className="p-4 text-right">June Gross</th>
+                        <th className="p-4 text-right">{auditResults.prevMonthLabel || 'May'} Gross</th>
+                        <th className="p-4 text-right">{auditResults.currentMonthLabel || 'June'} Gross</th>
                         <th className="p-4 text-right font-bold">Gross Diff</th>
                       </tr>
                     </thead>
@@ -931,7 +1032,7 @@ export default function EFFPayrollAuditor({ onBack }) {
                 <div className="space-y-3">
                   <div className="flex items-center space-x-2 text-emerald-400 font-bold">
                     <UserPlus size={16} />
-                    <h4 className="text-sm">Added in June ({filteredAdded.length})</h4>
+                    <h4 className="text-sm">Added in {auditResults.currentMonthLabel || 'June'} ({filteredAdded.length})</h4>
                   </div>
                   <div className="border border-slate-800 rounded-xl max-h-[350px] overflow-y-auto">
                     {filteredAdded.length === 0 ? (
@@ -953,7 +1054,7 @@ export default function EFFPayrollAuditor({ onBack }) {
                 <div className="space-y-3">
                   <div className="flex items-center space-x-2 text-red-400 font-bold">
                     <UserMinus size={16} />
-                    <h4 className="text-sm">Missing in June ({filteredMissing.length})</h4>
+                    <h4 className="text-sm">Missing in {auditResults.currentMonthLabel || 'June'} ({filteredMissing.length})</h4>
                   </div>
                   <div className="border border-slate-800 rounded-xl max-h-[350px] overflow-y-auto">
                     {filteredMissing.length === 0 ? (
@@ -965,7 +1066,7 @@ export default function EFFPayrollAuditor({ onBack }) {
                             <div className="flex flex-col">
                               <span className="font-bold text-slate-300">{emp.name}</span>
                               {emp.name === "REJITH LAL" && (
-                                <span className="text-[9px] text-amber-500 font-bold font-mono">⚠️ Spelling Warning: Spelled "RAJITH LAL R G" in June</span>
+                                <span className="text-[9px] text-amber-500 font-bold font-mono">⚠️ Spelling Warning: Spelled "RAJITH LAL R G" in {auditResults.currentMonthLabel || 'June'}</span>
                               )}
                             </div>
                             <span className="text-[10px] text-slate-450">{emp.designation} @ {emp.branch}</span>

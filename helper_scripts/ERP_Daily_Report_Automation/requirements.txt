@@ -4,3 +4,6 @@ openpyxl
 requests
 Pillow
 python-dotenv
+gspread
+google-auth
+beautifulsoup4

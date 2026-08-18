@@ -127,7 +127,8 @@ export default function DatabaseExplorer() {
       const wb = XLSX.utils.book_new();
       const sheetName = activeTable === 'live_scanned_invoices' ? 'Scanned Invoices' :
                         activeTable === 'pod_register' ? 'POD Register' :
-                        activeTable === 'supervisor_branch_mapping' ? 'Supervisor Mapping' : 'All Invoices';
+                        activeTable === 'supervisor_branch_mapping' ? 'Supervisor Mapping' :
+                        activeTable === 'holidays' ? 'Holidays' : 'All Invoices';
       
       // Filter rows based on search term
       const dataToExport = filteredRows.map(r => {
@@ -173,7 +174,9 @@ export default function DatabaseExplorer() {
       String(r.phone_number || '').toLowerCase().includes(term) ||
       String(r.remarks || '').toLowerCase().includes(term) ||
       String(r.supervisor_name || '').toLowerCase().includes(term) ||
-      String(r.branch || '').toLowerCase().includes(term)
+      String(r.branch || '').toLowerCase().includes(term) ||
+      String(r.date || '').toLowerCase().includes(term) ||
+      String(r.description || '').toLowerCase().includes(term)
     );
   });
 
@@ -209,15 +212,19 @@ export default function DatabaseExplorer() {
             <span>Reload Data</span>
           </button>
 
-          {activeTable === 'supervisor_branch_mapping' && (
+          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'holidays') && (
             <button
               onClick={() => {
-                setCreateForm({ supervisor_name: '', branch: '' });
+                if (activeTable === 'supervisor_branch_mapping') {
+                  setCreateForm({ supervisor_name: '', branch: '' });
+                } else {
+                  setCreateForm({ date: '', description: '' });
+                }
                 setCreatingNew(true);
               }}
               className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-emerald-950/20 cursor-pointer"
             >
-              <span>+ Add Supervisor</span>
+              <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : '+ Add Holiday'}</span>
             </button>
           )}
 
@@ -239,6 +246,7 @@ export default function DatabaseExplorer() {
           { id: 'live_scanned_invoices', name: 'Scanned Invoices' },
           { id: 'pod_register', name: 'POD Register (Signature/Seals)' },
           { id: 'supervisor_branch_mapping', name: 'Supervisor Mapping' },
+          { id: 'holidays', name: 'Holidays List' },
           { id: 'all_invoices', name: 'All Invoices (Backup)' }
         ].map(tab => {
           const isActive = activeTable === tab.id;
@@ -308,6 +316,12 @@ export default function DatabaseExplorer() {
                         <th className="p-3.5">Supervisor Name</th>
                         <th className="p-3.5">Branch Name</th>
                       </>
+                    ) : activeTable === 'holidays' ? (
+                      <>
+                        <th className="p-3.5">Created At</th>
+                        <th className="p-3.5">Date</th>
+                        <th className="p-3.5">Description</th>
+                      </>
                     ) : (
                       <>
                         <th className="p-3.5">Uploaded Date</th>
@@ -345,6 +359,12 @@ export default function DatabaseExplorer() {
                           <td className="p-3.5 font-mono">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>
                           <td className="p-3.5 font-semibold text-white">{row.supervisor_name}</td>
                           <td className="p-3.5 font-semibold text-primary">{row.branch}</td>
+                        </>
+                      ) : activeTable === 'holidays' ? (
+                        <>
+                          <td className="p-3.5 font-mono">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>
+                          <td className="p-3.5 font-semibold text-white font-mono">{row.date}</td>
+                          <td className="p-3.5 text-primary font-semibold">{row.description || '-'}</td>
                         </>
                       ) : (
                         <>
@@ -456,6 +476,28 @@ export default function DatabaseExplorer() {
                       onChange={e => setEditForm({ ...editForm, branch: e.target.value })}
                       className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
                       required
+                    />
+                  </div>
+                </>
+              ) : activeTable === 'holidays' ? (
+                <>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Date</label>
+                    <input
+                      type="date"
+                      value={editForm.date ? editForm.date.split('T')[0] : ''}
+                      onChange={e => setEditForm({ ...editForm, date: e.target.value })}
+                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Description</label>
+                    <input
+                      type="text"
+                      value={editForm.description || ''}
+                      onChange={e => setEditForm({ ...editForm, description: e.target.value })}
+                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
                     />
                   </div>
                 </>
@@ -646,9 +688,32 @@ export default function DatabaseExplorer() {
                     />
                   </div>
                 </>
+              ) : activeTable === 'holidays' ? (
+                <>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Date</label>
+                    <input
+                      type="date"
+                      value={createForm.date || ''}
+                      onChange={e => setCreateForm({ ...createForm, date: e.target.value })}
+                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Description</label>
+                    <input
+                      type="text"
+                      value={createForm.description || ''}
+                      onChange={e => setCreateForm({ ...createForm, description: e.target.value })}
+                      placeholder="e.g. Independence Day"
+                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
+                    />
+                  </div>
+                </>
               ) : (
                 <div className="text-slate-400 text-xs">
-                  Create is only supported for Supervisor Mapping table.
+                  Create is only supported for Supervisor Mapping and Holidays tables.
                 </div>
               )}
 
