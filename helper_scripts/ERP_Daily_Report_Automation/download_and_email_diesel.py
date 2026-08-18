@@ -618,7 +618,8 @@ async def main_orchestrator():
         
     print(f"Target execution date: {target_date.strftime('%Y-%m-%d')}")
     
-    workspace_dir = "/Users/anwar/Desktop/Antigravity-Related"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    workspace_dir = os.path.abspath(os.path.join(script_dir, "..", ".."))
     temp_dir = os.path.join(workspace_dir, "temp_reports")
     os.makedirs(temp_dir, exist_ok=True)
     
