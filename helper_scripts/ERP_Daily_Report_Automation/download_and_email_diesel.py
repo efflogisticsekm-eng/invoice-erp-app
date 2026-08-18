@@ -106,7 +106,13 @@ def parse_date(date_str):
 def normalize_vehicle(v_no):
     return re.sub(r'\s+', '', clean_val(v_no)).upper()
 
-async def download_transactions(username, password, temp_dir):
+async def download_transactions(username, password, temp_dir, target_date=None):
+    if target_date is None:
+        target_date = datetime.now() - timedelta(days=1)
+    start_date = target_date - timedelta(days=30)
+    start_str = start_date.strftime("%d-%m-%Y")
+    end_str = target_date.strftime("%d-%m-%Y")
+
     async with async_playwright() as p:
         print("Starting Playwright Chromium browser...")
         browser = await p.chromium.launch(headless=True)
@@ -155,6 +161,27 @@ async def download_transactions(username, password, temp_dir):
         await tx_details_link.wait_for(state="visible", timeout=5000)
         await tx_details_link.click()
         await page.wait_for_timeout(8000)
+        
+        print(f"Setting date filter range: {start_str} to {end_str}...")
+        start_input = page.locator("input[formcontrolname='startDate']")
+        await start_input.wait_for(state="visible", timeout=5000)
+        await start_input.click()
+        await page.keyboard.press("Control+A")
+        await page.keyboard.press("Backspace")
+        await start_input.fill(start_str)
+        await page.wait_for_timeout(500)
+        
+        end_input = page.locator("input[formcontrolname='endDate']")
+        await end_input.wait_for(state="visible", timeout=5000)
+        await end_input.click()
+        await page.keyboard.press("Control+A")
+        await page.keyboard.press("Backspace")
+        await end_input.fill(end_str)
+        await page.wait_for_timeout(500)
+        
+        print("Clicking Search to apply date filter...")
+        await page.locator("button", has_text="Search").first.click()
+        await page.wait_for_timeout(6000)
         
         print("Locating Excel export icon...")
         excel_btn = page.locator("img[src*='xls.png']").first
@@ -690,7 +717,7 @@ async def main_orchestrator():
         password = os.getenv("IOC_PASSWORD", "Eff@2026Logis")
         
         try:
-            raw_csv_path = await download_transactions(username, password, temp_dir)
+            raw_csv_path = await download_transactions(username, password, temp_dir, target_date=target_date)
         except Exception as e:
             print(f"❌ Portal scraping failed: {e}")
             sys.exit(1)
