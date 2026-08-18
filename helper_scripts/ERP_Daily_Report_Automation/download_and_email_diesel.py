@@ -355,7 +355,8 @@ def generate_excel_report(processed_df, target_date, output_path):
             "SNO.": v["sno"] if v["sno"] != 999 else "",
             "VEHICLENO.": v["vehicle_no"],
             "BRANCH": v["branch"],
-            "VEHICLE TYPE": v["type"]
+            "VEHICLE TYPE": v["type"],
+            "RQRD MILEAGE": v.get("rqrd_mileage") if v.get("rqrd_mileage") is not None else ""
         }
         
         a_row = {
@@ -391,7 +392,8 @@ def generate_excel_report(processed_df, target_date, output_path):
         "SNO.": "",
         "VEHICLENO.": "AVERAGE",
         "BRANCH": "",
-        "VEHICLE TYPE": ""
+        "VEHICLE TYPE": "",
+        "RQRD MILEAGE": ""
     }
     
     total_a_row = {
@@ -460,8 +462,8 @@ def generate_excel_report(processed_df, target_date, output_path):
             if v_info and v_info.get("rqrd_mileage") is not None:
                 rqrd = v_info["rqrd_mileage"]
                 
-                # Date columns (cols 5 to avg_col_idx - 1)
-                for c_idx in range(5, avg_col_idx):
+                # Date columns (cols 6 to avg_col_idx - 1)
+                for c_idx in range(6, avg_col_idx):
                     val = ws.cell(row=r_idx, column=c_idx).value
                     try:
                         if val != "" and val is not None:
@@ -581,6 +583,7 @@ def generate_email_body_html(processed_df, target_date):
                 if row["Mileage (km/L)"] < rqrd_mileage:
                     mileage_style = "color: #9C0006; background-color: #FFD2E2;"
                     
+            rqrd_val = "{:.2f}".format(rqrd_mileage) if rqrd_mileage is not None else "-"
             rows_html += f"""
             <tr>
                 <td style="padding: 8px; border: 1px solid #ddd;">{row["Vehicle No."]}</td>
@@ -591,6 +594,7 @@ def generate_email_body_html(processed_df, target_date):
                 <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold; background-color: #fafafa;">{dist_val}</td>
                 <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">{row["Fuel Qty (Litres)"]:.2f}</td>
                 <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold; color: #1F497D;">Rs. {row["Amount (Rs)"]:,.2f}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold; color: #555;">{rqrd_val}</td>
                 <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold; {mileage_style}">{m_val}</td>
             </tr>
             """
@@ -613,6 +617,7 @@ def generate_email_body_html(processed_df, target_date):
                         <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Run (km)</th>
                         <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Qty (L)</th>
                         <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Amount (Rs)</th>
+                        <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Rqrd Mileage</th>
                         <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Mileage (km/L)</th>
                     </tr>
                 </thead>
