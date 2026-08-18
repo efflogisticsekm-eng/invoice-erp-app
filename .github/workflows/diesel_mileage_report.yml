@@ -31,6 +31,11 @@ jobs:
         pip install playwright pandas openpyxl numpy
         playwright install --with-deps chromium
 
+    - name: Test site connectivity
+      run: |
+        echo "Testing HTTP connection to IOC Xtrapower..."
+        curl -i -s -L -X GET --max-time 15 "https://beta.iocxtrapower.com/account/login?returnUrl=%2F" || echo "curl connection failed or timed out"
+
     - name: Run Report Automation Script
       env:
         SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
