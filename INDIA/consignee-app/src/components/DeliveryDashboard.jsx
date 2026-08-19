@@ -1641,24 +1641,47 @@ export default function DeliveryDashboard() {
   }, [customHolidays, excludeSundays, despatchMap, supervisorMap]);
 
   const addHolidayDate = async (dateStr) => {
-    if (!dateStr || customHolidays.includes(dateStr)) return;
+    if (!dateStr) return;
+    
+    // Parse the input date (supports YYYY-MM-DD or DD/MM/YYYY)
+    const parsedDate = parseDate(dateStr);
+    if (!parsedDate || isNaN(parsedDate.getTime())) {
+      alert("Invalid date format. Please use DD/MM/YYYY or select from calendar.");
+      return;
+    }
+    
+    // Format as YYYY-MM-DD for database compatibility (DATE column)
+    const y = parsedDate.getFullYear();
+    const m = String(parsedDate.getMonth() + 1).padStart(2, '0');
+    const d = String(parsedDate.getDate()).padStart(2, '0');
+    const dbDateStr = `${y}-${m}-${d}`;
+
+    if (customHolidays.includes(dbDateStr)) {
+      alert("This holiday is already added.");
+      return;
+    }
+    
     try {
       const res = await fetch('/api/explorer/create/holidays', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: dateStr, description: 'Custom Holiday' })
+        body: JSON.stringify({ date: dbDateStr, description: 'Custom Holiday' })
       });
       if (res.ok) {
         const result = await res.json();
         const newRow = result.data;
         if (newRow) {
           setHolidaysDbList(prev => [...prev, newRow]);
-          const dateOnly = newRow.date ? newRow.date.split('T')[0] : dateStr;
+          const dateOnly = newRow.date ? newRow.date.split('T')[0] : dbDateStr;
           setCustomHolidays(prev => [...prev, dateOnly]);
         }
+      } else {
+        const errResult = await res.json().catch(() => ({}));
+        alert(`Failed to add holiday: ${errResult.error || 'Server error'}`);
       }
     } catch (err) {
       console.error("Error adding holiday:", err);
+      alert("Error adding holiday. Please check connection.");
     }
   };
 
@@ -2330,15 +2353,19 @@ export default function DeliveryDashboard() {
               <div>
                 <p className="text-sm text-slate-600 mb-2 font-semibold">Custom Holidays (അവധി ദിവസങ്ങൾ)</p>
                 <div className="flex flex-wrap gap-2 mb-3">
-                  {customHolidays.map((h, i) => (
-                    <span key={i} className="bg-white border border-slate-200 text-slate-700 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-sm animate-in zoom-in-95">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                      {h}
-                      <button onClick={() => removeHoliday(h)} className="text-slate-400 hover:text-rose-500 transition cursor-pointer">
-                        <X size={14} />
-                      </button>
-                    </span>
-                  ))}
+                  {customHolidays.map((h, i) => {
+                    const parsed = parseDate(h);
+                    const formatted = parsed ? getDateStr(parsed) : h;
+                    return (
+                      <span key={i} className="bg-white border border-slate-200 text-slate-700 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-sm animate-in zoom-in-95">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                        {formatted}
+                        <button onClick={() => removeHoliday(h)} className="text-slate-400 hover:text-rose-500 transition cursor-pointer">
+                          <X size={14} />
+                        </button>
+                      </span>
+                    );
+                  })}
                   {customHolidays.length === 0 && (
                     <span className="text-sm text-slate-400 italic">No custom holidays set.</span>
                   )}
