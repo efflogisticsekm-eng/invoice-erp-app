@@ -358,7 +358,8 @@ export default function Scanner({ user, onBack }) {
                 return MAIN_CATEGORIES.filter(cat => {
                   if (cat === 'Other') return true; // Other is always visible if any sub-item is visible (simplification)
                   const rule = PERMISSIONS['default'];
-                  return !rule.blocked.includes(userRole);
+                  const nameOrRole = userProfile?.full_name || '';
+                  return !rule.blocked.includes(userRole) && !rule.blocked.includes(nameOrRole);
                 }).map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
                 ));
@@ -386,21 +387,22 @@ export default function Scanner({ user, onBack }) {
                     'Subscription': { allowed: ['HO', 'Asst.HR', 'HR', 'FM', 'CEO', 'MD'] },
                     'Bonnus': { allowed: ['HO', 'Asst.HR', 'RM', 'HR', 'FM', 'CEO', 'MD'] },
                     
-                    'Telephone Bill': { blocked: ['Asst VM', 'VM(Vehicle Manager)', 'HR'] },
-                    'Internet Bill': { blocked: ['Asst VM', 'VM(Vehicle Manager)', 'HR'] },
-                    'Petty Cash': { blocked: ['Asst VM', 'Asst.HR', 'VM(Vehicle Manager)', 'HR'] },
-                    'Salary': { blocked: ['Asst VM', 'VM(Vehicle Manager)'] },
-                    'Staff Accomodation Rent': { blocked: ['Asst VM', 'CFA-Eloor', 'Kollam Parcel', 'Asian TCR', 'MPM Parcel', 'KSD Parcel', 'Asst.HR', 'VM(Vehicle Manager)', 'HR'] },
-                    'Ware house Rent': { blocked: ['Asst VM', 'CFA-Eloor', 'Kollam Parcel', 'Asian TCR', 'MPM Parcel', 'KSD Parcel', 'Asst.HR', 'VM(Vehicle Manager)', 'HR'] },
+                    'Telephone Bill': { blocked: ['Asst VM', 'VM', 'VM(Vehicle Manager)', 'HR'] },
+                    'Internet Bill': { blocked: ['Asst VM', 'VM', 'VM(Vehicle Manager)', 'HR'] },
+                    'Petty Cash': { blocked: ['Asst VM', 'Asst.HR', 'VM', 'VM(Vehicle Manager)', 'HR'] },
+                    'Salary': { blocked: ['Asst VM', 'VM', 'VM(Vehicle Manager)'] },
+                    'Staff Accomodation Rent': { blocked: ['Asst VM', 'CFA-Eloor', 'Kollam Parcel', 'Asian TCR', 'MPM Parcel', 'KSD Parcel', 'Asst.HR', 'VM', 'VM(Vehicle Manager)', 'HR'] },
+                    'Ware house Rent': { blocked: ['Asst VM', 'CFA-Eloor', 'Kollam Parcel', 'Asian TCR', 'MPM Parcel', 'KSD Parcel', 'Asst.HR', 'VM', 'VM(Vehicle Manager)', 'HR'] },
                     'default': { blocked: ['Asst VM', 'Asst.HR', 'HR'] }
                   };
 
                   return OTHER_CATEGORIES.filter(cat => {
                     const rule = PERMISSIONS[cat] || PERMISSIONS['default'];
+                    const nameOrRole = userProfile?.full_name || '';
                     if (rule.allowed) {
-                      return rule.allowed.includes(userRole);
+                      return rule.allowed.includes(userRole) || rule.allowed.includes(nameOrRole);
                     } else if (rule.blocked) {
-                      return !rule.blocked.includes(userRole);
+                      return !rule.blocked.includes(userRole) && !rule.blocked.includes(nameOrRole);
                     }
                     return true;
                   }).map(cat => (
