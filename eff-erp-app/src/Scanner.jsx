@@ -55,18 +55,9 @@ export default function Scanner({ user, onBack }) {
 
   React.useEffect(() => {
     const fetchVehicles = async () => {
-      if (!userProfile) return;
       try {
-        let query = supabase.from('vehicles').select('*');
-        const allAccessRoles = ['Asst VM', 'VM(Vehicle Manager)', 'RM', 'HO', 'FM', 'CEO', 'MD'];
-        
-        if (!allAccessRoles.includes(userRole)) {
-          if (userProfile.branch) {
-            query = query.eq('branch', userProfile.branch);
-          }
-        }
-        
-        const { data, error } = await query;
+        // Fetch all vehicles for now so the user can definitely see them
+        const { data, error } = await supabase.from('vehicles').select('*');
         if (!error && data) {
           setVehiclesList(data);
         }
@@ -82,6 +73,8 @@ export default function Scanner({ user, onBack }) {
     if (selectedFile) {
       setFile(selectedFile);
       setPreview(URL.createObjectURL(selectedFile));
+      // Auto-scan when a file is selected!
+      processOCR(selectedFile);
     }
   };
 
@@ -389,7 +382,7 @@ export default function Scanner({ user, onBack }) {
                 className="btn-primary" 
                 onClick={() => processOCR(file)}
                 disabled={loading}
-                style={{ width: '100%', background: 'var(--success)' }}
+                style={{ width: '100%', background: '#2563eb', color: 'white', fontWeight: 'bold', padding: '12px' }}
               >
                 {loading ? 'Scanning AI...' : 'Scan with AI'}
               </button>
