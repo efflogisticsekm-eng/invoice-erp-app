@@ -2531,7 +2531,7 @@ def main():
             if not df_despatch_raw.empty and not args.from_date:
                 for col in df_despatch_raw.columns:
                     if 'DATE' in str(col).upper():
-                        df_despatch_raw['parsed_dt'] = pd.to_datetime(df_despatch_raw[col], errors='coerce')
+                        df_despatch_raw['parsed_dt'] = pd.to_datetime(df_despatch_raw[col], dayfirst=True, errors='coerce')
                         df_despatch_raw = df_despatch_raw[df_despatch_raw['parsed_dt'].isna() | (df_despatch_raw['parsed_dt'] >= cutoff_date)].drop(columns=['parsed_dt'])
                         break
             if not df_despatch_raw.empty:
@@ -2542,7 +2542,7 @@ def main():
             if not df_lr_raw.empty and not args.from_date:
                 for col in df_lr_raw.columns:
                     if 'DATE' in str(col).upper():
-                        df_lr_raw['parsed_dt'] = pd.to_datetime(df_lr_raw[col], errors='coerce')
+                        df_lr_raw['parsed_dt'] = pd.to_datetime(df_lr_raw[col], dayfirst=True, errors='coerce')
                         df_lr_raw = df_lr_raw[df_lr_raw['parsed_dt'].isna() | (df_lr_raw['parsed_dt'] >= cutoff_date)].drop(columns=['parsed_dt'])
                         break
             if not df_lr_raw.empty:
@@ -2553,7 +2553,7 @@ def main():
                 ("Reconciled Audit", result_df),
                 ("All Data", result_df),
                 ("Despatch Data", df_despatch_raw),
-                ("LR Data", df_lr_raw),
+                ("LR Data", df_whole),
                 ("Topay", df_topay),
                 ("Paid", df_paid)
             ]
