@@ -144,42 +144,47 @@ export default function Scanner({ user, onBack }) {
         throw new Error(data.error.message);
       }
 
-      const content = data.choices[0].message.content.trim();
+      let content = data.choices[0].message.content.trim();
       let extracted;
       try {
-        // Strip out any markdown formatting if OpenAI includes it despite instructions
-        const jsonStr = content.replace(/```json/g, '').replace(/```/g, '').trim();
-        extracted = JSON.parse(jsonStr);
+        content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+        extracted = JSON.parse(content);
       } catch (e) {
-        throw new Error("Failed to parse JSON from OpenAI response: " + content);
+        throw new Error("Failed to parse JSON from AI response: " + content);
       }
 
       console.log("OpenAI Extracted Data:", extracted);
 
       if (extracted.partyName) {
-        if (mainCategory === 'Vehicle Maintenance') {
-          setWorkshopName(extracted.partyName);
-        } else if (mainCategory === 'Vehicle Rent') {
-          setVendor(extracted.partyName);
-        } else {
-          setToWhom(extracted.partyName);
-        }
+        if (mainCategory === 'Vehicle Maintenance') setWorkshopName(extracted.partyName);
+        else if (mainCategory === 'Vehicle Rent') setVendor(extracted.partyName);
+        else setToWhom(extracted.partyName);
       }
-      if (extracted.totalAmount) setTotalAmount(extracted.totalAmount.toString());
-      if (extracted.gstAmount !== undefined) setGstAmount(extracted.gstAmount.toString());
       
-      // Calculate or use subtotal for the main amount field
-      if (extracted.subTotal) {
-        setAmount(extracted.subTotal.toString());
-      } else if (extracted.totalAmount && extracted.gstAmount !== undefined) {
-        setAmount((extracted.totalAmount - extracted.gstAmount).toString());
+      const parseAmt = (val) => {
+        if (!val) return 0;
+        if (typeof val === 'number') return val;
+        return parseFloat(val.replace(/[^0-9.-]+/g, '')) || 0;
+      };
+
+      const tAmt = parseAmt(extracted.totalAmount);
+      const gAmt = parseAmt(extracted.gstAmount);
+      const sAmt = parseAmt(extracted.subTotal);
+
+      if (tAmt) setTotalAmount(tAmt.toString());
+      if (gAmt) setGstAmount(gAmt.toString());
+      
+      if (sAmt) {
+        setAmount(sAmt.toString());
+      } else if (tAmt && gAmt) {
+        setAmount((tAmt - gAmt).toString());
       } else {
-        setAmount(extracted.totalAmount ? extracted.totalAmount.toString() : '0');
+        setAmount(tAmt ? tAmt.toString() : '');
       }
 
     } catch (error) {
       console.error('OCR Error:', error);
-      alert('Failed to read bill details using AI. Please enter manually.\\nError: ' + error.message);
+      alert('Failed to read bill details. Error: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -357,43 +362,44 @@ export default function Scanner({ user, onBack }) {
             </div>
           )}
 
+          {/* Unified Upload Section */}
+          <div style={{ margin: '20px 0', padding: '15px', background: '#eef2ff', borderRadius: '8px', border: '1px dashed #4f46e5' }}>
+            <h3 style={{ marginTop: 0, marginBottom: '10px', fontSize: '16px', color: '#4f46e5' }}>2. Upload Bill & Scan (Optional)</h3>
+            <div className="input-group">
+              <input 
+                type="file" 
+                accept="image/*" 
+                capture="environment" 
+                id="cameraInput"
+                style={{ display: 'none' }}
+                onChange={handleFileChange}
+              />
+              <label htmlFor="cameraInput" className="btn-primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', width: '100%', marginBottom: '10px' }}>
+                Open Camera / Gallery
+              </label>
+            </div>
+            {preview && (
+              <div style={{ margin: '15px 0', textAlign: 'center' }}>
+                <img src={preview} alt="Bill Preview" style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '8px' }} />
+              </div>
+            )}
+            {file && (
+              <button 
+                type="button"
+                className="btn-primary" 
+                onClick={() => processOCR(file)}
+                disabled={loading}
+                style={{ width: '100%', background: 'var(--success)' }}
+              >
+                {loading ? 'Scanning AI...' : 'Scan with AI'}
+              </button>
+            )}
+          </div>
+
+          <h3 style={{ color: 'var(--primary)', marginBottom: '15px', borderBottom: '2px solid var(--primary)', paddingBottom: '5px' }}>3. Expense Details</h3>
+
           {mainCategory === 'Vehicle Maintenance' && (
             <>
-              <div style={{ margin: '20px 0', padding: '15px', background: '#f8f9fa', borderRadius: '8px', border: '1px dashed #ccc' }}>
-                <h3 style={{ marginTop: 0, marginBottom: '10px', fontSize: '16px', color: 'var(--primary)' }}>2. Upload Bill & Scan (Optional)</h3>
-                <div className="input-group">
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    capture="environment" 
-                    id="cameraInput"
-                    style={{ display: 'none' }}
-                    onChange={handleFileChange}
-                  />
-                  <label htmlFor="cameraInput" className="btn-primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', width: '100%', marginBottom: '10px' }}>
-                    Open Camera / Gallery
-                  </label>
-                </div>
-                {preview && (
-                  <div style={{ margin: '15px 0', textAlign: 'center' }}>
-                    <img src={preview} alt="Bill Preview" style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '8px' }} />
-                  </div>
-                )}
-                {file && (
-                  <button 
-                    type="button"
-                    className="btn-primary" 
-                    onClick={() => processOCR(file)}
-                    disabled={loading}
-                    style={{ width: '100%', background: 'var(--success)' }}
-                  >
-                    {loading ? 'Scanning AI...' : 'Scan with AI'}
-                  </button>
-                )}
-              </div>
-
-              <h3 style={{ color: 'var(--primary)', marginBottom: '15px', borderBottom: '2px solid var(--primary)', paddingBottom: '5px' }}>3. Expense Details</h3>
-
               <div className="input-group">
                 <label>Maintenance Type (Sub Category)</label>
                 <select className="input-field" value={subCategory} onChange={e => setSubCategory(e.target.value)}>
@@ -412,21 +418,20 @@ export default function Scanner({ user, onBack }) {
               </div>
               <div className="input-group">
                 <label>Vehicle No</label>
-                <input 
-                  type="text" 
+                <select 
                   className="input-field" 
-                  list="vehicle-list"
-                  placeholder="Search or Select Vehicle No..."
                   value={vehicleNo} 
                   onChange={e => setVehicleNo(e.target.value)} 
-                />
-                <datalist id="vehicle-list">
-                  {vehiclesList.map(v => (
+                >
+                  <option value="">-- Select Vehicle --</option>
+                  {vehiclesList.length > 0 ? vehiclesList.map(v => (
                     <option key={v.id} value={v.vehicle_no}>
                       {v.vehicle_no} - {v.branch}
                     </option>
-                  ))}
-                </datalist>
+                  )) : (
+                    <option disabled>No vehicles found for your branch. Did you run the SQL?</option>
+                  )}
+                </select>
               </div>
               <div className="input-group"><label>Description / Sub Type</label><input type="text" className="input-field" placeholder="e.g. Oil Change, GPS, Break Pad" value={putDescription} onChange={e => setPutDescription(e.target.value)} /></div>
               <div className="input-group"><label>Odometer Reading</label><input type="text" className="input-field" value={odometerReading} onChange={e => setOdometerReading(e.target.value)} /></div>
@@ -436,40 +441,6 @@ export default function Scanner({ user, onBack }) {
 
           {mainCategory === 'Vehicle Rent' && (
             <>
-              <div style={{ margin: '20px 0', padding: '15px', background: '#f8f9fa', borderRadius: '8px', border: '1px dashed #ccc' }}>
-                <h3 style={{ marginTop: 0, marginBottom: '10px', fontSize: '16px', color: 'var(--primary)' }}>2. Upload Bill & Scan (Optional)</h3>
-                <div className="input-group">
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    capture="environment" 
-                    id="cameraInput"
-                    style={{ display: 'none' }}
-                    onChange={handleFileChange}
-                  />
-                  <label htmlFor="cameraInput" className="btn-primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', width: '100%', marginBottom: '10px' }}>
-                    Open Camera / Gallery
-                  </label>
-                </div>
-                {preview && (
-                  <div style={{ margin: '15px 0', textAlign: 'center' }}>
-                    <img src={preview} alt="Bill Preview" style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '8px' }} />
-                  </div>
-                )}
-                {file && (
-                  <button 
-                    type="button"
-                    className="btn-primary" 
-                    onClick={() => processOCR(file)}
-                    disabled={loading}
-                    style={{ width: '100%', background: 'var(--success)' }}
-                  >
-                    {loading ? 'Scanning AI...' : 'Scan with AI'}
-                  </button>
-                )}
-              </div>
-              <h3 style={{ color: 'var(--primary)', marginBottom: '15px', borderBottom: '2px solid var(--primary)', paddingBottom: '5px' }}>3. Expense Details</h3>
-              
               <div className="input-group"><label>LR No's</label><input type="text" className="input-field" value={lrNo} onChange={e => setLrNo(e.target.value)} /></div>
               <div className="input-group"><label>LR Date</label><input type="date" className="input-field" value={lrDate} onChange={e => setLrDate(e.target.value)} /></div>
               <div className="input-group"><label>Total Weight</label><input type="text" className="input-field" value={totalWeight} onChange={e => setTotalWeight(e.target.value)} /></div>
@@ -485,40 +456,6 @@ export default function Scanner({ user, onBack }) {
 
           {mainCategory === 'Vehicle Rent Balance Payment' && (
             <>
-              <div style={{ margin: '20px 0', padding: '15px', background: '#f8f9fa', borderRadius: '8px', border: '1px dashed #ccc' }}>
-                <h3 style={{ marginTop: 0, marginBottom: '10px', fontSize: '16px', color: 'var(--primary)' }}>2. Upload Bill & Scan (Optional)</h3>
-                <div className="input-group">
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    capture="environment" 
-                    id="cameraInput"
-                    style={{ display: 'none' }}
-                    onChange={handleFileChange}
-                  />
-                  <label htmlFor="cameraInput" className="btn-primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', width: '100%', marginBottom: '10px' }}>
-                    Open Camera / Gallery
-                  </label>
-                </div>
-                {preview && (
-                  <div style={{ margin: '15px 0', textAlign: 'center' }}>
-                    <img src={preview} alt="Bill Preview" style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '8px' }} />
-                  </div>
-                )}
-                {file && (
-                  <button 
-                    type="button"
-                    className="btn-primary" 
-                    onClick={() => processOCR(file)}
-                    disabled={loading}
-                    style={{ width: '100%', background: 'var(--success)' }}
-                  >
-                    {loading ? 'Scanning AI...' : 'Scan with AI'}
-                  </button>
-                )}
-              </div>
-              <h3 style={{ color: 'var(--primary)', marginBottom: '15px', borderBottom: '2px solid var(--primary)', paddingBottom: '5px' }}>3. Expense Details</h3>
-              
               <div className="input-group"><label>LR No's</label><input type="text" className="input-field" value={lrNo} onChange={e => setLrNo(e.target.value)} /></div>
               <div className="input-group"><label>Any Other Charge</label><input type="text" className="input-field" value={putDescription} onChange={e => setPutDescription(e.target.value)} /></div>
             </>
@@ -526,40 +463,6 @@ export default function Scanner({ user, onBack }) {
 
           {mainCategory === 'Other' && (
             <>
-              <div style={{ margin: '20px 0', padding: '15px', background: '#f8f9fa', borderRadius: '8px', border: '1px dashed #ccc' }}>
-                <h3 style={{ marginTop: 0, marginBottom: '10px', fontSize: '16px', color: 'var(--primary)' }}>2. Upload Bill & Scan (Optional)</h3>
-                <div className="input-group">
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    capture="environment" 
-                    id="cameraInput"
-                    style={{ display: 'none' }}
-                    onChange={handleFileChange}
-                  />
-                  <label htmlFor="cameraInput" className="btn-primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', width: '100%', marginBottom: '10px' }}>
-                    Open Camera / Gallery
-                  </label>
-                </div>
-                {preview && (
-                  <div style={{ margin: '15px 0', textAlign: 'center' }}>
-                    <img src={preview} alt="Bill Preview" style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '8px' }} />
-                  </div>
-                )}
-                {file && (
-                  <button 
-                    type="button"
-                    className="btn-primary" 
-                    onClick={() => processOCR(file)}
-                    disabled={loading}
-                    style={{ width: '100%', background: 'var(--success)' }}
-                  >
-                    {loading ? 'Scanning AI...' : 'Scan with AI'}
-                  </button>
-                )}
-              </div>
-              <h3 style={{ color: 'var(--primary)', marginBottom: '15px', borderBottom: '2px solid var(--primary)', paddingBottom: '5px' }}>3. Expense Details</h3>
-              
               <div className="input-group"><label>Description / Item Details</label><input type="text" className="input-field" value={putDescription} onChange={e => setPutDescription(e.target.value)} /></div>
               {/* Hide "To Whom" for specific items according to PDF if needed, but safe to show mostly, PDF says GST and TDS have no 'To Whom'. */}
               {otherItem !== 'GST' && otherItem !== 'TDS' && (
