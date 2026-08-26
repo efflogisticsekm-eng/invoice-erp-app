@@ -47,10 +47,25 @@ export default function Scanner({ user, onBack }) {
 
   React.useEffect(() => {
     const fetchProfile = async () => {
-      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      if (data) {
-        setUserRole(data.role);
-        setUserProfile(data);
+      try {
+        const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+        if (data) {
+          setUserRole(data.role);
+          setUserProfile(data);
+        } else {
+          // Fallback: use user metadata if profiles table is RLS-blocked
+          console.warn("Profile fetch returned null (RLS?). Using fallback.", error);
+          const meta = user.user_metadata || {};
+          setUserProfile({ 
+            id: user.id, 
+            role: meta.role || 'User', 
+            branch: meta.branch || null, 
+            full_name: meta.full_name || user.email 
+          });
+          if (meta.role) setUserRole(meta.role);
+        }
+      } catch (err) {
+        console.error("Profile fetch error:", err);
       }
     };
     fetchProfile();
@@ -58,12 +73,11 @@ export default function Scanner({ user, onBack }) {
 
   React.useEffect(() => {
     const fetchVehicles = async () => {
-      if (!userProfile) return;
       try {
         let query = supabase.from('vehicles').select('*');
         const allAccessRoles = ['Asst VM', 'VM(Vehicle Manager)', 'RM', 'HO', 'FM', 'CEO', 'MD'];
         
-        if (!allAccessRoles.includes(userRole)) {
+        if (userProfile && !allAccessRoles.includes(userRole)) {
           if (userProfile.branch) {
             query = query.ilike('branch', userProfile.branch);
           }
@@ -72,6 +86,8 @@ export default function Scanner({ user, onBack }) {
         const { data, error } = await query;
         if (!error && data) {
           setVehiclesList(data);
+        } else {
+          console.error("Vehicles fetch error:", error);
         }
       } catch (err) {
         console.error("Error fetching vehicles:", err);
