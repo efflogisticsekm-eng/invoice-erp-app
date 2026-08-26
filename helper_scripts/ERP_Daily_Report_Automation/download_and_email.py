@@ -386,9 +386,12 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
         to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
     else:
         yesterday = target_date - timedelta(days=1)
-        days_back = 60 if mode == "reconcile" else 30
-        from_date_str = from_override if from_override else (yesterday - timedelta(days=days_back)).strftime("%Y-%m-%d")
-        to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
+        if mode == "reconcile":
+            from_date_str = from_override if from_override else yesterday.strftime("%Y-%m-%d")
+            to_date_str = to_override if to_override else yesterday.strftime("%Y-%m-%d")
+        else:
+            from_date_str = from_override if from_override else (yesterday - timedelta(days=30)).strftime("%Y-%m-%d")
+            to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
         
     print(f"Date range resolved: fromDate={from_date_str}, toDate={to_date_str}")
     
