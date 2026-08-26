@@ -384,14 +384,21 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
             lookback_date -= timedelta(days=1)
         from_date_str = from_override if from_override else lookback_date.strftime("%Y-%m-%d")
         to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
-    else:
+    elif mode == "reconcile":
+        holidays_list = fetch_holidays()
         yesterday = target_date - timedelta(days=1)
-        if mode == "reconcile":
-            from_date_str = from_override if from_override else yesterday.strftime("%Y-%m-%d")
+        # Look back past Sundays and marked holidays to find last working day
+        lookback = target_date - timedelta(days=1)
+        while lookback.weekday() == 6 or lookback.strftime("%Y-%m-%d") in holidays_list:
+            lookback -= timedelta(days=1)
+            
+        if target_date.weekday() == 0:  # Monday run: Collect Saturday 00:00:01 to Sunday 24:00:00
+            saturday = target_date - timedelta(days=2)
+            from_date_str = from_override if from_override else saturday.strftime("%Y-%m-%d")
             to_date_str = to_override if to_override else yesterday.strftime("%Y-%m-%d")
         else:
-            from_date_str = from_override if from_override else (yesterday - timedelta(days=30)).strftime("%Y-%m-%d")
-            to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
+            from_date_str = from_override if from_override else lookback.strftime("%Y-%m-%d")
+            to_date_str = to_override if to_override else yesterday.strftime("%Y-%m-%d")
         
     print(f"Date range resolved: fromDate={from_date_str}, toDate={to_date_str}")
     
