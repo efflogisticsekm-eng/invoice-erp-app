@@ -2481,13 +2481,23 @@ def main():
             result_df, summary_stats, df_whole = process_freight_data(lr_file, rates_excel)
             print(f"Calculations complete: {summary_stats}", flush=True)
             
-            # Extract records older than 52 days for archiving
-            result_df['parsed_dt'] = pd.to_datetime(result_df['DATE'], format='%d/%m/%Y', errors='coerce')
-            cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=52)
-            df_archive = result_df[pd.notna(result_df['parsed_dt']) & (result_df['parsed_dt'] < cutoff_date)].copy().drop(columns=['parsed_dt'])
-            
-            # Keep 52-day rolling window for active sheet
-            result_df = result_df[result_df['parsed_dt'].isna() | (result_df['parsed_dt'] >= cutoff_date)].copy().drop(columns=['parsed_dt'])
+            # Extract records older than 52 days for archiving (only on automated daily runs without date overrides)
+            if not args.from_date:
+                result_df['parsed_dt'] = pd.to_datetime(result_df['DATE'], format='%d/%m/%Y', errors='coerce')
+                cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=52)
+                df_archive = result_df[pd.notna(result_df['parsed_dt']) & (result_df['parsed_dt'] < cutoff_date)].copy().drop(columns=['parsed_dt'])
+                result_df = result_df[result_df['parsed_dt'].isna() | (result_df['parsed_dt'] >= cutoff_date)].copy().drop(columns=['parsed_dt'])
+
+            # Filter payment buckets before formatting floats to string
+            ptype_col = 'PAYMENT TYPE' if 'PAYMENT TYPE' in result_df.columns else ''
+            topay_mask = pd.to_numeric(result_df['To Pay'], errors='coerce') > 0
+            paid_mask = pd.to_numeric(result_df['Paid'], errors='coerce') > 0
+            if ptype_col:
+                topay_mask = topay_mask | result_df[ptype_col].astype(str).str.upper().str.contains('TO PAY|TOPAY')
+                paid_mask = paid_mask | result_df[ptype_col].astype(str).str.upper().str.contains('PAID')
+
+            df_topay = result_df[topay_mask].copy()
+            df_paid = result_df[paid_mask].copy()
 
             # Format dataframe for google sheets transfer (replace nan values, format headers)
             result_df = result_df.fillna("")
@@ -2498,6 +2508,15 @@ def main():
                     result_df[col] = pd.to_numeric(result_df[col], errors='coerce').apply(lambda x: f"{x:.2f}" if pd.notna(x) else "")
                 else:
                     result_df[col] = result_df[col].astype(str)
+
+            for df_sub in [df_topay, df_paid]:
+                if not df_sub.empty:
+                    df_sub.fillna("", inplace=True)
+                    for col in df_sub.columns:
+                        if col in num_cols:
+                            df_sub[col] = pd.to_numeric(df_sub[col], errors='coerce').apply(lambda x: f"{x:.2f}" if pd.notna(x) else "")
+                        else:
+                            df_sub[col] = df_sub[col].astype(str)
 
             def robust_read_df(filepath):
                 if not filepath or not os.path.exists(filepath):
@@ -2515,28 +2534,26 @@ def main():
 
             # Prepare raw datasets for Despatch Data and LR Data tabs
             df_despatch_raw = robust_read_df(despatch_file).fillna("")
-            if not df_despatch_raw.empty:
+            if not df_despatch_raw.empty and not args.from_date:
                 for col in df_despatch_raw.columns:
                     if 'DATE' in str(col).upper():
                         df_despatch_raw['parsed_dt'] = pd.to_datetime(df_despatch_raw[col], errors='coerce')
                         df_despatch_raw = df_despatch_raw[df_despatch_raw['parsed_dt'].isna() | (df_despatch_raw['parsed_dt'] >= cutoff_date)].drop(columns=['parsed_dt'])
                         break
+            if not df_despatch_raw.empty:
                 for col in df_despatch_raw.columns:
                     df_despatch_raw[col] = df_despatch_raw[col].astype(str)
 
             df_lr_raw = robust_read_df(lr_file).fillna("")
-            if not df_lr_raw.empty:
+            if not df_lr_raw.empty and not args.from_date:
                 for col in df_lr_raw.columns:
                     if 'DATE' in str(col).upper():
                         df_lr_raw['parsed_dt'] = pd.to_datetime(df_lr_raw[col], errors='coerce')
                         df_lr_raw = df_lr_raw[df_lr_raw['parsed_dt'].isna() | (df_lr_raw['parsed_dt'] >= cutoff_date)].drop(columns=['parsed_dt'])
                         break
+            if not df_lr_raw.empty:
                 for col in df_lr_raw.columns:
                     df_lr_raw[col] = df_lr_raw[col].astype(str)
-
-            # Filter payment buckets
-            df_topay = result_df[pd.to_numeric(result_df['To Pay'], errors='coerce') > 0].copy()
-            df_paid = result_df[pd.to_numeric(result_df['Paid'], errors='coerce') > 0].copy()
 
             target_tabs = [
                 ("Reconciled Audit", result_df),
