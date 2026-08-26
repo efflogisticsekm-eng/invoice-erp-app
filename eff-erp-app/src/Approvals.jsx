@@ -170,6 +170,7 @@ export default function Approvals({ user, profile, onBack }) {
           <p>No pending approvals for you.</p>
         </div>
       ) : (
+        requests.map(req => (
           <div key={req.id} className="card" style={{ marginBottom: '10px', padding: '15px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
               <strong style={{ fontSize: '16px' }}>{req.profiles?.full_name || 'Unknown'}</strong>
