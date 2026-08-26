@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { CheckCircle, XCircle } from 'lucide-react';
+import { CheckCircle, XCircle, Camera } from 'lucide-react';
 
 export default function Approvals({ user, profile, onBack }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedImage, setSelectedImage] = useState(null);
 
   useEffect(() => {
     fetchRequests();
@@ -169,27 +170,24 @@ export default function Approvals({ user, profile, onBack }) {
           <p>No pending approvals for you.</p>
         </div>
       ) : (
-        requests.map(req => (
-          <div key={req.id} className="card" style={{ marginBottom: '15px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-              <strong style={{ fontSize: '18px' }}>{req.profiles?.full_name || 'Unknown'}</strong>
-              <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>₹{req.total_amount}</span>
+          <div key={req.id} className="card" style={{ marginBottom: '10px', padding: '15px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+              <strong style={{ fontSize: '16px' }}>{req.profiles?.full_name || 'Unknown'}</strong>
+              <span style={{ color: 'var(--primary)', fontWeight: 'bold', fontSize: '18px' }}>₹{req.total_amount}</span>
             </div>
-             <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginBottom: '15px' }}>
-              Category: {req.category} {req.sub_category ? `(${req.sub_category})` : ''}<br/>
-              Requested on: {new Date(req.created_at).toLocaleDateString()}
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 10px 0' }}>
+              Category: {req.category} {req.sub_category ? `(${req.sub_category})` : ''} | Date: {new Date(req.created_at).toLocaleDateString()}
             </p>
 
             {/* Expense details block */}
             {req.details && (
-              <div style={{ background: '#f8f9fa', padding: '12px', borderRadius: '8px', marginBottom: '15px', fontSize: '14px', border: '1px solid #eef2ff' }}>
-                <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--primary)' }}>Details</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 15px' }}>
+              <div style={{ background: '#f8f9fa', padding: '10px', borderRadius: '6px', marginBottom: '10px', fontSize: '13px', border: '1px solid #eef2ff' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 10px' }}>
                   {req.details.vehicleNo && <div><strong>Vehicle No:</strong> {req.details.vehicleNo}</div>}
                   {req.details.odometerReading && <div><strong>Odometer:</strong> {req.details.odometerReading}</div>}
-                  {req.details.workshopName && <div><strong>Workshop:</strong> {req.details.workshopName}</div>}
-                  {req.details.vendor && <div><strong>Vendor:</strong> {req.details.vendor}</div>}
-                  {req.details.toWhom && <div><strong>To Whom:</strong> {req.details.toWhom}</div>}
+                  {req.details.workshopName && <div style={{ gridColumn: 'span 2' }}><strong>Workshop:</strong> {req.details.workshopName}</div>}
+                  {req.details.vendor && <div style={{ gridColumn: 'span 2' }}><strong>Vendor:</strong> {req.details.vendor}</div>}
+                  {req.details.toWhom && <div style={{ gridColumn: 'span 2' }}><strong>To Whom:</strong> {req.details.toWhom}</div>}
                   {req.details.paymentType && <div><strong>Payment:</strong> {req.details.paymentType}</div>}
                   {req.details.lrNo && <div><strong>LR No:</strong> {req.details.lrNo}</div>}
                   {req.details.lrDate && <div><strong>LR Date:</strong> {req.details.lrDate}</div>}
@@ -202,53 +200,115 @@ export default function Approvals({ user, profile, onBack }) {
                   {req.details.rentAdvance && <div><strong>Rent Advance:</strong> ₹{req.details.rentAdvance}</div>}
                 </div>
                 {req.details.putDescription && (
-                  <div style={{ marginTop: '8px', borderTop: '1px solid #eee', paddingTop: '8px' }}>
+                  <div style={{ marginTop: '5px', borderTop: '1px solid #eee', paddingTop: '5px' }}>
                     <strong>Description:</strong> {req.details.putDescription}
                   </div>
                 )}
                 {/* GST breakdown */}
                 {(req.details.cgstAmount > 0 || req.details.sgstAmount > 0 || req.details.igstAmount > 0) && (
-                  <div style={{ marginTop: '8px', borderTop: '1px solid #eee', paddingTop: '8px', display: 'flex', gap: '15px', color: '#666', fontSize: '12px' }}>
+                  <div style={{ marginTop: '5px', borderTop: '1px solid #eee', paddingTop: '5px', display: 'flex', gap: '15px', color: '#666', fontSize: '11px' }}>
                     {req.details.cgstAmount > 0 && <span><strong>CGST:</strong> ₹{req.details.cgstAmount}</span>}
                     {req.details.sgstAmount > 0 && <span><strong>SGST:</strong> ₹{req.details.sgstAmount}</span>}
                     {req.details.igstAmount > 0 && <span><strong>IGST:</strong> ₹{req.details.igstAmount}</span>}
                   </div>
                 )}
+
+                {/* View Bill Photo Button inside the Details block */}
+                {req.image_url && (
+                  <div style={{ marginTop: '8px', borderTop: '1px solid #eee', paddingTop: '8px' }}>
+                    <button 
+                      type="button" 
+                      onClick={() => setSelectedImage(req.image_url)}
+                      style={{
+                        background: '#eff6ff',
+                        color: '#2563eb',
+                        border: '1px solid #bfdbfe',
+                        borderRadius: '4px',
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Camera size={14} /> View Bill Photo
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Bill Photo Preview */}
-            {req.image_url && (
-              <div style={{ marginBottom: '15px', textAlign: 'center' }}>
-                <a href={req.image_url} target="_blank" rel="noopener noreferrer">
-                  <img 
-                    src={req.image_url} 
-                    alt="Bill Document" 
-                    style={{ maxWidth: '100%', maxHeight: '200px', borderRadius: '6px', border: '1px solid #ddd', cursor: 'zoom-in' }} 
-                  />
-                </a>
-                <p style={{ margin: '5px 0 0 0', fontSize: '11px', color: 'var(--text-muted)' }}>Click image to zoom/view</p>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '5px' }}>
               <button 
                 className="btn btn-primary" 
-                style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px' }}
+                style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px', padding: '10px' }}
                 onClick={() => handleApprove(req)}
               >
-                <CheckCircle size={18} /> Approve
+                <CheckCircle size={16} /> Approve
               </button>
               <button 
                 className="btn" 
-                style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px', background: '#fee2e2', color: '#dc2626', border: 'none' }}
+                style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px', background: '#fee2e2', color: '#dc2626', border: 'none', padding: '10px' }}
                 onClick={() => handleReject(req)}
               >
-                <XCircle size={18} /> Reject
+                <XCircle size={16} /> Reject
               </button>
             </div>
           </div>
         ))
+      )}
+
+      {/* Full Screen Image Modal */}
+      {selectedImage && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.9)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 9999,
+            padding: '10px'
+          }}
+          onClick={() => setSelectedImage(null)}
+        >
+          <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '95%' }} onClick={e => e.stopPropagation()}>
+            <img 
+              src={selectedImage} 
+              alt="Enlarged Bill" 
+              style={{ maxWidth: '100vw', maxHeight: '85vh', borderRadius: '4px', boxShadow: '0 4px 20px rgba(0,0,0,0.8)', objectFit: 'contain' }} 
+            />
+            <button 
+              onClick={() => setSelectedImage(null)}
+              style={{
+                position: 'absolute',
+                top: '-45px',
+                right: '10px',
+                background: 'white',
+                border: 'none',
+                borderRadius: '50%',
+                width: '35px',
+                height: '35px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 'bold',
+                fontSize: '18px',
+                cursor: 'pointer',
+                boxShadow: '0 2px 5px rgba(0,0,0,0.3)'
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
