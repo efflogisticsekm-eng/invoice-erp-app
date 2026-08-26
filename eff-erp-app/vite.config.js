@@ -32,6 +32,9 @@ export default defineConfig(({ mode }) => {
                 };
                 await supabase.from('profiles').upsert(profileData, { onConflict: 'id', ignoreDuplicates: true });
 
+                // Map branch to expense_requests column
+                data.branch = data.user_branch || null;
+
                 // Remove helper fields before insert
                 delete data.user_email;
                 delete data.user_role;
