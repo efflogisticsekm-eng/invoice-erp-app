@@ -68,7 +68,7 @@ export default function Approvals({ user, profile, onBack }) {
     try {
       const nextLevelRaw = computeNextLevel(request.category, request.sub_category, profile.role);
       
-      let nextLevel = null;
+      let nextLevel = 'Approved';
       let newStatus = 'Pending';
       
       if (nextLevelRaw === 'Approved') {
