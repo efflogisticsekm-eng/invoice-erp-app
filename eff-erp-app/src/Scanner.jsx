@@ -41,6 +41,7 @@ export default function Scanner({ user, onBack }) {
   
   const [userRole, setUserRole] = useState('User');
   const [userProfile, setUserProfile] = useState(null);
+  const [compressedBase64, setCompressedBase64] = useState('');
   
   // Vehicles
   const [vehiclesList, setVehiclesList] = useState([]);
@@ -110,15 +111,38 @@ export default function Scanner({ user, onBack }) {
     try {
       setLoading(true);
       
-      // Convert file blob to base64
-      const getBase64 = (file) => new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => resolve(reader.result.split(',')[1]);
-        reader.onerror = error => reject(error);
-      });
+      // Compress and get base64 Data URL to keep DB payload light and fast
+      const compressAndGetBase64 = (fileObj) => {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const MAX_WIDTH = 800; // max size to compress to ~150kb
+              let width = img.width;
+              let height = img.height;
 
-      const base64Image = await getBase64(fileBlob);
+              if (width > MAX_WIDTH) {
+                height = Math.round((height * MAX_WIDTH) / width);
+                width = MAX_WIDTH;
+              }
+
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, width, height);
+              resolve(canvas.toDataURL('image/jpeg', 0.6));
+            };
+            img.src = event.target.result;
+          };
+          reader.readAsDataURL(fileObj);
+        });
+      };
+
+      const base64DataUrl = await compressAndGetBase64(fileBlob);
+      setCompressedBase64(base64DataUrl);
+      const base64Image = base64DataUrl.split(',')[1];
       
       const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
       if (!apiKey) {
@@ -301,6 +325,7 @@ export default function Scanner({ user, onBack }) {
           total_amount: parseFloat(totalAmount) || 0,
           current_level: nextLevel,
           status: 'Pending',
+          image_url: compressedBase64 || null,
           details: {
             vehicleNo, odometerReading, workshopName, paymentType, putDescription, toWhom,
             lrNo, lrDate, totalWeight, destination, approximateKm, vehicleType, 
