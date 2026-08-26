@@ -55,9 +55,18 @@ export default function Scanner({ user, onBack }) {
 
   React.useEffect(() => {
     const fetchVehicles = async () => {
+      if (!userProfile) return;
       try {
-        // Fetch all vehicles for now so the user can definitely see them
-        const { data, error } = await supabase.from('vehicles').select('*');
+        let query = supabase.from('vehicles').select('*');
+        const allAccessRoles = ['Asst VM', 'VM(Vehicle Manager)', 'RM', 'HO', 'FM', 'CEO', 'MD'];
+        
+        if (!allAccessRoles.includes(userRole)) {
+          if (userProfile.branch) {
+            query = query.ilike('branch', userProfile.branch);
+          }
+        }
+        
+        const { data, error } = await query;
         if (!error && data) {
           setVehiclesList(data);
         }
