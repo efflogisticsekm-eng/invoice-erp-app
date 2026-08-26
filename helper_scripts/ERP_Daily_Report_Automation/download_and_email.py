@@ -2481,9 +2481,12 @@ def main():
             result_df, summary_stats, df_whole = process_freight_data(lr_file, rates_excel)
             print(f"Calculations complete: {summary_stats}", flush=True)
             
-            # Filter result_df to maintain 52-Day Rolling Window
+            # Extract records older than 52 days for archiving
             result_df['parsed_dt'] = pd.to_datetime(result_df['DATE'], format='%d/%m/%Y', errors='coerce')
             cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=52)
+            df_archive = result_df[pd.notna(result_df['parsed_dt']) & (result_df['parsed_dt'] < cutoff_date)].copy().drop(columns=['parsed_dt'])
+            
+            # Keep 52-day rolling window for active sheet
             result_df = result_df[result_df['parsed_dt'].isna() | (result_df['parsed_dt'] >= cutoff_date)].copy().drop(columns=['parsed_dt'])
 
             # Format dataframe for google sheets transfer (replace nan values, format headers)
@@ -2586,6 +2589,26 @@ def main():
                 print("🔒 Master rate sheets visibility updated (hidden).", flush=True)
             except Exception as hide_err:
                 print(f"Note: Could not hide rate tabs: {hide_err}", flush=True)
+            
+            # If archive records exist, append them safely to 'Parcel Billing - Archive 2026'
+            if 'df_archive' in locals() and not df_archive.empty:
+                archive_title = "Parcel Billing - Archive 2026"
+                try:
+                    try:
+                        ash = client.open(archive_title)
+                    except gspread.exceptions.SpreadsheetNotFound:
+                        ash = client.create(archive_title)
+                    try:
+                        aws = ash.worksheet("Archive")
+                    except gspread.exceptions.WorksheetNotFound:
+                        aws = ash.sheet1
+                        aws.update_title("Archive")
+                        aws.update(range_name="A1", values=[df_archive.columns.tolist()])
+                    archive_data = df_archive.fillna("").values.tolist()
+                    aws.append_rows(archive_data, value_input_option='USER_ENTERED')
+                    print(f"📦 Archived {len(archive_data)} historical rows to '{archive_title}'.", flush=True)
+                except Exception as arch_err:
+                    print(f"Note: Archiving error: {arch_err}", flush=True)
             
         except Exception as audit_err:
             print(f"❌ Error during reconciliation/sync flow: {audit_err}", flush=True)
