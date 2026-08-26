@@ -1,5 +1,6 @@
 import os
 import sys
+sys.path.append("/Users/anwar/Library/Python/3.9/lib/python/site-packages")
 import time
 import smtplib
 import argparse
@@ -33,22 +34,24 @@ WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 RECIPIENT_PHONE_NUMBER = os.getenv("RECIPIENT_PHONE_NUMBER")
 
 # Default settings if no env (e.g. for local testing, fallback to local .env values if present)
-if not ERP_USERNAME or not ERP_PASSWORD:
-    # Try loading from local .env files
-    from dotenv import load_dotenv
-    from pathlib import Path
-    env_path = Path(__file__).parent.parent.parent / "INDIA" / "consignee-app" / ".env"
+# Try loading from local .env files
+from dotenv import load_dotenv
+from pathlib import Path
+env_path = Path("/Users/anwar/Antigravity-Related/ERP nxt Data collection/Invoice_Extractor_Tool/.env")
+if env_path.exists():
     load_dotenv(dotenv_path=env_path)
-    ERP_USERNAME = os.getenv("ERP_USERNAME")
-    ERP_PASSWORD = os.getenv("ERP_PASSWORD")
-    SUPABASE_URL = os.getenv("SUPABASE_URL")
-    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-    SENDER_EMAIL = os.getenv("SENDER_EMAIL")
-    SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
-    RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
-    WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
-    WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
-    RECIPIENT_PHONE_NUMBER = os.getenv("RECIPIENT_PHONE_NUMBER")
+
+# Assign variables from environment
+ERP_USERNAME = os.getenv("ERP_USERNAME")
+ERP_PASSWORD = os.getenv("ERP_PASSWORD")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SENDER_EMAIL = os.getenv("SENDER_EMAIL")
+SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
+RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
+WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
+WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+RECIPIENT_PHONE_NUMBER = os.getenv("RECIPIENT_PHONE_NUMBER")
 
 # Strip surrounding quotes from env variables (handles user paste errors in GitHub Secrets)
 def clean_env_var(val):
@@ -279,10 +282,20 @@ def fetch_supervisor_mappings():
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}"
         }
-        res = requests.get(url, headers=headers)
-        res.raise_for_status()
-        data = res.json()
-        print(f"Loaded {len(data)} supervisor mappings.")
+        # Include a timeout and retry mechanism for network resilience
+        for attempt in range(5):
+            try:
+                res = requests.get(url, headers=headers, timeout=15)
+                res.raise_for_status()
+                data = res.json()
+                print(f"Loaded {len(data)} supervisor mappings.")
+                break
+            except Exception as retry_err:
+                if attempt == 4:
+                    raise retry_err
+                backoff = (attempt + 1) * 5
+                print(f"Supervisor mapping fetch failed (attempt {attempt+1}/5): {retry_err}. Retrying in {backoff}s...", flush=True)
+                time.sleep(backoff)
         mapping = {}
         for item in data:
             name = item.get('supervisor_name')
@@ -303,10 +316,20 @@ def fetch_holidays():
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}"
         }
-        res = requests.get(url, headers=headers)
-        res.raise_for_status()
-        data = res.json()
-        print(f"Loaded {len(data)} holidays.")
+        # Include timeout and retries
+        for attempt in range(5):
+            try:
+                res = requests.get(url, headers=headers, timeout=15)
+                res.raise_for_status()
+                data = res.json()
+                print(f"Loaded {len(data)} holidays.")
+                break
+            except Exception as retry_err:
+                if attempt == 4:
+                    raise retry_err
+                backoff = (attempt + 1) * 5
+                print(f"Holiday fetch failed (attempt {attempt+1}/5): {retry_err}. Retrying in {backoff}s...", flush=True)
+                time.sleep(backoff)
         holidays_list = []
         for item in data:
             d_str = item.get('date')
@@ -381,6 +404,10 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
         browser = p.chromium.launch(headless=True)
         context = browser.new_context()
         page = context.new_page()
+        # Set a default timeout for all Playwright actions (30 seconds)
+        page.set_default_timeout(30000)
+        # Optional: set default navigation timeout
+        page.set_default_navigation_timeout(30000)
         
         page.on("console", lambda msg: print(f"Browser Console: {msg.text}"))
         page.on("pageerror", lambda err: print(f"Browser Page Error: {err}"))
@@ -594,6 +621,8 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 except Exception:
                     pass
                 page = context.new_page()
+                page.set_default_timeout(30000)
+                page.set_default_navigation_timeout(30000)
                 page.on("console", lambda msg: print(f"Browser Console: {msg.text}"))
                 page.on("pageerror", lambda err: print(f"Browser Page Error: {err}"))
                 
@@ -664,6 +693,12 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 if consignors:
                     print("Navigating to Bill Clear page for exports...", flush=True)
                     bill_clear_url = "https://eff.aadhocc.in/eff_2021/main/bill_clear/"
+                    checkpoint_file = os.path.join(DOWNLOAD_DIR, "bill_clear_checkpoint.json")
+                    processed_consignors = []
+                    if os.path.exists(checkpoint_file):
+                        with open(checkpoint_file, "r") as f:
+                            processed_consignors = json.load(f)
+                    
                     try:
                         page.goto(bill_clear_url)
                         page.wait_for_load_state("load")
@@ -698,6 +733,9 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                         to_date_bc = target_date.strftime("%d-%m-%Y")
                         
                         for cons_name in sorted(list(consignors)):
+                            if cons_name in processed_consignors:
+                                continue
+                                
                             cons_name_upper = cons_name.strip().upper()
                             opt_val = consignor_id_map.get(cons_name_upper)
                             if not opt_val:
@@ -742,6 +780,9 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                                 bc_file_path = os.path.join(DOWNLOAD_DIR, f"bill_clear_{opt_val}.xlsx")
                                 bc_download.save_as(bc_file_path)
                                 print(f"    Saved Bill Clear to: {bc_file_path}", flush=True)
+                                processed_consignors.append(cons_name)
+                                with open(checkpoint_file, "w") as f:
+                                    json.dump(processed_consignors, f)
                             except Exception as bc_err:
                                 print(f"    Failed to download Bill Clear for '{cons_name}': {bc_err}", flush=True)
                     except Exception as bc_page_err:
@@ -751,8 +792,15 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 if gdms:
                     print(f"Scraping print layouts for {len(gdms)} active GDMs using Playwright...", flush=True)
                     gdm_details = {}
+                    gdm_checkpoint = os.path.join(DOWNLOAD_DIR, "gdm_checkpoint.json")
+                    if os.path.exists(gdm_checkpoint):
+                        with open(gdm_checkpoint, "r") as f:
+                            gdm_details = json.load(f)
                     
                     for gdm_no in sorted(list(gdms)):
+                        if gdm_no in gdm_details:
+                            continue
+                            
                         gdm_url = f"https://eff.aadhocc.in/eff_2021/main/effdespatch/view/{gdm_no}"
                         print(f"  Scraping GDM {gdm_no} print layout: {gdm_url}...", flush=True)
                         try:
@@ -818,11 +866,6 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                                 
                                 gdm_details[gdm_no] = lr_entries
                                 print(f"    Scraped GDM {gdm_no} successfully: {len(lr_entries)} LRs found.", flush=True)
-                                if len(lr_entries) == 0:
-                                    body = soup.find("body")
-                                    body_text = body.get_text() if body else ""
-                                    body_clean = " ".join(body_text.split())
-                                    print(f"    [DEBUG] GDM {gdm_no} Body text: {body_clean[:1000]}", flush=True)
                             else:
                                 print(f"    No table found on view page for GDM {gdm_no}.", flush=True)
                         except Exception as gdm_err:
@@ -2417,7 +2460,113 @@ def main():
     elif args.mode == "reconcile":
         # Download reports needed for reconciliation (raw LR, raw Despatch, bill clear reports, and GDM details)
         lr_file, despatch_file, from_date, to_date = download_erp_reports(mode="reconcile", from_override=args.from_date, to_override=args.to_date)
-        print("Reconciliation downloads completed successfully.")
+        print("Reconciliation downloads completed successfully. Commencing discrepancy analysis...", flush=True)
+        
+        # Invoke freight calculation engine
+        import sys
+        sys.path.append("/Users/anwar/Antigravity-Related/EFF PARCEL FREIGHT WORKING")
+        from freight_calculator import process_freight_data
+        
+        # Target Google Sheet Title
+        sheet_title = "Topay & Paid Parcel Billing"
+        creds_path = "/Users/anwar/Antigravity-Related/ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
+        
+        # Load local excel or fetch from Google Sheet dynamically
+        rates_excel = "/Users/anwar/Antigravity-Related/EFF PARCEL FREIGHT WORKING/All Consignors - RATES Combined.xlsx"
+        
+        try:
+            print("Running freight calculation engine...", flush=True)
+            result_df, summary_stats, df_whole = process_freight_data(lr_file, rates_excel)
+            print(f"Calculations complete: {summary_stats}", flush=True)
+            
+            # Format dataframe for google sheets transfer (replace nan values, format headers)
+            result_df = result_df.fillna("")
+            num_cols = ['WEIGHT', 'Existing ERP Total', 'Calculated Total Freight', 'Account Pay', 'To Pay', 'Paid', 
+                        'Calculated Stationary Charge', 'Calculated Unloading Charge', 'Grand Total with UL', 'Amount Difference']
+            for col in result_df.columns:
+                if col in num_cols:
+                    result_df[col] = pd.to_numeric(result_df[col], errors='coerce').apply(lambda x: f"{x:.2f}" if pd.notna(x) else "")
+                else:
+                    result_df[col] = result_df[col].astype(str)
+            # Prepare raw datasets for Despatch Data and LR Data tabs
+            df_despatch_raw = pd.DataFrame()
+            if despatch_file and os.path.exists(despatch_file):
+                try:
+                    df_despatch_raw = pd.read_excel(despatch_file).fillna("")
+                    for col in df_despatch_raw.columns:
+                        df_despatch_raw[col] = df_despatch_raw[col].astype(str)
+                except Exception:
+                    pass
+
+            df_lr_raw = pd.DataFrame()
+            if lr_file and os.path.exists(lr_file):
+                try:
+                    df_lr_raw = pd.read_excel(lr_file).fillna("")
+                    for col in df_lr_raw.columns:
+                        df_lr_raw[col] = df_lr_raw[col].astype(str)
+                except Exception:
+                    pass
+
+            # Filter payment buckets
+            df_topay = result_df[pd.to_numeric(result_df['To Pay'], errors='coerce') > 0].copy()
+            df_paid = result_df[pd.to_numeric(result_df['Paid'], errors='coerce') > 0].copy()
+
+            target_tabs = [
+                ("Reconciled Audit", result_df),
+                ("All Data", result_df),
+                ("Despatch Data", df_despatch_raw),
+                ("LR Data", df_lr_raw),
+                ("Topay", df_topay),
+                ("Paid", df_paid)
+            ]
+
+            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
+            client = gspread.authorize(creds)
+            sh = client.open(sheet_title)
+
+            for tab_name, dataset_df in target_tabs:
+                if dataset_df.empty and tab_name in ("Topay", "Paid"):
+                    print(f"Skipping empty dataset for tab '{tab_name}'...", flush=True)
+                    continue
+
+                data_to_sync = [dataset_df.columns.tolist()] + dataset_df.values.tolist()
+                print(f"Syncing {len(data_to_sync)-1} rows to tab '{tab_name}' in '{sheet_title}'...", flush=True)
+
+                try:
+                    ws = sh.worksheet(tab_name)
+                    ws.clear()
+                    if ws.row_count < len(data_to_sync) + 100:
+                        ws.resize(rows=len(data_to_sync) + 100, cols=max(30, len(dataset_df.columns)))
+                except gspread.exceptions.WorksheetNotFound:
+                    ws = sh.add_worksheet(title=tab_name, rows=str(max(1000, len(data_to_sync)+100)), cols=str(max(30, len(dataset_df.columns))))
+
+                chunk_size = 5000
+                for i in range(0, len(data_to_sync), chunk_size):
+                    chunk = data_to_sync[i:i+chunk_size]
+                    start_row = i + 1
+                    ws.update(range_name=f"A{start_row}", values=chunk)
+                print(f"  ✅ Tab '{tab_name}' synced ({len(data_to_sync)-1} rows).", flush=True)
+
+            print("🎉 Success! Reconciled Audit, All Data, Topay, and Paid tabs synced to Google Sheets.", flush=True)
+
+            # Ensure master rate sheet tabs remain hidden
+            try:
+                rate_sheet_names = pd.ExcelFile(rates_excel).sheet_names
+                for sname in rate_sheet_names:
+                    try:
+                        rate_ws = sh.worksheet(sname)
+                        sh.batch_update({'requests': [{'updateSheetProperties': {'properties': {'sheetId': rate_ws.id, 'hidden': True}, 'fields': 'hidden'}}]})
+                    except Exception:
+                        pass
+                print("🔒 Master rate sheets visibility updated (hidden).", flush=True)
+            except Exception as hide_err:
+                print(f"Note: Could not hide rate tabs: {hide_err}", flush=True)
+            
+        except Exception as audit_err:
+            print(f"❌ Error during reconciliation/sync flow: {audit_err}", flush=True)
+            import traceback
+            traceback.print_exc()
 
 if __name__ == "__main__":
     main()
