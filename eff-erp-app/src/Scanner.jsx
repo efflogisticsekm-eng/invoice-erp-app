@@ -42,6 +42,8 @@ export default function Scanner({ user, onBack }) {
   const [userRole, setUserRole] = useState('User');
   const [userProfile, setUserProfile] = useState(null);
   const [compressedBase64, setCompressedBase64] = useState('');
+  const [rawImage, setRawImage] = useState(null);
+  const [crop, setCrop] = useState({ top: 5, bottom: 5, left: 5, right: 5 });
   
   // Vehicles
   const [vehiclesList, setVehiclesList] = useState([]);
@@ -101,48 +103,110 @@ export default function Scanner({ user, onBack }) {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
       setFile(selectedFile);
-      setPreview(URL.createObjectURL(selectedFile));
-      // Auto-scan when a file is selected!
-      processOCR(selectedFile);
+      
+      // Load raw image for cropper
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setRawImage(event.target.result);
+        setCrop({ top: 5, bottom: 5, left: 5, right: 5 }); // Reset default crop bounds
+      };
+      reader.readAsDataURL(selectedFile);
     }
   };
 
-  const processOCR = async (fileBlob) => {
+  const handleCropSubmit = () => {
+    if (!rawImage) return;
+    setLoading(true);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        
+        // Calculate coordinates based on raw image size
+        const x = (crop.left / 100) * img.width;
+        const y = (crop.top / 100) * img.height;
+        const w = ((100 - crop.left - crop.right) / 100) * img.width;
+        const h = ((100 - crop.top - crop.bottom) / 100) * img.height;
+
+        canvas.width = w;
+        canvas.height = h;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
+
+        // Perform final compress to keep database payload lightweight (~150kb)
+        const MAX_WIDTH = 800;
+        let targetW = w;
+        let targetH = h;
+        if (w > MAX_WIDTH) {
+          targetH = Math.round((h * MAX_WIDTH) / w);
+          targetW = MAX_WIDTH;
+        }
+
+        const compressCanvas = document.createElement('canvas');
+        compressCanvas.width = targetW;
+        compressCanvas.height = targetH;
+        const compressCtx = compressCanvas.getContext('2d');
+        compressCtx.drawImage(canvas, 0, 0, targetW, targetH);
+
+        const croppedBase64 = compressCanvas.toDataURL('image/jpeg', 0.6);
+        
+        setPreview(croppedBase64);
+        setCompressedBase64(croppedBase64);
+        setRawImage(null); // Close crop editor
+        
+        // Start OCR using the cropped base64 directly
+        processOCR(croppedBase64, true);
+      } catch (err) {
+        console.error("Crop error:", err);
+        alert("Failed to crop image: " + err.message);
+        setLoading(false);
+      }
+    };
+    img.src = rawImage;
+  };
+
+  const processOCR = async (fileInput, isBase64 = false) => {
     try {
       setLoading(true);
       
-      // Compress and get base64 Data URL to keep DB payload light and fast
-      const compressAndGetBase64 = (fileObj) => {
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            const img = new Image();
-            img.onload = () => {
-              const canvas = document.createElement('canvas');
-              const MAX_WIDTH = 800; // max size to compress to ~150kb
-              let width = img.width;
-              let height = img.height;
+      let base64Image;
+      if (isBase64) {
+        base64Image = fileInput.split(',')[1] || fileInput;
+      } else {
+        // Fallback for regular upload button click without cropper
+        const compressAndGetBase64 = (fileObj) => {
+          return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const MAX_WIDTH = 800;
+                let width = img.width;
+                let height = img.height;
 
-              if (width > MAX_WIDTH) {
-                height = Math.round((height * MAX_WIDTH) / width);
-                width = MAX_WIDTH;
-              }
+                if (width > MAX_WIDTH) {
+                  height = Math.round((height * MAX_WIDTH) / width);
+                  width = MAX_WIDTH;
+                }
 
-              canvas.width = width;
-              canvas.height = height;
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(img, 0, 0, width, height);
-              resolve(canvas.toDataURL('image/jpeg', 0.6));
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/jpeg', 0.6));
+              };
+              img.src = event.target.result;
             };
-            img.src = event.target.result;
-          };
-          reader.readAsDataURL(fileObj);
-        });
-      };
+            reader.readAsDataURL(fileObj);
+          });
+        };
 
-      const base64DataUrl = await compressAndGetBase64(fileBlob);
-      setCompressedBase64(base64DataUrl);
-      const base64Image = base64DataUrl.split(',')[1];
+        const base64DataUrl = await compressAndGetBase64(fileInput);
+        setCompressedBase64(base64DataUrl);
+        base64Image = base64DataUrl.split(',')[1];
+      }
       
       const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
       if (!apiKey) {
@@ -353,6 +417,100 @@ export default function Scanner({ user, onBack }) {
     const total = (parseFloat(c) || 0) + (parseFloat(s) || 0) + (parseFloat(i) || 0);
     setGstAmount(total > 0 ? total.toString() : '');
   };
+
+  if (rawImage) {
+    return (
+      <div style={{ padding: '15px', display: 'flex', flexDirection: 'column', height: '100vh', boxSizing: 'border-box', background: '#111827', color: 'white' }}>
+        <h2 style={{ fontSize: '18px', textAlign: 'center', margin: '0 0 5px 0' }}>Crop Bill Document</h2>
+        <p style={{ fontSize: '11px', color: '#9ca3af', textAlign: 'center', margin: '0 0 10px 0' }}>
+          Adjust the sliders to crop out background and borders.
+        </p>
+
+        <div style={{ position: 'relative', flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', background: '#000', borderRadius: '8px' }}>
+          <img 
+            src={rawImage} 
+            alt="To crop" 
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+          />
+
+          {/* Semi-transparent overlays */}
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: `${crop.top}%`, background: 'rgba(0,0,0,0.6)' }} />
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${crop.bottom}%`, background: 'rgba(0,0,0,0.6)' }} />
+          <div style={{ position: 'absolute', top: `${crop.top}%`, bottom: `${crop.bottom}%`, left: 0, width: `${crop.left}%`, background: 'rgba(0,0,0,0.6)' }} />
+          <div style={{ position: 'absolute', top: `${crop.top}%`, bottom: `${crop.bottom}%`, right: 0, width: `${crop.right}%`, background: 'rgba(0,0,0,0.6)' }} />
+
+          {/* Boundaries */}
+          <div style={{
+            position: 'absolute',
+            top: `${crop.top}%`,
+            bottom: `${crop.bottom}%`,
+            left: `${crop.left}%`,
+            right: `${crop.right}%`,
+            border: '2px dashed #4f46e5',
+            boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.1)'
+          }} />
+        </div>
+
+        {/* Controls */}
+        <div style={{ background: '#1f2937', padding: '12px', borderRadius: '8px', marginTop: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px' }}>
+            <div>
+              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '2px' }}>Top Crop: {crop.top}%</label>
+              <input 
+                type="range" min="0" max="45" value={crop.top} 
+                onChange={(e) => setCrop(prev => ({ ...prev, top: parseInt(e.target.value) }))}
+                style={{ width: '100%', accentColor: '#4f46e5', margin: 0 }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '2px' }}>Bottom Crop: {crop.bottom}%</label>
+              <input 
+                type="range" min="0" max="45" value={crop.bottom} 
+                onChange={(e) => setCrop(prev => ({ ...prev, bottom: parseInt(e.target.value) }))}
+                style={{ width: '100%', accentColor: '#4f46e5', margin: 0 }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '2px' }}>Left Crop: {crop.left}%</label>
+              <input 
+                type="range" min="0" max="45" value={crop.left} 
+                onChange={(e) => setCrop(prev => ({ ...prev, left: parseInt(e.target.value) }))}
+                style={{ width: '100%', accentColor: '#4f46e5', margin: 0 }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '2px' }}>Right Crop: {crop.right}%</label>
+              <input 
+                type="range" min="0" max="45" value={crop.right} 
+                onChange={(e) => setCrop(prev => ({ ...prev, right: parseInt(e.target.value) }))}
+                style={{ width: '100%', accentColor: '#4f46e5', margin: 0 }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+            <button 
+              type="button"
+              style={{ flex: 1, padding: '10px', background: '#4f46e5', border: 'none', color: 'white', fontWeight: 'bold', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
+              onClick={handleCropSubmit}
+            >
+              Crop & Scan AI
+            </button>
+            <button 
+              type="button"
+              style={{ flex: 1, padding: '10px', background: '#374151', border: 'none', color: '#d1d5db', fontWeight: 'bold', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
+              onClick={() => {
+                setRawImage(null);
+                setFile(null);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: '20px' }}>
