@@ -13,7 +13,10 @@ export default function Scanner({ user, onBack }) {
   const [subCategory, setSubCategory] = useState(''); // Stores 'Maintenance Type' for Vehicle Maintenance
   
   const [amount, setAmount] = useState('');
-  const [gstAmount, setGstAmount] = useState('');
+  const [cgstAmount, setCgstAmount] = useState('');
+  const [sgstAmount, setSgstAmount] = useState('');
+  const [igstAmount, setIgstAmount] = useState('');
+  const [gstAmount, setGstAmount] = useState(''); // GST Total
   const [totalAmount, setTotalAmount] = useState('');
   const [toWhom, setToWhom] = useState('');
   
@@ -108,6 +111,8 @@ export default function Scanner({ user, onBack }) {
         return;
       }
 
+      const vehicleListString = vehiclesList.map(v => v.vehicle_no).join(', ');
+
       console.log("Sending image to OpenAI Vision API...");
       
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -124,7 +129,7 @@ export default function Scanner({ user, onBack }) {
               content: [
                 {
                   type: "text",
-                  text: `Extract details from this receipt/invoice for the expense category: "${mainCategory === 'Other' ? otherItem : mainCategory}". Return ONLY a valid JSON object with the keys: 'partyName' (the name of the shop, vendor, or workshop), 'totalAmount' (the grand total amount as a number), 'gstAmount' (the total tax/GST amount as a number, if none found return 0), and 'subTotal' (the amount before tax). Do not include markdown formatting or any other text, just the raw JSON.`
+                  text: `Extract details from this receipt/invoice for the expense category: "${mainCategory === 'Other' ? otherItem : mainCategory}". Return ONLY a valid JSON object with the keys: 'partyName' (the name of the shop, vendor, or workshop), 'totalAmount' (the grand total amount as a number), 'cgst' (the CGST amount as a number, or 0), 'sgst' (the SGST amount as a number, or 0), 'igst' (the IGST amount as a number, or 0), 'gstTotal' (the total tax/GST amount as a number. If only a single GST amount is present, put it here, otherwise sum the CGST, SGST, IGST into this), and 'subTotal' (the amount before tax). Also extract 'vehicleNo' (Look for a vehicle registration number in the bill. Here are the valid vehicle numbers: ${vehicleListString}. Match ignoring spaces, dashes, or special characters. Return the exact matching vehicle number from the list if found). Do not include markdown formatting or any other text, just the raw JSON.`
                 },
                 {
                   type: "image_url",
@@ -163,6 +168,10 @@ export default function Scanner({ user, onBack }) {
         else setToWhom(extracted.partyName);
       }
       
+      if (extracted.vehicleNo) {
+        setVehicleNo(extracted.vehicleNo);
+      }
+
       const parseAmt = (val) => {
         if (!val) return 0;
         if (typeof val === 'number') return val;
@@ -170,14 +179,25 @@ export default function Scanner({ user, onBack }) {
       };
 
       const tAmt = parseAmt(extracted.totalAmount);
-      const gAmt = parseAmt(extracted.gstAmount);
-      const sAmt = parseAmt(extracted.subTotal);
+      const cAmt = parseAmt(extracted.cgst);
+      const sAmt = parseAmt(extracted.sgst);
+      const iAmt = parseAmt(extracted.igst);
+      let gAmt = parseAmt(extracted.gstTotal);
+      const sTotalAmt = parseAmt(extracted.subTotal);
+
+      if (cAmt) setCgstAmount(cAmt.toString());
+      if (sAmt) setSgstAmount(sAmt.toString());
+      if (iAmt) setIgstAmount(iAmt.toString());
+
+      if (!gAmt && (cAmt || sAmt || iAmt)) {
+        gAmt = cAmt + sAmt + iAmt;
+      }
 
       if (tAmt) setTotalAmount(tAmt.toString());
       if (gAmt) setGstAmount(gAmt.toString());
       
-      if (sAmt) {
-        setAmount(sAmt.toString());
+      if (sTotalAmt) {
+        setAmount(sTotalAmt.toString());
       } else if (tAmt && gAmt) {
         setAmount((tAmt - gAmt).toString());
       } else {
@@ -265,7 +285,10 @@ export default function Scanner({ user, onBack }) {
           details: {
             vehicleNo, odometerReading, workshopName, paymentType, putDescription, toWhom,
             lrNo, lrDate, totalWeight, destination, approximateKm, vehicleType, 
-            vehicleRent, unionCharges, rentAdvance, vendor
+            vehicleRent, unionCharges, rentAdvance, vendor,
+            cgstAmount: parseFloat(cgstAmount) || 0,
+            sgstAmount: parseFloat(sgstAmount) || 0,
+            igstAmount: parseFloat(igstAmount) || 0
           }
         })
       });
@@ -280,6 +303,11 @@ export default function Scanner({ user, onBack }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const updateGstTotal = (c, s, i) => {
+    const total = (parseFloat(c) || 0) + (parseFloat(s) || 0) + (parseFloat(i) || 0);
+    setGstAmount(total > 0 ? total.toString() : '');
   };
 
   return (
@@ -497,9 +525,24 @@ export default function Scanner({ user, onBack }) {
             }
             if (showGst) {
               return (
-                <div className="input-group">
-                  <label>GST Amount</label>
-                  <input type="number" className="input-field" value={gstAmount} onChange={e => setGstAmount(e.target.value)} required />
+                <div style={{ background: '#f8f9fa', padding: '15px', borderRadius: '8px', marginBottom: '15px', border: '1px dashed #ccc' }}>
+                  <h4 style={{ margin: '0 0 10px 0', color: 'var(--primary)', fontSize: '14px' }}>GST Breakdown</h4>
+                  <div className="input-group">
+                    <label>CGST</label>
+                    <input type="number" className="input-field" value={cgstAmount} onChange={e => { setCgstAmount(e.target.value); updateGstTotal(e.target.value, sgstAmount, igstAmount); }} />
+                  </div>
+                  <div className="input-group">
+                    <label>SGST</label>
+                    <input type="number" className="input-field" value={sgstAmount} onChange={e => { setSgstAmount(e.target.value); updateGstTotal(cgstAmount, e.target.value, igstAmount); }} />
+                  </div>
+                  <div className="input-group">
+                    <label>IGST</label>
+                    <input type="number" className="input-field" value={igstAmount} onChange={e => { setIgstAmount(e.target.value); updateGstTotal(cgstAmount, sgstAmount, e.target.value); }} />
+                  </div>
+                  <div className="input-group" style={{ marginBottom: 0 }}>
+                    <label style={{ fontWeight: 'bold' }}>Total GST Amount</label>
+                    <input type="number" className="input-field" value={gstAmount} onChange={e => setGstAmount(e.target.value)} required />
+                  </div>
                 </div>
               );
             }
