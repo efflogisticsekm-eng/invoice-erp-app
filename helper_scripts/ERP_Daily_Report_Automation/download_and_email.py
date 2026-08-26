@@ -41,11 +41,11 @@ env_path = Path("/Users/anwar/Antigravity-Related/ERP nxt Data collection/Invoic
 if env_path.exists():
     load_dotenv(dotenv_path=env_path)
 
-# Assign variables from environment
-ERP_USERNAME = os.getenv("ERP_USERNAME")
-ERP_PASSWORD = os.getenv("ERP_PASSWORD")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# Assign variables from environment (with default fallbacks for local runs)
+ERP_USERNAME = os.getenv("ERP_USERNAME") or "effedathala"
+ERP_PASSWORD = os.getenv("ERP_PASSWORD") or "@eff2019"
+SUPABASE_URL = os.getenv("SUPABASE_URL") or "https://ktxhjnhghgzcyokbcsoe.supabase.co"
+SUPABASE_KEY = os.getenv("SUPABASE_KEY") or "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0eGhqbmhnaGd6Y3lva2Jjc29lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDYwNTI4MDAsImV4cCI6MjA2MTYyODgwMH0.J1k6v6bQ9L57y3R8k6X-0j9p4Q7R8k6X-0j9p4Q7R8k"
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
@@ -420,26 +420,20 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
             page.goto(main_login_url)
             page.wait_for_load_state("load")
             
-            if page.locator("#login_user_id").count() > 0 or "login" in page.url.lower():
+            if page.locator("#login_user_id, input[name='user_id'], input[type='text']").count() > 0 or "login" in page.url.lower():
                 print("Performing ERP Login...")
-                if page.locator("#login_user_id").count() > 0:
-                    page.fill("#login_user_id", ERP_USERNAME)
-                else:
-                    page.fill("input[type='text']", ERP_USERNAME)
-                    
-                if page.locator("#login_password").count() > 0:
-                    page.fill("#login_password", ERP_PASSWORD)
-                else:
-                    page.fill("input[type='password']", ERP_PASSWORD)
-                    
-                submit_button = page.locator("form#login_form button[type='submit'], button[type='submit']")
+                user_input = page.locator("#login_user_id, input[name='user_id'], input[type='text']").first
+                pass_input = page.locator("#login_password, input[name='password'], input[type='password']").first
+                user_input.fill(ERP_USERNAME)
+                pass_input.fill(ERP_PASSWORD)
+                
+                submit_button = page.locator("form#login_form button[type='submit'], button[type='submit'], input[type='submit']")
                 if submit_button.count() > 0:
                     submit_button.first.click()
                 else:
                     page.keyboard.press("Enter")
                     
-                page.wait_for_timeout(2000)
-                # Wait for navigation to complete (expecting to leave the login page)
+                page.wait_for_timeout(3000)
                 try:
                     page.wait_for_url(lambda u: "/login" not in u, timeout=15000)
                     page.wait_for_load_state("load")
