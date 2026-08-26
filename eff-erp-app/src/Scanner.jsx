@@ -291,6 +291,9 @@ export default function Scanner({ user, onBack }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: user.id,
+          user_email: user.email,
+          user_role: userRole,
+          user_branch: userProfile?.branch || null,
           category: finalCategory,
           sub_category: subCategory || null,
           amount: parseFloat(amount) || 0,
@@ -460,6 +463,7 @@ export default function Scanner({ user, onBack }) {
                   <option value="Insurance">Insurance</option>
                   <option value="Tyre maintenance">Tyre maintenance</option>
                   <option value="Tyre Purchase">Tyre Purchase</option>
+                  <option value="DEF(Adblue)">DEF(Adblue)</option>
                 </select>
               </div>
               <div className="input-group">
