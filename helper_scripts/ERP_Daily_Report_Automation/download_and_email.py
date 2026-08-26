@@ -387,18 +387,10 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
     elif mode == "reconcile":
         holidays_list = fetch_holidays()
         yesterday = target_date - timedelta(days=1)
-        # Look back past Sundays and marked holidays to find last working day
-        lookback = target_date - timedelta(days=1)
-        while lookback.weekday() == 6 or lookback.strftime("%Y-%m-%d") in holidays_list:
-            lookback -= timedelta(days=1)
-            
-        if target_date.weekday() == 0:  # Monday run: Collect Saturday 00:00:01 to Sunday 24:00:00
-            saturday = target_date - timedelta(days=2)
-            from_date_str = from_override if from_override else saturday.strftime("%Y-%m-%d")
-            to_date_str = to_override if to_override else yesterday.strftime("%Y-%m-%d")
-        else:
-            from_date_str = from_override if from_override else lookback.strftime("%Y-%m-%d")
-            to_date_str = to_override if to_override else yesterday.strftime("%Y-%m-%d")
+        # 52-Day Rolling Window: Previous Month 21st -> Current Month -> Next Month 10th
+        rolling_start = target_date - timedelta(days=52)
+        from_date_str = from_override if from_override else rolling_start.strftime("%Y-%m-%d")
+        to_date_str = to_override if to_override else yesterday.strftime("%Y-%m-%d")
         
     print(f"Date range resolved: fromDate={from_date_str}, toDate={to_date_str}")
     
@@ -2489,6 +2481,11 @@ def main():
             result_df, summary_stats, df_whole = process_freight_data(lr_file, rates_excel)
             print(f"Calculations complete: {summary_stats}", flush=True)
             
+            # Filter result_df to maintain 52-Day Rolling Window
+            result_df['parsed_dt'] = pd.to_datetime(result_df['DATE'], format='%d/%m/%Y', errors='coerce')
+            cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=52)
+            result_df = result_df[result_df['parsed_dt'].isna() | (result_df['parsed_dt'] >= cutoff_date)].copy().drop(columns=['parsed_dt'])
+
             # Format dataframe for google sheets transfer (replace nan values, format headers)
             result_df = result_df.fillna("")
             num_cols = ['WEIGHT', 'Existing ERP Total', 'Calculated Total Freight', 'Account Pay', 'To Pay', 'Paid', 
@@ -2498,24 +2495,41 @@ def main():
                     result_df[col] = pd.to_numeric(result_df[col], errors='coerce').apply(lambda x: f"{x:.2f}" if pd.notna(x) else "")
                 else:
                     result_df[col] = result_df[col].astype(str)
-            # Prepare raw datasets for Despatch Data and LR Data tabs
-            df_despatch_raw = pd.DataFrame()
-            if despatch_file and os.path.exists(despatch_file):
-                try:
-                    df_despatch_raw = pd.read_excel(despatch_file).fillna("")
-                    for col in df_despatch_raw.columns:
-                        df_despatch_raw[col] = df_despatch_raw[col].astype(str)
-                except Exception:
-                    pass
 
-            df_lr_raw = pd.DataFrame()
-            if lr_file and os.path.exists(lr_file):
+            def robust_read_df(filepath):
+                if not filepath or not os.path.exists(filepath):
+                    return pd.DataFrame()
                 try:
-                    df_lr_raw = pd.read_excel(lr_file).fillna("")
-                    for col in df_lr_raw.columns:
-                        df_lr_raw[col] = df_lr_raw[col].astype(str)
+                    return pd.read_excel(filepath)
                 except Exception:
-                    pass
+                    try:
+                        dfs = pd.read_html(filepath)
+                        if dfs: return dfs[0]
+                    except Exception:
+                        try: return pd.read_csv(filepath)
+                        except Exception: pass
+                return pd.DataFrame()
+
+            # Prepare raw datasets for Despatch Data and LR Data tabs
+            df_despatch_raw = robust_read_df(despatch_file).fillna("")
+            if not df_despatch_raw.empty:
+                for col in df_despatch_raw.columns:
+                    if 'DATE' in str(col).upper():
+                        df_despatch_raw['parsed_dt'] = pd.to_datetime(df_despatch_raw[col], errors='coerce')
+                        df_despatch_raw = df_despatch_raw[df_despatch_raw['parsed_dt'].isna() | (df_despatch_raw['parsed_dt'] >= cutoff_date)].drop(columns=['parsed_dt'])
+                        break
+                for col in df_despatch_raw.columns:
+                    df_despatch_raw[col] = df_despatch_raw[col].astype(str)
+
+            df_lr_raw = robust_read_df(lr_file).fillna("")
+            if not df_lr_raw.empty:
+                for col in df_lr_raw.columns:
+                    if 'DATE' in str(col).upper():
+                        df_lr_raw['parsed_dt'] = pd.to_datetime(df_lr_raw[col], errors='coerce')
+                        df_lr_raw = df_lr_raw[df_lr_raw['parsed_dt'].isna() | (df_lr_raw['parsed_dt'] >= cutoff_date)].drop(columns=['parsed_dt'])
+                        break
+                for col in df_lr_raw.columns:
+                    df_lr_raw[col] = df_lr_raw[col].astype(str)
 
             # Filter payment buckets
             df_topay = result_df[pd.to_numeric(result_df['To Pay'], errors='coerce') > 0].copy()
