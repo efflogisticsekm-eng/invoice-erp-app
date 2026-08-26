@@ -535,12 +535,14 @@ export default function Scanner({ user, onBack }) {
               {(() => {
                 const MAIN_CATEGORIES = ['Vehicle Rent', 'Vehicle Rent Balance Payment', 'Vehicle Maintenance', 'Other'];
                 const PERMISSIONS = {
+                  'Vehicle Rent': { blocked: ['Asst VM', 'VM', 'VM(Vehicle Manager)', 'FM', 'HR', 'MD', 'CEO', 'RM', 'Asst.HR'] },
+                  'Vehicle Rent Balance Payment': { blocked: ['Asst VM', 'VM', 'VM(Vehicle Manager)', 'FM', 'HR', 'MD', 'CEO', 'RM', 'Asst.HR'] },
                   'default': { blocked: ['Asst VM', 'Asst.HR', 'HR'] }
                 };
 
                 return MAIN_CATEGORIES.filter(cat => {
-                  if (cat === 'Other') return true; // Other is always visible if any sub-item is visible (simplification)
-                  const rule = PERMISSIONS['default'];
+                  if (cat === 'Other') return true; // Other is always visible if any sub-item is visible
+                  const rule = PERMISSIONS[cat] || PERMISSIONS['default'];
                   const nameOrRole = userProfile?.full_name || '';
                   return !rule.blocked.includes(userRole) && !rule.blocked.includes(nameOrRole);
                 }).map(cat => (
