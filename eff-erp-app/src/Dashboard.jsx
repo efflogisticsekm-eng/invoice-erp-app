@@ -4,10 +4,11 @@ import { LogOut, Camera, FileText, CheckSquare } from 'lucide-react';
 import Scanner from './Scanner';
 import Approvals from './Approvals';
 import PendingOthers from './PendingOthers';
+import MyRequests from './MyRequests';
 
 export default function Dashboard({ user, onLogout }) {
   const [profile, setProfile] = useState(null);
-  const [view, setView] = useState('dashboard'); // 'dashboard', 'scanner', 'approvals', 'pending_others'
+  const [view, setView] = useState('dashboard'); // 'dashboard', 'scanner', 'approvals', 'pending_others', 'my_requests'
   
   useEffect(() => {
     fetchProfile();
@@ -37,6 +38,9 @@ export default function Dashboard({ user, onLogout }) {
   }
   if (view === 'pending_others') {
     return <PendingOthers user={user} profile={profile} onBack={() => setView('dashboard')} />;
+  }
+  if (view === 'my_requests') {
+    return <MyRequests user={user} profile={profile} onBack={() => setView('dashboard')} />;
   }
 
   return (
@@ -103,7 +107,7 @@ export default function Dashboard({ user, onLogout }) {
           <button 
             className="dashboard-grid-btn"
             style={{ gridColumn: 'span 2' }}
-            onClick={() => alert('My Requests coming soon!')}
+            onClick={() => setView('my_requests')}
           >
             My Requests
           </button>

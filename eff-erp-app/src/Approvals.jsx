@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { CheckCircle, XCircle, Camera } from 'lucide-react';
+import { CheckCircle, XCircle, Camera, HelpCircle } from 'lucide-react';
 
 export default function Approvals({ user, profile, onBack }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [activeRemarksReq, setActiveRemarksReq] = useState(null);
+  const [remarksText, setRemarksText] = useState('');
 
   useEffect(() => {
     fetchRequests();
@@ -77,13 +79,15 @@ export default function Approvals({ user, profile, onBack }) {
         nextLevel = nextLevelRaw;
       }
 
-      // Update the request
+      // Update the request - only update current_level if it's not fully approved
+      const updateData = { status: newStatus };
+      if (newStatus !== 'Approved') {
+        updateData.current_level = nextLevel;
+      }
+      
       const { error } = await supabase
         .from('expense_requests')
-        .update({ 
-          current_level: nextLevel,
-          status: newStatus
-        })
+        .update(updateData)
         .eq('id', request.id);
 
       if (error) throw error;
@@ -98,9 +102,6 @@ export default function Approvals({ user, profile, onBack }) {
       // TRIGGER WEBHOOK IF FULLY APPROVED
       if (newStatus === 'Approved') {
         try {
-          // Send to local proxy API or directly. Since this is client side, we can just fetch the Google script directly
-          // Assuming the user will deploy the App Script and paste the URL here. 
-          // For now, we mock the fetch or use a placeholder URL.
           const webhookUrl = localStorage.getItem('google_webhook_url');
           if (webhookUrl) {
             await fetch(webhookUrl, {
@@ -133,11 +134,28 @@ export default function Approvals({ user, profile, onBack }) {
     }
   };
 
-  const handleReject = async (request) => {
+  const handleReject = async (request, remarks) => {
     try {
+      const updatedDetails = {
+        ...(request.details || {}),
+        remarksHistory: [
+          ...(request.details?.remarksHistory || []),
+          {
+            role: profile.role,
+            name: profile.full_name,
+            date: new Date().toISOString(),
+            type: 'Reject',
+            text: remarks
+          }
+        ]
+      };
+
       const { error } = await supabase
         .from('expense_requests')
-        .update({ status: 'Rejected' })
+        .update({ 
+          status: 'Rejected',
+          details: updatedDetails
+        })
         .eq('id', request.id);
 
       if (error) throw error;
@@ -149,6 +167,74 @@ export default function Approvals({ user, profile, onBack }) {
       });
 
       alert('Request Rejected');
+      fetchRequests();
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  };
+
+  const handleClarification = async (request, remarks) => {
+    try {
+      const computePreviousLevel = (cat, subCat, currentRole) => {
+        let chain = [];
+        if (cat === 'Vehicle Maintenance') {
+          if (subCat === 'Accident' || subCat === 'Brake down') {
+            chain = ['VM', 'FM', 'CEO', 'MD'];
+          } else {
+            chain = ['VM', 'FM', 'MD'];
+          }
+        } else if (cat === 'Vehicle Rent' || cat === 'Vehicle Rent Balance Payment') {
+          chain = ['RM', 'FM', 'MD'];
+        } else if (cat === 'Traveling Exp' || cat === 'Hotel Rooms' || cat === 'Uniform' || cat === 'Bonnus' || cat === 'Man Power out sourse') {
+          chain = ['RM', 'HR', 'FM', 'CEO', 'MD'];
+        } else if (cat === 'Stationary Purchase' || cat === 'Telephone Bill' || cat === 'Internet Bill' || cat === 'Staff Accomodation Rent' || cat === 'Ware house Rent' || cat === 'Union Charge' || cat === 'Petty Cash') {
+          chain = ['RM', 'FM', 'CEO', 'MD'];
+        } else if (cat === 'Office Rent' || cat === 'Subscription' || cat === 'Salary') {
+          chain = ['FM', 'CEO', 'MD'];
+        } else if (cat === 'Fuel Charge' || cat === 'Sub Contractor Payment' || cat === 'GST' || cat === 'TDS') {
+          chain = ['FM', 'MD'];
+        } else {
+          chain = ['MD'];
+        }
+
+        const roleIndex = chain.indexOf(currentRole);
+        if (roleIndex > 0) {
+          return chain[roleIndex - 1]; // Go back to previous approver
+        } else {
+          return 'BM'; // Go back to submitter (BM)
+        }
+      };
+
+      const prevLevel = computePreviousLevel(request.category, request.sub_category, profile.role);
+      
+      const updatedDetails = {
+        ...(request.details || {}),
+        clarifiedBy: profile.role, // Track who requested clarification
+        remarksHistory: [
+          ...(request.details?.remarksHistory || []),
+          {
+            role: profile.role,
+            name: profile.full_name,
+            date: new Date().toISOString(),
+            type: 'Clarification',
+            text: remarks
+          }
+        ]
+      };
+
+      // Set status to Clarification, current_level to prevLevel
+      const { error } = await supabase
+        .from('expense_requests')
+        .update({
+          status: 'Clarification',
+          current_level: prevLevel,
+          details: updatedDetails
+        })
+        .eq('id', request.id);
+
+      if (error) throw error;
+
+      alert(`Request sent back for clarification to ${prevLevel}`);
       fetchRequests();
     } catch (err) {
       alert('Error: ' + err.message);
@@ -240,23 +326,103 @@ export default function Approvals({ user, profile, onBack }) {
                 )}
               </div>
             )}
+            {/* Remarks History Audit Log */}
+            {req.details?.remarksHistory && req.details.remarksHistory.length > 0 && (
+              <div style={{ background: '#fffbeb', padding: '10px', borderRadius: '6px', border: '1px solid #fef3c7', marginBottom: '10px', fontSize: '12px' }}>
+                <h4 style={{ margin: '0 0 6px 0', fontSize: '12px', color: '#b45309', fontWeight: 'bold' }}>History of Remarks</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {req.details.remarksHistory.map((rem, i) => (
+                    <div key={i} style={{ borderBottom: i < req.details.remarksHistory.length - 1 ? '1px solid #fde68a' : 'none', paddingBottom: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#92400e', fontWeight: 'bold' }}>
+                        <span>{rem.name} ({rem.role})</span>
+                        <span style={{ fontSize: '9px', fontWeight: 'normal' }}>{new Date(rem.date).toLocaleDateString()}</span>
+                      </div>
+                      <div style={{ fontStyle: rem.type === 'Justification' ? 'italic' : 'normal', color: '#4b5563', marginTop: '2px' }}>
+                        <strong>{rem.type}:</strong> {rem.text}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-            <div style={{ display: 'flex', gap: '10px', marginTop: '5px' }}>
-              <button 
-                className="btn btn-primary" 
-                style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px', padding: '10px' }}
-                onClick={() => handleApprove(req)}
-              >
-                <CheckCircle size={16} /> Approve
-              </button>
-              <button 
-                className="btn" 
-                style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px', background: '#fee2e2', color: '#dc2626', border: 'none', padding: '10px' }}
-                onClick={() => handleReject(req)}
-              >
-                <XCircle size={16} /> Reject
-              </button>
-            </div>
+            {/* Inline Remarks Input for Clarification or Rejection */}
+            {activeRemarksReq && activeRemarksReq.id === req.id ? (
+              <div style={{ marginTop: '5px', background: '#fef2f2', padding: '10px', borderRadius: '6px', border: '1px solid #fee2e2' }}>
+                <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#991b1b', display: 'block', marginBottom: '4px' }}>
+                  Remarks for {activeRemarksReq.type === 'Reject' ? 'Rejection' : 'Clarification'}:
+                </label>
+                <textarea
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '8px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '12px', resize: 'vertical' }}
+                  rows="2"
+                  value={remarksText}
+                  onChange={e => setRemarksText(e.target.value)}
+                  placeholder="Enter reason or questions..."
+                  required
+                />
+                <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                  <button
+                    onClick={() => {
+                      if (!remarksText.trim()) {
+                        alert('Remarks are required!');
+                        return;
+                      }
+                      if (activeRemarksReq.type === 'Reject') {
+                        handleReject(req, remarksText);
+                      } else {
+                        handleClarification(req, remarksText);
+                      }
+                      setActiveRemarksReq(null);
+                      setRemarksText('');
+                    }}
+                    style={{ flex: 1, padding: '8px', background: activeRemarksReq.type === 'Reject' ? '#dc2626' : '#ea580c', border: 'none', color: 'white', fontWeight: 'bold', borderRadius: '4px', fontSize: '11px', cursor: 'pointer' }}
+                  >
+                    Submit
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveRemarksReq(null);
+                      setRemarksText('');
+                    }}
+                    style={{ flex: 1, padding: '8px', background: '#e5e7eb', border: 'none', color: '#374151', fontWeight: 'bold', borderRadius: '4px', fontSize: '11px', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: '5px', marginTop: '5px' }}>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ flex: 1.2, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px', padding: '10px 8px', fontSize: '12px' }}
+                  onClick={() => handleApprove(req)}
+                >
+                  <CheckCircle size={15} /> Approve
+                </button>
+                
+                <button 
+                  className="btn" 
+                  style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '10px 8px', fontSize: '12px' }}
+                  onClick={() => {
+                    setActiveRemarksReq({ id: req.id, type: 'Clarification' });
+                    setRemarksText('');
+                  }}
+                >
+                  <HelpCircle size={15} /> Clarify
+                </button>
+
+                <button 
+                  className="btn" 
+                  style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px', background: '#fee2e2', color: '#dc2626', border: 'none', padding: '10px 8px', fontSize: '12px' }}
+                  onClick={() => {
+                    setActiveRemarksReq({ id: req.id, type: 'Reject' });
+                    setRemarksText('');
+                  }}
+                >
+                  <XCircle size={15} /> Reject
+                </button>
+              </div>
+            )}
           </div>
         ))
       )}
