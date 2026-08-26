@@ -2526,28 +2526,67 @@ def main():
                         except Exception: pass
                 return pd.DataFrame()
 
-            # Prepare raw datasets for Despatch Data and LR Data tabs
-            df_despatch_raw = robust_read_df(despatch_file).fillna("")
-            if not df_despatch_raw.empty and not args.from_date:
+            # Prepare clean position-based Despatch Data
+            df_despatch_raw = pd.DataFrame()
+            try:
+                df_desp_csv = pd.read_csv(despatch_file, header=None, skiprows=1, low_memory=False)
+                if not df_desp_csv.empty:
+                    ui_times = {}
+                    ui_times_file = os.path.join(tempfile.gettempdir(), "ui_despatch_times.json")
+                    if os.path.exists(ui_times_file):
+                        try:
+                            with open(ui_times_file, "r") as f:
+                                ui_times = json.load(f)
+                        except Exception:
+                            pass
+                    
+                    df_despatch_raw['SL NO'] = range(1, len(df_desp_csv) + 1)
+                    df_despatch_raw['DESPATCH NO'] = df_desp_csv.iloc[:, 11].astype(str)
+                    df_despatch_raw['DESPATCH DATE'] = df_desp_csv.iloc[:, 0].astype(str)
+                    
+                    dp_nos = df_despatch_raw['DESPATCH NO'].tolist()
+                    df_despatch_raw['DESPATCH TIME'] = [ui_times.get(dp, {}).get('time', '') for dp in dp_nos]
+                    df_despatch_raw['DESPATCH BRANCH'] = [ui_times.get(dp, {}).get('despatch_branch', '') for dp in dp_nos]
+                    df_despatch_raw['DELIVERY TYPE'] = [ui_times.get(dp, {}).get('delivery_type', '') for dp in dp_nos]
+                    
+                    df_despatch_raw['LR NO'] = df_desp_csv.iloc[:, 4].astype(str)
+                    df_despatch_raw['CONSIGNOR'] = df_desp_csv.iloc[:, 1].astype(str)
+                    df_despatch_raw['CONSIGNEE'] = df_desp_csv.iloc[:, 2].astype(str)
+                    df_despatch_raw['DESTINATION'] = df_desp_csv.iloc[:, 3].astype(str)
+                    df_despatch_raw['INVOICE NO'] = df_desp_csv.iloc[:, 5].astype(str)
+                    df_despatch_raw['WEIGHT'] = df_desp_csv.iloc[:, 6].astype(str)
+                    df_despatch_raw['BOX QTY'] = df_desp_csv.iloc[:, 7].astype(str)
+                    df_despatch_raw['TOTAL FREIGHT'] = df_desp_csv.iloc[:, 9].astype(str)
+                    df_despatch_raw['VALUE OF GOODS'] = df_desp_csv.iloc[:, 10].astype(str)
+                    df_despatch_raw['DELIVERY DATE TIME'] = df_desp_csv.iloc[:, 13].astype(str)
+                    df_despatch_raw['CREATED BY'] = df_desp_csv.iloc[:, 12].astype(str)
+                    df_despatch_raw['LD SUPERVISOR'] = df_desp_csv.iloc[:, 14].astype(str)
+            except Exception as desp_err:
+                print("Error parsing despatch file for clean reordering:", desp_err)
+                df_despatch_raw = robust_read_df(despatch_file).fillna("")
+
+            # Filter Despatch Data and LR Data by cutoff_date or custom from_date
+            req_from_dt = pd.to_datetime(args.from_date, errors='coerce') if args.from_date else cutoff_date
+            
+            if not df_despatch_raw.empty and req_from_dt is not None:
                 for col in df_despatch_raw.columns:
                     if 'DATE' in str(col).upper():
                         df_despatch_raw['parsed_dt'] = pd.to_datetime(df_despatch_raw[col], dayfirst=True, errors='coerce')
-                        df_despatch_raw = df_despatch_raw[df_despatch_raw['parsed_dt'].isna() | (df_despatch_raw['parsed_dt'] >= cutoff_date)].drop(columns=['parsed_dt'])
+                        df_despatch_raw = df_despatch_raw[df_despatch_raw['parsed_dt'].isna() | (df_despatch_raw['parsed_dt'] >= req_from_dt)].drop(columns=['parsed_dt'])
                         break
             if not df_despatch_raw.empty:
                 for col in df_despatch_raw.columns:
                     df_despatch_raw[col] = df_despatch_raw[col].astype(str)
 
-            df_lr_raw = robust_read_df(lr_file).fillna("")
-            if not df_lr_raw.empty and not args.from_date:
-                for col in df_lr_raw.columns:
+            if not df_whole.empty and req_from_dt is not None:
+                for col in df_whole.columns:
                     if 'DATE' in str(col).upper():
-                        df_lr_raw['parsed_dt'] = pd.to_datetime(df_lr_raw[col], dayfirst=True, errors='coerce')
-                        df_lr_raw = df_lr_raw[df_lr_raw['parsed_dt'].isna() | (df_lr_raw['parsed_dt'] >= cutoff_date)].drop(columns=['parsed_dt'])
+                        df_whole['parsed_dt'] = pd.to_datetime(df_whole[col], dayfirst=True, errors='coerce')
+                        df_whole = df_whole[df_whole['parsed_dt'].isna() | (df_whole['parsed_dt'] >= req_from_dt)].drop(columns=['parsed_dt'])
                         break
-            if not df_lr_raw.empty:
-                for col in df_lr_raw.columns:
-                    df_lr_raw[col] = df_lr_raw[col].astype(str)
+            if not df_whole.empty:
+                for col in df_whole.columns:
+                    df_whole[col] = df_whole[col].astype(str)
 
             target_tabs = [
                 ("Reconciled Audit", result_df),
