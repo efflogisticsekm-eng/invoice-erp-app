@@ -3,10 +3,11 @@ import { supabase } from './supabase';
 import { LogOut, Camera, FileText, CheckSquare } from 'lucide-react';
 import Scanner from './Scanner';
 import Approvals from './Approvals';
+import PendingOthers from './PendingOthers';
 
 export default function Dashboard({ user, onLogout }) {
   const [profile, setProfile] = useState(null);
-  const [view, setView] = useState('dashboard'); // 'dashboard', 'scanner', 'approvals'
+  const [view, setView] = useState('dashboard'); // 'dashboard', 'scanner', 'approvals', 'pending_others'
   
   useEffect(() => {
     fetchProfile();
@@ -33,6 +34,9 @@ export default function Dashboard({ user, onLogout }) {
   }
   if (view === 'approvals') {
     return <Approvals user={user} profile={profile} onBack={() => setView('dashboard')} />;
+  }
+  if (view === 'pending_others') {
+    return <PendingOthers user={user} profile={profile} onBack={() => setView('dashboard')} />;
   }
 
   return (
@@ -79,17 +83,26 @@ export default function Dashboard({ user, onLogout }) {
             Pending Approval
           </button>
 
-          {/* Bottom Left: Past History */}
+          {/* Bottom Left: Pending with Others */}
+          <button 
+            className="dashboard-grid-btn"
+            onClick={() => setView('pending_others')}
+          >
+            Pending with Others
+          </button>
+          
+          {/* Bottom Right: Past History */}
           <button 
             className="dashboard-grid-btn"
             onClick={() => alert('Past History coming soon!')}
           >
             Past History
           </button>
-
-          {/* Bottom Right: My Requests */}
+          
+          {/* Fifth button spanning 2 columns: My Requests */}
           <button 
             className="dashboard-grid-btn"
+            style={{ gridColumn: 'span 2' }}
             onClick={() => alert('My Requests coming soon!')}
           >
             My Requests
