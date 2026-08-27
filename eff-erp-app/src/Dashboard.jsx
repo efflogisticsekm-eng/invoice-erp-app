@@ -5,11 +5,16 @@ import Scanner from './Scanner';
 import Approvals from './Approvals';
 import PendingOthers from './PendingOthers';
 import MyRequests from './MyRequests';
+import PastHistory from './PastHistory';
 
 export default function Dashboard({ user, onLogout }) {
   const [profile, setProfile] = useState(null);
-  const [view, setView] = useState('dashboard'); // 'dashboard', 'scanner', 'approvals', 'pending_others', 'my_requests'
+  const [view, setView] = useState(() => sessionStorage.getItem('currentView') || 'dashboard'); // 'dashboard', 'scanner', 'approvals', 'pending_others', 'my_requests', 'past_history'
   
+  useEffect(() => {
+    sessionStorage.setItem('currentView', view);
+  }, [view]);
+
   useEffect(() => {
     fetchProfile();
   }, []);
@@ -41,6 +46,9 @@ export default function Dashboard({ user, onLogout }) {
   }
   if (view === 'my_requests') {
     return <MyRequests user={user} profile={profile} onBack={() => setView('dashboard')} />;
+  }
+  if (view === 'past_history') {
+    return <PastHistory user={user} profile={profile} onBack={() => setView('dashboard')} />;
   }
 
   return (
@@ -98,7 +106,7 @@ export default function Dashboard({ user, onLogout }) {
           {/* Bottom Right: Past History */}
           <button 
             className="dashboard-grid-btn"
-            onClick={() => alert('Past History coming soon!')}
+            onClick={() => setView('past_history')}
           >
             Past History
           </button>

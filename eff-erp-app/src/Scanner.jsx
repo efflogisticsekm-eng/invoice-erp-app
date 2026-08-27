@@ -17,6 +17,9 @@ export default function Scanner({ user, onBack }) {
   const [sgstAmount, setSgstAmount] = useState('');
   const [igstAmount, setIgstAmount] = useState('');
   const [gstAmount, setGstAmount] = useState(''); // GST Total
+  const [gstApplicable, setGstApplicable] = useState(false);
+  const [gstType, setGstType] = useState('Kerala'); // Kerala, IGST
+  const [gstRate, setGstRate] = useState('5'); // 5, 12, 18
   const [totalAmount, setTotalAmount] = useState('');
   const [toWhom, setToWhom] = useState('');
   
@@ -27,16 +30,29 @@ export default function Scanner({ user, onBack }) {
   const [paymentType, setPaymentType] = useState('Credit'); // Credit/Cash
   const [putDescription, setPutDescription] = useState('');
   
+  // Bank Details (For Credit)
+  const [bankName, setBankName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [ifscCode, setIfscCode] = useState('');
+  const [branchName, setBranchName] = useState('');
+  
+  // Toggles for UI
+  const [showGstDetails, setShowGstDetails] = useState(false);
+  const [showBankDetails, setShowBankDetails] = useState(false);
+
   // Rent fields
+  const [gdmNumber, setGdmNumber] = useState('');
   const [lrNo, setLrNo] = useState('');
   const [lrDate, setLrDate] = useState('');
   const [totalWeight, setTotalWeight] = useState('');
+  const [totalBox, setTotalBox] = useState('');
   const [destination, setDestination] = useState('');
   const [approximateKm, setApproximateKm] = useState('');
   const [vehicleType, setVehicleType] = useState('');
   const [vehicleRent, setVehicleRent] = useState('');
   const [unionCharges, setUnionCharges] = useState('');
   const [rentAdvance, setRentAdvance] = useState('');
+  const [balanceAmount, setBalanceAmount] = useState('');
   const [vendor, setVendor] = useState('');
   
   const [userRole, setUserRole] = useState('User');
@@ -44,6 +60,7 @@ export default function Scanner({ user, onBack }) {
   const [compressedBase64, setCompressedBase64] = useState('');
   const [rawImage, setRawImage] = useState(null);
   const [crop, setCrop] = useState({ top: 5, bottom: 5, left: 5, right: 5 });
+
   
   // Vehicles
   const [vehiclesList, setVehiclesList] = useState([]);
@@ -98,6 +115,85 @@ export default function Scanner({ user, onBack }) {
     };
     fetchVehicles();
   }, [userRole, userProfile]);
+
+  // Calculate amounts automatically
+  React.useEffect(() => {
+    const baseAmt = parseFloat(amount) || 0;
+    let calcGst = 0;
+    if (gstApplicable) {
+      calcGst = baseAmt * (parseFloat(gstRate) / 100);
+    }
+    setGstAmount(calcGst > 0 ? calcGst.toFixed(2) : '');
+    
+    if (gstApplicable) {
+      if (gstType === 'Kerala') {
+        setCgstAmount((calcGst / 2).toFixed(2));
+        setSgstAmount((calcGst / 2).toFixed(2));
+        setIgstAmount('');
+      } else {
+        setCgstAmount('');
+        setSgstAmount('');
+        setIgstAmount(calcGst.toFixed(2));
+      }
+    } else {
+      setCgstAmount('');
+      setSgstAmount('');
+      setIgstAmount('');
+    }
+
+    const union = parseFloat(unionCharges) || 0;
+    const t = baseAmt + calcGst + union;
+    setTotalAmount(t > 0 ? t.toFixed(2) : '');
+
+    const advance = parseFloat(rentAdvance) || 0;
+    const bal = t - advance;
+    setBalanceAmount(bal > 0 ? bal.toFixed(2) : '');
+  }, [amount, gstApplicable, gstType, gstRate, rentAdvance, unionCharges]);
+
+  const uniqueVehicleTypes = [...new Set(vehiclesList.map(v => v.vehicle_type).filter(Boolean))];
+
+  const handleVehicleChange = (e) => {
+    const val = e.target.value;
+    setVehicleNo(val);
+    const selected = vehiclesList.find(v => v.vehicle_no === val);
+    if (selected && selected.vehicle_type) {
+      setVehicleType(selected.vehicle_type);
+    }
+  };
+
+
+  const fetchLrData = async () => {
+    if (!gdmNumber) {
+      alert("Please enter a GDM Number first.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('fetch-erp-lrs', {
+        body: { gdmNumber: gdmNumber, username: 'effedathala', password: '@eff2019' }
+      });
+      
+      if (error) throw error;
+      
+      if (data && data.lrNumbers && data.lrNumbers.length > 0) {
+        setLrNo(data.lrNumbers.join(', '));
+        if (data.totalBox !== undefined) {
+          setTotalBox(data.totalBox.toString());
+        }
+        if (data.totalWeight !== undefined) {
+          setTotalWeight(data.totalWeight.toString());
+        }
+        alert(`Successfully fetched ${data.lrNumbers.length} LR numbers!`);
+      } else {
+        alert("No LR numbers found for this GDM or invalid GDM.");
+      }
+    } catch (err) {
+      console.error("Error fetching LR data:", err);
+      alert("Failed to fetch LR data: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -275,30 +371,19 @@ export default function Scanner({ user, onBack }) {
       if (extracted.vehicleNo) {
         setVehicleNo(extracted.vehicleNo);
       }
-
+      if (extracted.totalAmount !== undefined) {
+        // totalAmount is now derived. We don't overwrite it manually.
+      }
+      
       const parseAmt = (val) => {
         if (!val) return 0;
         if (typeof val === 'number') return val;
-        return parseFloat(val.replace(/[^0-9.-]+/g, '')) || 0;
+        return parseFloat(val.toString().replace(/[^0-9.-]+/g, '')) || 0;
       };
 
       const tAmt = parseAmt(extracted.totalAmount);
-      const cAmt = parseAmt(extracted.cgst);
-      const sAmt = parseAmt(extracted.sgst);
-      const iAmt = parseAmt(extracted.igst);
       let gAmt = parseAmt(extracted.gstTotal);
       const sTotalAmt = parseAmt(extracted.subTotal);
-
-      if (cAmt) setCgstAmount(cAmt.toString());
-      if (sAmt) setSgstAmount(sAmt.toString());
-      if (iAmt) setIgstAmount(iAmt.toString());
-
-      if (!gAmt && (cAmt || sAmt || iAmt)) {
-        gAmt = cAmt + sAmt + iAmt;
-      }
-
-      if (tAmt) setTotalAmount(tAmt.toString());
-      if (gAmt) setGstAmount(gAmt.toString());
       
       if (sTotalAmt) {
         setAmount(sTotalAmt.toString());
@@ -306,6 +391,10 @@ export default function Scanner({ user, onBack }) {
         setAmount((tAmt - gAmt).toString());
       } else {
         setAmount(tAmt ? tAmt.toString() : '');
+      }
+
+      if (gAmt > 0) {
+        setGstApplicable(true);
       }
 
     } catch (error) {
@@ -392,8 +481,9 @@ export default function Scanner({ user, onBack }) {
           image_url: compressedBase64 || null,
           details: {
             vehicleNo, odometerReading, workshopName, paymentType, putDescription, toWhom,
-            lrNo, lrDate, totalWeight, destination, approximateKm, vehicleType, 
-            vehicleRent, unionCharges, rentAdvance, vendor,
+            lrNo, lrDate, totalWeight, totalBox, destination, approximateKm, vehicleType, 
+            vehicleRent, unionCharges, rentAdvance, vendor, balanceAmount,
+            bankName, accountNumber, ifscCode, branchName,
             cgstAmount: parseFloat(cgstAmount) || 0,
             sgstAmount: parseFloat(sgstAmount) || 0,
             igstAmount: parseFloat(igstAmount) || 0
@@ -413,10 +503,7 @@ export default function Scanner({ user, onBack }) {
     }
   };
 
-  const updateGstTotal = (c, s, i) => {
-    const total = (parseFloat(c) || 0) + (parseFloat(s) || 0) + (parseFloat(i) || 0);
-    setGstAmount(total > 0 ? total.toString() : '');
-  };
+
 
   if (rawImage) {
     return (
@@ -658,7 +745,7 @@ export default function Scanner({ user, onBack }) {
                 <select 
                   className="input-field" 
                   value={vehicleNo} 
-                  onChange={e => setVehicleNo(e.target.value)} 
+                  onChange={handleVehicleChange} 
                 >
                   <option value="">-- Select Vehicle --</option>
                   {vehiclesList.length > 0 ? vehiclesList.map(v => (
@@ -678,92 +765,190 @@ export default function Scanner({ user, onBack }) {
 
           {mainCategory === 'Vehicle Rent' && (
             <>
-              <div className="input-group"><label>LR No's</label><input type="text" className="input-field" value={lrNo} onChange={e => setLrNo(e.target.value)} /></div>
-              <div className="input-group"><label>LR Date</label><input type="date" className="input-field" value={lrDate} onChange={e => setLrDate(e.target.value)} /></div>
-              <div className="input-group"><label>Total Weight</label><input type="text" className="input-field" value={totalWeight} onChange={e => setTotalWeight(e.target.value)} /></div>
-              <div className="input-group"><label>Destination</label><input type="text" className="input-field" value={destination} onChange={e => setDestination(e.target.value)} /></div>
-              <div className="input-group"><label>Approximate Km</label><input type="text" className="input-field" value={approximateKm} onChange={e => setApproximateKm(e.target.value)} /></div>
-              <div className="input-group"><label>Vehicle Type</label><input type="text" className="input-field" value={vehicleType} onChange={e => setVehicleType(e.target.value)} /></div>
-              <div className="input-group"><label>Vehicle Rent</label><input type="number" className="input-field" value={vehicleRent} onChange={e => setVehicleRent(e.target.value)} /></div>
-              <div className="input-group"><label>Union Charges</label><input type="number" className="input-field" value={unionCharges} onChange={e => setUnionCharges(e.target.value)} /></div>
-              <div className="input-group"><label>Rent Advance</label><input type="number" className="input-field" value={rentAdvance} onChange={e => setRentAdvance(e.target.value)} /></div>
-              <div className="input-group"><label>Vendor</label><input type="text" className="input-field" value={vendor} onChange={e => setVendor(e.target.value)} /></div>
+              <div className="input-group">
+                <label>GDM Number (Despatch No)</label>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <input type="text" inputMode="numeric" className="input-field" value={gdmNumber} onChange={e => setGdmNumber(e.target.value)} placeholder="Enter GDM to auto-fetch LRs" style={{ flex: 1 }} />
+                  <button type="button" onClick={fetchLrData} className="btn-primary" disabled={loading} style={{ padding: '0 15px', whiteSpace: 'nowrap', borderRadius: '8px' }}>
+                    {loading ? 'Fetching...' : 'Fetch LRs'}
+                  </button>
+                </div>
+              </div>
+              <div style={{ opacity: gdmNumber.trim() ? 1 : 0.5, pointerEvents: gdmNumber.trim() ? 'auto' : 'none' }}>
+                <div className="input-group"><label>LR No's</label><input type="text" className="input-field" value={lrNo} onChange={e => setLrNo(e.target.value)} /></div>
+                <div className="input-group"><label>Despatch Date</label><input type="date" className="input-field" value={lrDate} onChange={e => setLrDate(e.target.value)} /></div>
+                <div className="input-group"><label>Total Weight</label><input type="number" inputMode="decimal" className="input-field" value={totalWeight} onChange={e => setTotalWeight(e.target.value)} /></div>
+                <div className="input-group"><label>Total Box</label><input type="number" inputMode="numeric" className="input-field" value={totalBox} onChange={e => setTotalBox(e.target.value)} /></div>
+                <div className="input-group"><label>Destination</label><input type="text" className="input-field" value={destination} onChange={e => setDestination(e.target.value)} /></div>
+                <div className="input-group"><label>Approximate Km</label><input type="number" inputMode="decimal" className="input-field" value={approximateKm} onChange={e => setApproximateKm(e.target.value)} /></div>
+                <div className="input-group">
+                  <label>Vehicle Type</label>
+                  <select className="input-field" value={vehicleType} onChange={e => setVehicleType(e.target.value)}>
+                    <option value="">Select Type</option>
+                    <option value="3 Wheeler">3 Wheeler</option>
+                    <option value="Ace">Ace</option>
+                    <option value="Pick up">Pick up</option>
+                    <option value="407 /LMV">407 /LMV</option>
+                    <option value="Eicher / MGV">Eicher / MGV</option>
+                    <option value="10 Tonner">10 Tonner</option>
+                    <option value="16 Tonner">16 Tonner</option>
+                    <option value="Multi Axile">Multi Axile</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div className="input-group"><label>Vendor Name</label><input type="text" className="input-field" value={vendor} onChange={e => setVendor(e.target.value)} /></div>
+              </div>
             </>
           )}
 
           {mainCategory === 'Vehicle Rent Balance Payment' && (
             <>
-              <div className="input-group"><label>LR No's</label><input type="text" className="input-field" value={lrNo} onChange={e => setLrNo(e.target.value)} /></div>
-              <div className="input-group"><label>Any Other Charge</label><input type="text" className="input-field" value={putDescription} onChange={e => setPutDescription(e.target.value)} /></div>
+              <div className="input-group">
+                <label>GDM Number (Despatch No)</label>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <input type="text" inputMode="numeric" className="input-field" value={gdmNumber} onChange={e => setGdmNumber(e.target.value)} placeholder="Enter GDM to auto-fetch LRs" style={{ flex: 1 }} />
+                  <button type="button" onClick={fetchLrData} className="btn-primary" disabled={loading} style={{ padding: '0 15px', whiteSpace: 'nowrap', borderRadius: '8px' }}>
+                    {loading ? 'Fetching...' : 'Fetch LRs'}
+                  </button>
+                </div>
+              </div>
+              <div style={{ opacity: gdmNumber.trim() ? 1 : 0.5, pointerEvents: gdmNumber.trim() ? 'auto' : 'none' }}>
+                <div className="input-group"><label>LR No's</label><input type="text" className="input-field" value={lrNo} onChange={e => setLrNo(e.target.value)} /></div>
+                <div className="input-group"><label>Despatch Date</label><input type="date" className="input-field" value={lrDate} onChange={e => setLrDate(e.target.value)} /></div>
+                <div className="input-group"><label>Any Other Charge</label><input type="text" className="input-field" value={putDescription} onChange={e => setPutDescription(e.target.value)} /></div>
+              </div>
             </>
           )}
 
           {mainCategory === 'Other' && (
             <>
               <div className="input-group"><label>Description / Item Details</label><input type="text" className="input-field" value={putDescription} onChange={e => setPutDescription(e.target.value)} /></div>
-              {/* Hide "To Whom" for specific items according to PDF if needed, but safe to show mostly, PDF says GST and TDS have no 'To Whom'. */}
               {otherItem !== 'GST' && otherItem !== 'TDS' && (
                 <div className="input-group"><label>To Whom / Party Name</label><input type="text" className="input-field" value={toWhom} onChange={e => setToWhom(e.target.value)} /></div>
               )}
             </>
           )}
 
-          <div className="input-group">
-            <label>Credit / Cash</label>
-            <select className="input-field" value={paymentType} onChange={e => setPaymentType(e.target.value)}>
-              <option value="Credit">Credit</option>
-              <option value="Cash">Cash</option>
-            </select>
-          </div>
+          <div style={{ opacity: ((mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') && !gdmNumber.trim()) ? 0.5 : 1, pointerEvents: ((mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') && !gdmNumber.trim()) ? 'none' : 'auto' }}>
+            <div className="input-group">
+              <label>Amount (Without GST) (Extracted via AI)</label>
+              <input type="number" inputMode="decimal" className="input-field" value={amount} onChange={e => setAmount(e.target.value)} required />
+            </div>
 
-          <div className="input-group">
-            <label>Amount (Without GST) (Extracted via AI)</label>
-            <input type="number" className="input-field" value={amount} onChange={e => setAmount(e.target.value)} required />
-          </div>
-
-          {/* Conditional GST Amount based on Item type */}
-          {(() => {
-            let showGst = true;
-            if (mainCategory === 'Other') {
-              const noGstItems = ['Union Charge', 'Fuel Charge', 'GST', 'TDS', 'Bonnus', 'Petty Cash', 'Salary', 'Donation'];
-              if (noGstItems.includes(otherItem)) {
-                showGst = false;
+            {(() => {
+              let showGst = true;
+              if (mainCategory === 'Other') {
+                const noGstItems = ['Union Charge', 'Fuel Charge', 'GST', 'TDS', 'Bonnus', 'Petty Cash', 'Salary', 'Donation'];
+                if (noGstItems.includes(otherItem)) {
+                  showGst = false;
+                }
               }
-            }
-            if (showGst) {
-              return (
-                <div style={{ background: '#f8f9fa', padding: '15px', borderRadius: '8px', marginBottom: '15px', border: '1px dashed #ccc' }}>
-                  <h4 style={{ margin: '0 0 10px 0', color: 'var(--primary)', fontSize: '14px' }}>GST Breakdown</h4>
-                  <div className="input-group">
-                    <label>CGST</label>
-                    <input type="number" className="input-field" value={cgstAmount} onChange={e => { setCgstAmount(e.target.value); updateGstTotal(e.target.value, sgstAmount, igstAmount); }} />
+              if (showGst) {
+                return (
+                  <div style={{ background: '#f8f9fa', padding: '15px', borderRadius: '8px', marginBottom: '15px', border: '1px dashed #ccc' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                      <input type="checkbox" id="gstApplicable" checked={gstApplicable} onChange={e => setGstApplicable(e.target.checked)} style={{ width: '18px', height: '18px' }} />
+                      <label htmlFor="gstApplicable" style={{ margin: 0, fontWeight: 'bold', color: 'var(--primary)' }}>GST Applicable</label>
+                    </div>
+
+                    {gstApplicable && (
+                      <div style={{ marginTop: '15px', paddingLeft: '5px' }}>
+                        <div style={{ marginBottom: '10px' }}>
+                          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: '#555' }}>Select GST Type</label>
+                          <div style={{ display: 'flex', gap: '15px' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                              <input type="radio" name="gstType" value="Kerala" checked={gstType === 'Kerala'} onChange={e => setGstType(e.target.value)} />
+                              Kerala
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                              <input type="radio" name="gstType" value="IGST" checked={gstType === 'IGST'} onChange={e => setGstType(e.target.value)} />
+                              IGST
+                            </label>
+                          </div>
+                        </div>
+
+                        <div style={{ marginBottom: '15px' }}>
+                          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: '#555' }}>Select Percentage</label>
+                          <div style={{ display: 'flex', gap: '15px' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                              <input type="radio" name="gstRate" value="5" checked={gstRate === '5'} onChange={e => setGstRate(e.target.value)} />
+                              5%
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                              <input type="radio" name="gstRate" value="12" checked={gstRate === '12'} onChange={e => setGstRate(e.target.value)} />
+                              12%
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                              <input type="radio" name="gstRate" value="18" checked={gstRate === '18'} onChange={e => setGstRate(e.target.value)} />
+                              18%
+                            </label>
+                          </div>
+                        </div>
+                        
+                        <div className="input-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontWeight: 'bold' }}>Total GST Amount (Auto)</label>
+                          <input type="number" inputMode="decimal" className="input-field" value={gstAmount} readOnly style={{ background: '#f3f4f6' }} />
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="input-group">
-                    <label>SGST</label>
-                    <input type="number" className="input-field" value={sgstAmount} onChange={e => { setSgstAmount(e.target.value); updateGstTotal(cgstAmount, e.target.value, igstAmount); }} />
-                  </div>
-                  <div className="input-group">
-                    <label>IGST</label>
-                    <input type="number" className="input-field" value={igstAmount} onChange={e => { setIgstAmount(e.target.value); updateGstTotal(cgstAmount, sgstAmount, e.target.value); }} />
-                  </div>
-                  <div className="input-group" style={{ marginBottom: 0 }}>
-                    <label style={{ fontWeight: 'bold' }}>Total GST Amount</label>
-                    <input type="number" className="input-field" value={gstAmount} onChange={e => setGstAmount(e.target.value)} required />
-                  </div>
+                );
+              }
+              return null;
+            })()}
+
+            {(mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') && (
+               <div className="input-group"><label>Union Charges</label><input type="number" inputMode="decimal" className="input-field" value={unionCharges} onChange={e => setUnionCharges(e.target.value)} /></div>
+            )}
+
+            <div className="input-group">
+              <label>Total Amount (Auto)</label>
+              <input type="number" inputMode="decimal" className="input-field" value={totalAmount} readOnly style={{ background: '#f3f4f6' }} required />
+            </div>
+
+            {(mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') && (
+               <div className="input-group"><label>Rent Advance</label><input type="number" inputMode="decimal" className="input-field" value={rentAdvance} onChange={e => setRentAdvance(e.target.value)} /></div>
+            )}
+
+            <div className="input-group">
+              <label>Credit / Cash</label>
+              <select className="input-field" value={paymentType} onChange={e => setPaymentType(e.target.value)} required>
+                <option value="Credit">Credit</option>
+                <option value="Cash">Cash</option>
+              </select>
+            </div>
+
+            {paymentType === 'Credit' && (
+              <div style={{ background: '#f8f9fa', padding: '15px', borderRadius: '8px', marginBottom: '15px', border: '1px dashed #ccc' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onClick={() => setShowBankDetails(!showBankDetails)}>
+                  <h4 style={{ margin: '0', color: 'var(--primary)', fontSize: '14px' }}>Bank Account Details</h4>
+                  <button type="button" style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>
+                    {showBankDetails ? 'Hide' : 'Show'}
+                  </button>
                 </div>
-              );
-            }
-            return null;
-          })()}
+                {showBankDetails && (
+                  <div style={{ marginTop: '15px' }}>
+                    <div className="input-group"><label>Bank Name</label><input type="text" className="input-field" value={bankName} onChange={e => setBankName(e.target.value)} /></div>
+                    <div className="input-group"><label>Account Number</label><input type="number" inputMode="numeric" className="input-field" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} /></div>
+                    <div className="input-group"><label>IFSC Code</label><input type="text" className="input-field" value={ifscCode} onChange={e => setIfscCode(e.target.value)} /></div>
+                    <div className="input-group"><label>Branch Name</label><input type="text" className="input-field" value={branchName} onChange={e => setBranchName(e.target.value)} /></div>
+                  </div>
+                )}
+              </div>
+            )}
 
-          <div className="input-group">
-            <label>Total Amount</label>
-            <input type="number" className="input-field" value={totalAmount} onChange={e => setTotalAmount(e.target.value)} required />
+            {paymentType === 'Cash' && (
+               <div className="input-group"><label>To Whom / Party Name</label><input type="text" className="input-field" value={toWhom} onChange={e => setToWhom(e.target.value)} /></div>
+            )}
+
+            {(mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') && (
+               <div className="input-group"><label>Balance Amount (Auto)</label><input type="number" inputMode="decimal" className="input-field" value={balanceAmount} readOnly style={{ background: '#f3f4f6' }} /></div>
+            )}
+
+            <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', marginTop: '15px' }}>
+              {loading ? 'Submitting...' : 'Submit for Approval'}
+            </button>
           </div>
-
-          <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%' }}>
-            {loading ? 'Submitting...' : 'Submit for Approval'}
-          </button>
         </form>
       </div>
     </div>

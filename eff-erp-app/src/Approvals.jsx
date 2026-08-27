@@ -101,10 +101,11 @@ export default function Approvals({ user, profile, onBack }) {
       
       // TRIGGER WEBHOOK IF FULLY APPROVED
       if (newStatus === 'Approved') {
+        let syncStatus = 'Failed';
         try {
-          const webhookUrl = localStorage.getItem('google_webhook_url');
+          const webhookUrl = import.meta.env.VITE_GOOGLE_WEBHOOK_URL || localStorage.getItem('google_webhook_url');
           if (webhookUrl) {
-            await fetch(webhookUrl, {
+            const res = await fetch(webhookUrl, {
               method: 'POST',
               body: JSON.stringify({
                 id: request.id,
@@ -119,12 +120,16 @@ export default function Approvals({ user, profile, onBack }) {
                 details: request.details || {}
               })
             });
+            if (res.ok) syncStatus = 'Success';
           } else {
             console.warn('Google Webhook URL not set in localStorage');
           }
         } catch (e) {
           console.error('Webhook failed', e);
         }
+
+        const updatedDetails = { ...(request.details || {}), sheetSync: syncStatus };
+        await supabase.from('expense_requests').update({ details: updatedDetails }).eq('id', request.id);
       }
 
       alert(newStatus === 'Approved' ? 'Request Fully Approved!' : `Approved! Forwarded to ${nextLevel}`);
