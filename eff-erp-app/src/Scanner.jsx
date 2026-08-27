@@ -304,51 +304,22 @@ export default function Scanner({ user, onBack }) {
         base64Image = base64DataUrl.split(',')[1];
       }
       
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-      if (!apiKey) {
-        alert("OpenAI API Key is missing! Please add VITE_OPENAI_API_KEY to your .env file.");
-        setLoading(false);
-        return;
-      }
+      // Remove frontend API key check as we will use Edge Function instead
 
       const vehicleListString = vehiclesList.map(v => v.vehicle_no).join(', ');
 
-      console.log("Sending image to OpenAI Vision API...");
+      console.log("Sending image to Supabase Edge Function (scan-receipt)...");
       
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: `Extract details from this receipt/invoice for the expense category: "${mainCategory === 'Other' ? otherItem : mainCategory}". Return ONLY a valid JSON object with the keys: 'partyName' (the name of the shop, vendor, or workshop), 'totalAmount' (the grand total amount as a number), 'cgst' (the CGST amount as a number, or 0), 'sgst' (the SGST amount as a number, or 0), 'igst' (the IGST amount as a number, or 0), 'gstTotal' (the total tax/GST amount as a number. If only a single GST amount is present, put it here, otherwise sum the CGST, SGST, IGST into this), and 'subTotal' (the amount before tax). Also extract 'vehicleNo' (Look for a vehicle registration number in the bill. Here are the valid vehicle numbers: ${vehicleListString}. Match ignoring spaces, dashes, or special characters. Return the exact matching vehicle number from the list if found). Do not include markdown formatting or any other text, just the raw JSON.`
-                },
-                {
-                  type: "image_url",
-                  image_url: {
-                    url: `data:image/jpeg;base64,${base64Image}`
-                  }
-                }
-              ]
-            }
-          ],
-          max_tokens: 500,
-          temperature: 0.0
-        })
+      const { data, error } = await supabase.functions.invoke('scan-receipt', {
+        body: {
+          base64Image: base64Image,
+          category: mainCategory === 'Other' ? otherItem : mainCategory,
+          vehicleListString: vehicleListString
+        }
       });
-
-      const data = await response.json();
       
-      if (data.error) {
-        throw new Error(data.error.message);
+      if (error || data.error) {
+        throw new Error(error?.message || data.error || "Edge function failed");
       }
 
       let content = data.choices[0].message.content.trim();
