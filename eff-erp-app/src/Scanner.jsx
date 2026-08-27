@@ -1,4 +1,3 @@
-import { createClient } from "@supabase/supabase-js";
 import React, { useState } from 'react';
 import { supabase } from './supabase';
 
@@ -435,37 +434,18 @@ export default function Scanner({ user, onBack }) {
       const nextLevel = computeNextLevel(finalCategory, subCategory, userRole);
 
       // TEMPORARY PROTOTYPE FIX: Call the local Vite proxy API to securely bypass RLS
-      // Directly insert using decoded admin client
-      const encodedKey = "c2Jfc2VjcmV0X3BWVE8xYTNmdkpzbXJJSW00bkwzUndfLTdZeTFGUG4=";
-      const adminKey = atob(encodedKey);
+
       
-      const customFetch = (url, options) => {
-        const newOptions = { ...options };
-        newOptions.headers = new Headers(options.headers);
-        if (newOptions.headers.has('apikey')) {
-          newOptions.headers.set('apikey', adminKey);
-        }
-        if (newOptions.headers.has('Authorization')) {
-          newOptions.headers.set('Authorization', `Bearer ${adminKey}`);
-        }
-        return fetch(url, newOptions);
-      };
-      
-      const adminSupabase = createClient(
-        import.meta.env.VITE_SUPABASE_URL,
-        import.meta.env.VITE_SUPABASE_ANON_KEY,
-        { global: { fetch: customFetch } }
-      );
-      
+      // 1. Update Profile (using Standard Client)
       const profileData = {
         id: user.id,
         full_name: user.email || 'User',
         role: userRole || 'User',
         branch: userProfile?.branch || null
       };
-      
-      await adminSupabase.from('profiles').upsert(profileData, { onConflict: 'id', ignoreDuplicates: true });
-      
+      await supabase.from('profiles').upsert(profileData, { onConflict: 'id', ignoreDuplicates: true });
+
+      // 2. Insert Expense Request (using Standard Client)
       const expenseData = {
           user_id: user.id,
           category: finalCategory,
@@ -488,8 +468,7 @@ export default function Scanner({ user, onBack }) {
           }
       };
       
-      const { error: insertError } = await adminSupabase.from('expense_requests').insert(expenseData);
-      
+      const { error: insertError } = await supabase.from('expense_requests').insert(expenseData);
       if (insertError) {
         throw new Error(insertError.message);
       }
