@@ -439,9 +439,22 @@ export default function Scanner({ user, onBack }) {
       const encodedKey = "c2Jfc2VjcmV0X3BWVE8xYTNmdkpzbXJJSW00bkwzUndfLTdZeTFGUG4=";
       const adminKey = atob(encodedKey);
       
+      const customFetch = (url, options) => {
+        const newOptions = { ...options };
+        newOptions.headers = new Headers(options.headers);
+        if (newOptions.headers.has('apikey')) {
+          newOptions.headers.set('apikey', adminKey);
+        }
+        if (newOptions.headers.has('Authorization')) {
+          newOptions.headers.set('Authorization', `Bearer ${adminKey}`);
+        }
+        return fetch(url, newOptions);
+      };
+      
       const adminSupabase = createClient(
         import.meta.env.VITE_SUPABASE_URL,
-        adminKey
+        import.meta.env.VITE_SUPABASE_ANON_KEY,
+        { global: { fetch: customFetch } }
       );
       
       const profileData = {
