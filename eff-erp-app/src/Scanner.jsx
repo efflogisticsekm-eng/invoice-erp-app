@@ -434,10 +434,8 @@ export default function Scanner({ user, onBack }) {
       const nextLevel = computeNextLevel(finalCategory, subCategory, userRole);
 
       // TEMPORARY PROTOTYPE FIX: Call the local Vite proxy API to securely bypass RLS
-      const response = await fetch('/api/insert_expense', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const response = await supabase.functions.invoke('insert-expense', {
+        body: {
           user_id: user.id,
           user_email: user.email,
           user_role: userRole,
@@ -459,11 +457,12 @@ export default function Scanner({ user, onBack }) {
             sgstAmount: parseFloat(sgstAmount) || 0,
             igstAmount: parseFloat(igstAmount) || 0
           }
-        })
+        }
       });
 
-      const resData = await response.json();
-      if (!response.ok || resData.error) throw new Error(resData.error || 'Unknown error');
+      if (response.error || (response.data && response.data.error)) {
+        throw new Error(response.error?.message || response.data?.error || 'Unknown error');
+      }
 
       alert('Request submitted successfully!');
       onBack();
