@@ -673,6 +673,14 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 page.select_option("#lr_current_status", "-1")
                 page.wait_for_timeout(1000)
                 
+                print("Clicking Search to apply date range filters...")
+                search_btn = page.locator("input[type='submit'][name='search'], button[type='submit'], button.search_btn, #search_btn").first
+                if search_btn.count() > 0:
+                    search_btn.click()
+                    page.wait_for_timeout(5000)
+                else:
+                    print("Warning: Search button not found on LR page. Data might not be filtered correctly.")
+                
                 print("Downloading LR raw report...")
                 lr_btn = page.locator("a.export_lr_excel, button#excelExport1, #excelExport1").first
                 lr_btn.wait_for(state="visible", timeout=15000)
@@ -2589,11 +2597,8 @@ def main():
 
             target_tabs = [
                 ("Reconciled Audit", result_df),
-                ("All Data", result_df),
                 ("Despatch Data", df_despatch_raw),
-                ("LR Data", df_whole),
-                ("Topay", df_topay),
-                ("Paid", df_paid)
+                ("LR Data", df_whole)
             ]
 
             scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
