@@ -2459,7 +2459,6 @@ def main():
         print("Reconciliation downloads completed successfully. Commencing discrepancy analysis...", flush=True)
         
         # Invoke freight calculation engine
-        import sys
         sys.path.append("/Users/anwar/Antigravity-Related/EFF PARCEL FREIGHT WORKING")
         from freight_calculator import process_freight_data
         
