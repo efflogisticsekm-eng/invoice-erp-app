@@ -4,6 +4,8 @@ sys.path.append("/Users/anwar/Library/Python/3.9/lib/python/site-packages")
 import time
 import smtplib
 import argparse
+import tempfile
+import json
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -2538,38 +2540,7 @@ def main():
             # Prepare clean position-based Despatch Data
             df_despatch_raw = pd.DataFrame()
             try:
-                df_desp_csv = pd.read_csv(despatch_file, header=None, skiprows=1, low_memory=False)
-                if not df_desp_csv.empty:
-                    ui_times = {}
-                    ui_times_file = os.path.join(tempfile.gettempdir(), "ui_despatch_times.json")
-                    if os.path.exists(ui_times_file):
-                        try:
-                            with open(ui_times_file, "r") as f:
-                                ui_times = json.load(f)
-                        except Exception:
-                            pass
-                    
-                    df_despatch_raw['SL NO'] = range(1, len(df_desp_csv) + 1)
-                    df_despatch_raw['DESPATCH NO'] = df_desp_csv.iloc[:, 11].astype(str)
-                    df_despatch_raw['DESPATCH DATE'] = df_desp_csv.iloc[:, 0].astype(str)
-                    
-                    dp_nos = df_despatch_raw['DESPATCH NO'].tolist()
-                    df_despatch_raw['DESPATCH TIME'] = [ui_times.get(dp, {}).get('time', '') for dp in dp_nos]
-                    df_despatch_raw['DESPATCH BRANCH'] = [ui_times.get(dp, {}).get('despatch_branch', '') for dp in dp_nos]
-                    df_despatch_raw['DELIVERY TYPE'] = [ui_times.get(dp, {}).get('delivery_type', '') for dp in dp_nos]
-                    
-                    df_despatch_raw['LR NO'] = df_desp_csv.iloc[:, 4].astype(str)
-                    df_despatch_raw['CONSIGNOR'] = df_desp_csv.iloc[:, 1].astype(str)
-                    df_despatch_raw['CONSIGNEE'] = df_desp_csv.iloc[:, 2].astype(str)
-                    df_despatch_raw['DESTINATION'] = df_desp_csv.iloc[:, 3].astype(str)
-                    df_despatch_raw['INVOICE NO'] = df_desp_csv.iloc[:, 5].astype(str)
-                    df_despatch_raw['WEIGHT'] = df_desp_csv.iloc[:, 6].astype(str)
-                    df_despatch_raw['BOX QTY'] = df_desp_csv.iloc[:, 7].astype(str)
-                    df_despatch_raw['TOTAL FREIGHT'] = df_desp_csv.iloc[:, 9].astype(str)
-                    df_despatch_raw['VALUE OF GOODS'] = df_desp_csv.iloc[:, 10].astype(str)
-                    df_despatch_raw['DELIVERY DATE TIME'] = df_desp_csv.iloc[:, 13].astype(str)
-                    df_despatch_raw['CREATED BY'] = df_desp_csv.iloc[:, 12].astype(str)
-                    df_despatch_raw['LD SUPERVISOR'] = df_desp_csv.iloc[:, 14].astype(str)
+                df_despatch_raw = pd.read_csv(despatch_file, low_memory=False)
             except Exception as desp_err:
                 print("Error parsing despatch file for clean reordering:", desp_err)
                 df_despatch_raw = robust_read_df(despatch_file).fillna("")

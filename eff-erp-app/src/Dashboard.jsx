@@ -6,6 +6,8 @@ import Approvals from './Approvals';
 import PendingOthers from './PendingOthers';
 import MyRequests from './MyRequests';
 import PastHistory from './PastHistory';
+import PettyCash from './PettyCash';
+import GdmExpenseEntry from './GdmExpenseEntry';
 
 export default function Dashboard({ user, onLogout }) {
   const [profile, setProfile] = useState(null);
@@ -49,6 +51,12 @@ export default function Dashboard({ user, onLogout }) {
   }
   if (view === 'past_history') {
     return <PastHistory user={user} profile={profile} onBack={() => setView('dashboard')} />;
+  }
+  if (view === 'petty_cash') {
+    return <PettyCash user={user} profile={profile} onBack={() => setView('dashboard')} />;
+  }
+  if (view === 'gdm_expense') {
+    return <GdmExpenseEntry user={user} profile={profile} onBack={() => setView('dashboard')} />;
   }
 
   return (
@@ -110,8 +118,24 @@ export default function Dashboard({ user, onLogout }) {
           >
             Past History
           </button>
+
+          {/* Petty Cash Button */}
+          <button 
+            className="dashboard-grid-btn"
+            onClick={() => setView('petty_cash')}
+          >
+            Petty Cash Entry
+          </button>
           
-          {/* Fifth button spanning 2 columns: My Requests */}
+          {/* GDM Expense Button */}
+          <button 
+            className="dashboard-grid-btn"
+            onClick={() => setView('gdm_expense')}
+          >
+            GDM Expense Entry
+          </button>
+          
+          {/* My Requests spanning 2 columns */}
           <button 
             className="dashboard-grid-btn"
             style={{ gridColumn: 'span 2' }}
