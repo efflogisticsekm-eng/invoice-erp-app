@@ -658,7 +658,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 
                 # Convert dates to DD-MM-YYYY for input fields
                 if mode in ("daily_evening_report", "afternoon_open_lrs", "reconcile"):
-                    from_dt = datetime.strptime(from_date_str, "%Y-%m-%d") - timedelta(days=60)
+                    from_dt = datetime.strptime(from_date_str, "%Y-%m-%d") - timedelta(days=7)
                 else:
                     from_dt = datetime.strptime(from_date_str, "%Y-%m-%d")
                 to_dt = datetime.strptime(to_date_str, "%Y-%m-%d")
@@ -674,17 +674,19 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 page.wait_for_timeout(1000)
                 
                 print("Clicking Search to apply date range filters...")
+                page.set_default_navigation_timeout(300000)
+                page.set_default_timeout(300000)
                 search_btn = page.locator("input[type='submit'][name='search'], button[type='submit'], button.search_btn, #search_btn").first
                 if search_btn.count() > 0:
-                    search_btn.click()
+                    search_btn.click(no_wait_after=True)
                     page.wait_for_timeout(5000)
                 else:
                     print("Warning: Search button not found on LR page. Data might not be filtered correctly.")
                 
                 print("Downloading LR raw report...")
                 lr_btn = page.locator("a.export_lr_excel, button#excelExport1, #excelExport1").first
-                lr_btn.wait_for(state="visible", timeout=15000)
-                with page.expect_download(timeout=60000) as download_info_lr:
+                lr_btn.wait_for(state="visible", timeout=300000)
+                with page.expect_download(timeout=300000) as download_info_lr:
                     lr_btn.click(no_wait_after=True)
                 download_lr = download_info_lr.value
                 download_lr.save_as(lr_file_path)
