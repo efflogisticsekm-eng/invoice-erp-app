@@ -2540,7 +2540,7 @@ def main():
             # Prepare clean position-based Despatch Data
             df_despatch_raw = pd.DataFrame()
             try:
-                df_despatch_raw = pd.read_csv(despatch_file, low_memory=False)
+                df_despatch_raw = pd.read_csv(despatch_file, low_memory=False, index_col=False)
             except Exception as desp_err:
                 print("Error parsing despatch file for clean reordering:", desp_err)
                 df_despatch_raw = robust_read_df(despatch_file).fillna("")
@@ -2584,6 +2584,8 @@ def main():
                     print(f"Skipping empty dataset for tab '{tab_name}'...", flush=True)
                     continue
 
+                # Ensure NaN/NaT are replaced with empty strings before JSON serialization
+                dataset_df = dataset_df.fillna("")
                 data_to_sync = [dataset_df.columns.tolist()] + dataset_df.values.tolist()
                 print(f"Syncing {len(data_to_sync)-1} rows to tab '{tab_name}' in '{sheet_title}'...", flush=True)
 
