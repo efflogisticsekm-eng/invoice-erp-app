@@ -2371,7 +2371,7 @@ def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_
 # 9. Main orchestrator
 def main():
     parser = argparse.ArgumentParser(description="ERP Dispatch & Delivery Performance Report")
-    parser.add_argument("--mode", choices=["evening", "morning", "daily_evening_report", "afternoon_open_lrs", "reconcile"], required=True, help="Run mode")
+    parser.add_argument("--mode", choices=["evening", "morning", "daily_evening_report", "afternoon_open_lrs", "reconcile", "petty_cash"], required=True, help="Run mode")
     parser.add_argument("--from-date", help="Override from date (YYYY-MM-DD)")
     parser.add_argument("--to-date", help="Override to date (YYYY-MM-DD)")
     parser.add_argument("--from-time", help="Override from time (HH:MM:SS)")
