@@ -43,7 +43,7 @@ jobs:
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       run: |
         # Download raw reports (fetches latest lr_raw, despatch_raw, bill_clear and gdm_details)
-        python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode reconcile
+        python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode petty_cash
 
     - name: Run Petty Cash Reconciliation Script
       env:

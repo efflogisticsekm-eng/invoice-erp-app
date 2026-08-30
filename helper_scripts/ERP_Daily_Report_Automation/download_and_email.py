@@ -378,7 +378,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
     if mode == "evening":
         from_date_str = from_override if from_override else target_date.strftime("%Y-%m-%d")
         to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
-    elif mode in ("daily_evening_report", "afternoon_open_lrs"):
+    elif mode in ("daily_evening_report", "afternoon_open_lrs", "petty_cash"):
         # Resolve dynamic lookback to find the last working day (non-Sunday, non-holiday)
         holidays_list = fetch_holidays()
         lookback_date = target_date - timedelta(days=1)
@@ -386,7 +386,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
             lookback_date -= timedelta(days=1)
         from_date_str = from_override if from_override else lookback_date.strftime("%Y-%m-%d")
         to_date_str = to_override if to_override else target_date.strftime("%Y-%m-%d")
-    elif mode == "reconcile":
+    elif mode in ("reconcile", "petty_cash"):
         holidays_list = fetch_holidays()
         yesterday = target_date - timedelta(days=1)
         # 52-Day Rolling Window: Previous Month 21st -> Current Month -> Next Month 10th
@@ -658,41 +658,68 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     except Exception as nav_err:
                         print("Re-login navigation timeout. Current URL:", page.url)
                 
-                # Convert dates to DD-MM-YYYY for input fields
-                if mode in ("daily_evening_report", "afternoon_open_lrs", "reconcile"):
-                    from_dt = datetime.strptime(from_date_str, "%Y-%m-%d") - timedelta(days=7)
-                else:
-                    from_dt = datetime.strptime(from_date_str, "%Y-%m-%d")
-                to_dt = datetime.strptime(to_date_str, "%Y-%m-%d")
-                from_date_lr = from_dt.strftime("%d-%m-%Y")
-                to_date_lr = to_dt.strftime("%d-%m-%Y")
+                # Convert dates for chunking
+                from_dt_full = datetime.strptime(from_date_str, "%Y-%m-%d")
+                to_dt_full = datetime.strptime(to_date_str, "%Y-%m-%d")
                 
-                print(f"Entering dates on LR search form: Date From={from_date_lr}, Date To={to_date_lr}")
-                page.fill("#search_date", from_date_lr)
-                page.fill("#search_date_to", to_date_lr)
+                # We will chunk the LR download into 15-day intervals
+                current_start = from_dt_full
+                lr_dfs = []
+                chunk_idx = 1
                 
                 print("Selecting 'All' in LR Current Status filter...")
                 page.select_option("#lr_current_status", "-1")
                 page.wait_for_timeout(1000)
                 
-                print("Clicking Search to apply date range filters...")
-                page.set_default_navigation_timeout(300000)
-                page.set_default_timeout(300000)
-                search_btn = page.locator("input[type='submit'][name='search'], button[type='submit'], button.search_btn, #search_btn").first
-                if search_btn.count() > 0:
-                    search_btn.click(no_wait_after=True)
-                    page.wait_for_timeout(5000)
-                else:
-                    print("Warning: Search button not found on LR page. Data might not be filtered correctly.")
+                while current_start <= to_dt_full:
+                    current_end = current_start + timedelta(days=15)
+                    if current_end > to_dt_full:
+                        current_end = to_dt_full
+                        
+                    from_date_lr = current_start.strftime("%d-%m-%Y")
+                    to_date_lr = current_end.strftime("%d-%m-%Y")
+                    
+                    print(f"Entering dates on LR search form for Chunk {chunk_idx}: Date From={from_date_lr}, Date To={to_date_lr}")
+                    page.fill("#search_date", from_date_lr)
+                    page.fill("#search_date_to", to_date_lr)
+                    
+                    print(f"Clicking Search for Chunk {chunk_idx}...")
+                    page.set_default_navigation_timeout(300000)
+                    page.set_default_timeout(300000)
+                    search_btn = page.locator("input[type='submit'][name='search'], button[type='submit'], button.search_btn, #search_btn").first
+                    if search_btn.count() > 0:
+                        search_btn.click(no_wait_after=True)
+                        page.wait_for_timeout(5000)
+                    else:
+                        print("Warning: Search button not found on LR page.")
+                    
+                    print(f"Downloading LR raw report Chunk {chunk_idx}...")
+                    lr_btn = page.locator("a.export_lr_excel, button#excelExport1, #excelExport1").first
+                    lr_btn.wait_for(state="visible", timeout=300000)
+                    
+                    chunk_file_path = os.path.join(DOWNLOAD_DIR, f"lr_raw_chunk_{chunk_idx}.xlsx")
+                    with page.expect_download(timeout=300000) as download_info_lr:
+                        lr_btn.click(no_wait_after=True)
+                    download_lr = download_info_lr.value
+                    download_lr.save_as(chunk_file_path)
+                    print(f"LR raw report Chunk {chunk_idx} saved.")
+                    
+                    try:
+                        chunk_df = robust_read_df(chunk_file_path)
+                        lr_dfs.append(chunk_df)
+                    except Exception as chunk_e:
+                        print(f"Error parsing chunk {chunk_idx}: {chunk_e}")
+                    current_start = current_end + timedelta(days=1)
+                    chunk_idx += 1
                 
-                print("Downloading LR raw report...")
-                lr_btn = page.locator("a.export_lr_excel, button#excelExport1, #excelExport1").first
-                lr_btn.wait_for(state="visible", timeout=300000)
-                with page.expect_download(timeout=300000) as download_info_lr:
-                    lr_btn.click(no_wait_after=True)
-                download_lr = download_info_lr.value
-                download_lr.save_as(lr_file_path)
-                print("LR raw report saved to:", lr_file_path)
+                print("Merging LR Data chunks...")
+                if lr_dfs:
+                    combined_lr_df = pd.concat(lr_dfs, ignore_index=True)
+                    combined_lr_df.to_excel(lr_file_path, index=False)
+                    print("Combined LR raw report saved to:", lr_file_path)
+                else:
+                    print("Failed to download or parse any LR Data chunks.")
+
                  
                 # --- NEW: Discover Active Consignors and GDMs from Google Sheets ---
                 consignors, gdms = discover_consignors_and_gdms()
@@ -886,7 +913,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                         json.dump(gdm_details, json_f, indent=4)
                     print(f"Saved GDM details map to: {gdm_json_path}", flush=True)
                  
-                return lr_file_path if mode in ("morning", "daily_evening_report", "afternoon_open_lrs", "reconcile") else None, despatch_file_path if mode != "afternoon_open_lrs" else None, from_date_str, to_date_str
+                return lr_file_path if mode in ("morning", "daily_evening_report", "afternoon_open_lrs", "reconcile", "petty_cash") else None, despatch_file_path if mode != "afternoon_open_lrs" else None, from_date_str, to_date_str
             
         except Exception as e:
             print("Error downloading from ERP:", e)
