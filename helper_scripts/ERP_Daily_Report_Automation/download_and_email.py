@@ -705,9 +705,17 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     print(f"LR raw report Chunk {chunk_idx} saved.")
                     
                     try:
-                        chunk_df = robust_read_df(chunk_file_path)
+                        import pandas as pd
+                        try:
+                            chunk_df = pd.read_excel(chunk_file_path)
+                        except Exception:
+                            try:
+                                chunk_df = pd.read_html(chunk_file_path)[0]
+                            except Exception:
+                                chunk_df = pd.read_csv(chunk_file_path)
                         lr_dfs.append(chunk_df)
                     except Exception as chunk_e:
+                        print(f"Error parsing chunk {chunk_idx}: {chunk_e}")
                         print(f"Error parsing chunk {chunk_idx}: {chunk_e}")
                     current_start = current_end + timedelta(days=1)
                     chunk_idx += 1
