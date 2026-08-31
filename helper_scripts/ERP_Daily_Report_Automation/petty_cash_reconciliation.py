@@ -243,7 +243,7 @@ def main():
     # Sunday is 6
     if now_ist.weekday() == 6:
         print(f"Today ({today_str}) is Sunday. Skipping Petty Cash Reconciliation gracefully.", flush=True)
-        # sys.exit(0)
+        sys.exit(0)
 
     # Fetch holidays from Supabase to check if today is a holiday
     supabase_url = os.getenv("SUPABASE_URL")
@@ -261,7 +261,7 @@ def main():
             holidays = [item.get("date").strip() for item in holidays_data if item.get("date")]
             if today_str in holidays:
                 print(f"Today ({today_str}) is a marked holiday. Skipping Petty Cash Reconciliation gracefully.", flush=True)
-                # sys.exit(0)
+                sys.exit(0)
             else:
                 print("Today is not a marked holiday. Proceeding...", flush=True)
         except Exception as e:
@@ -1673,11 +1673,6 @@ def main():
     # 8. Send Email Report
     print("Preparing daily email report...", flush=True)
     recipients = ["anwar@efflogistics.biz"]
-    if RECEIVER_EMAIL:
-        for r in RECEIVER_EMAIL.split(","):
-            email_clean = r.strip()
-            if email_clean and email_clean not in recipients:
-                recipients.append(email_clean)
                 
     if not SENDER_EMAIL or not SENDER_PASSWORD:
         print("Warning: SENDER_EMAIL or SENDER_PASSWORD not set. Skipping email dispatch.", flush=True)
