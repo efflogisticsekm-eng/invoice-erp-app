@@ -21,8 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Ensure playwright and other required packages are installed
-          pip install playwright pandas gspread oauth2client python-dotenv beautifulsoup4 lxml openpyxl
+          pip install playwright pandas gspread oauth2client python-dotenv beautifulsoup4 lxml openpyxl Pillow numpy requests
           playwright install --with-deps chromium
 
       - name: Run ERP Download and Email Flow
