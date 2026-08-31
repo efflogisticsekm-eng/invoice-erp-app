@@ -63,8 +63,8 @@ ERP_USERNAME = clean_env_var(ERP_USERNAME)
 ERP_PASSWORD = clean_env_var(ERP_PASSWORD)
 SUPABASE_URL = clean_env_var(SUPABASE_URL)
 SUPABASE_KEY = clean_env_var(SUPABASE_KEY)
-SENDER_EMAIL = clean_env_var(SENDER_EMAIL)
-SENDER_PASSWORD = clean_env_var(SENDER_PASSWORD)
+SENDER_EMAIL = os.getenv("SENDER_EMAIL")
+SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 RECEIVER_EMAIL = clean_env_var(RECEIVER_EMAIL)
 # Support comma-separated list of receivers and ensure salim@efflogistics.biz and shajahan@efflogistics.biz are added
 receivers_list = [r.strip() for r in RECEIVER_EMAIL.split(",") if r.strip()]
