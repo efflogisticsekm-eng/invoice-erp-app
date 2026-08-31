@@ -1,0 +1,109 @@
+import re
+with open("src/Scanner.jsx", "r") as f:
+    content = f.read()
+
+target = """      const customFetch = (url, options) => {
+        const newOptions = { ...options };
+        newOptions.headers = new Headers(options.headers);
+        if (newOptions.headers.has('apikey')) {
+          newOptions.headers.set('apikey', adminKey);
+        }
+        if (newOptions.headers.has('Authorization')) {
+          newOptions.headers.set('Authorization', `Bearer ${adminKey}`);
+        }
+        return fetch(url, newOptions);
+      };
+      
+      const adminSupabase = createClient(
+        import.meta.env.VITE_SUPABASE_URL,
+        import.meta.env.VITE_SUPABASE_ANON_KEY,
+        { global: { fetch: customFetch } }
+      );
+      
+      const profileData = {
+        id: user.id,
+        full_name: user.email || 'User',
+        role: userRole || 'User',
+        branch: userProfile?.branch || null
+      };
+      
+      await adminSupabase.from('profiles').upsert(profileData, { onConflict: 'id', ignoreDuplicates: true });
+      
+      const expenseData = {
+          user_id: user.id,
+          category: finalCategory,
+          sub_category: subCategory || null,
+          amount: parseFloat(amount) || 0,
+          gst_amount: parseFloat(gstAmount) || 0,
+          total_amount: parseFloat(totalAmount) || 0,
+          current_level: nextLevel,
+          status: 'Pending',
+          image_url: compressedBase64 || null,
+          branch: userProfile?.branch || null,
+          details: {
+            vehicleNo, odometerReading, workshopName, paymentType, putDescription, toWhom,
+            lrNo, lrDate, totalWeight, totalBox, destination, approximateKm, vehicleType, 
+            vehicleRent, unionCharges, rentAdvance, vendor, balanceAmount,
+            bankName, accountNumber, ifscCode, branchName,
+            cgstAmount: parseFloat(cgstAmount) || 0,
+            sgstAmount: parseFloat(sgstAmount) || 0,
+            igstAmount: parseFloat(igstAmount) || 0
+          }
+      };
+      
+      const { error: insertError } = await adminSupabase.from('expense_requests').insert(expenseData);
+      
+      if (insertError) {
+        throw new Error(insertError.message);
+      }"""
+
+replacement = """      // 1. Update Profile (using Standard Client)
+      const profileData = {
+        id: user.id,
+        full_name: user.email || 'User',
+        role: userRole || 'User',
+        branch: userProfile?.branch || null
+      };
+      await supabase.from('profiles').upsert(profileData, { onConflict: 'id', ignoreDuplicates: true });
+
+      // 2. Insert Expense Request (using Standard Client)
+      const expenseData = {
+          user_id: user.id,
+          category: finalCategory,
+          sub_category: subCategory || null,
+          amount: parseFloat(amount) || 0,
+          gst_amount: parseFloat(gstAmount) || 0,
+          total_amount: parseFloat(totalAmount) || 0,
+          current_level: nextLevel,
+          status: 'Pending',
+          image_url: compressedBase64 || null,
+          branch: userProfile?.branch || null,
+          details: {
+            vehicleNo, odometerReading, workshopName, paymentType, putDescription, toWhom,
+            lrNo, lrDate, totalWeight, totalBox, destination, approximateKm, vehicleType, 
+            vehicleRent, unionCharges, rentAdvance, vendor, balanceAmount,
+            bankName, accountNumber, ifscCode, branchName,
+            cgstAmount: parseFloat(cgstAmount) || 0,
+            sgstAmount: parseFloat(sgstAmount) || 0,
+            igstAmount: parseFloat(igstAmount) || 0
+          }
+      };
+      
+      const { error: insertError } = await supabase.from('expense_requests').insert(expenseData);
+      if (insertError) {
+        throw new Error(insertError.message);
+      }"""
+
+content = content.replace(target, replacement)
+
+# Remove the base64 stuff and createClient import
+target2 = """      // Directly insert using decoded admin client
+      const encodedKey = "c2Jfc2VjcmV0X3BWVE8xYTNmdkpzbXJJSW00bkwzUndfLTdZeTFGUG4=";
+      const adminKey = atob(encodedKey);"""
+content = content.replace(target2, "")
+
+target3 = 'import { createClient } from "@supabase/supabase-js";\n'
+content = content.replace(target3, "")
+
+with open("src/Scanner.jsx", "w") as f:
+    f.write(content)

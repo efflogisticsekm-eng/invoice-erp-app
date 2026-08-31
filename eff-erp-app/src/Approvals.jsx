@@ -80,7 +80,13 @@ export default function Approvals({ user, profile, onBack }) {
       }
 
       // Update the request - only update current_level if it's not fully approved
-      const updateData = { status: newStatus };
+      const updatedDetails = { ...(request.details || {}) };
+      if (!updatedDetails.approvalChain) {
+        updatedDetails.approvalChain = [];
+      }
+      updatedDetails.approvalChain.push(`${profile.full_name} (${profile.role})`);
+
+      const updateData = { status: newStatus, details: updatedDetails };
       if (newStatus !== 'Approved') {
         updateData.current_level = nextLevel;
       }
@@ -117,7 +123,7 @@ export default function Approvals({ user, profile, onBack }) {
                 user_role: request.profiles?.full_name || 'User',
                 branch: request.branch || 'HO',
                 status: 'Approved',
-                details: request.details || {}
+                details: updatedDetails
               })
             });
             if (res.ok) syncStatus = 'Success';
@@ -128,7 +134,7 @@ export default function Approvals({ user, profile, onBack }) {
           console.error('Webhook failed', e);
         }
 
-        const updatedDetails = { ...(request.details || {}), sheetSync: syncStatus };
+        updatedDetails.sheetSync = syncStatus;
         await supabase.from('expense_requests').update({ details: updatedDetails }).eq('id', request.id);
       }
 

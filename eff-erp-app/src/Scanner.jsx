@@ -23,6 +23,18 @@ export default function Scanner({ user, onBack }) {
   const [totalAmount, setTotalAmount] = useState('');
   const [toWhom, setToWhom] = useState('');
   
+  // New PDF Fields
+  const [unitItem, setUnitItem] = useState('');
+  const [qty, setQty] = useState('');
+  const [rate, setRate] = useState('');
+  const [billNo, setBillNo] = useState('');
+  const [billDate, setBillDate] = useState('');
+  const [billingGstin, setBillingGstin] = useState('');
+  const [billingPartyName, setBillingPartyName] = useState('');
+  const [advanceAmount, setAdvanceAmount] = useState('');
+  const [paymentToName, setPaymentToName] = useState('');
+  const [accountName, setAccountName] = useState('');
+  
   // Dynamic Fields
   const [vehicleNo, setVehicleNo] = useState('');
   const [odometerReading, setOdometerReading] = useState('');
@@ -118,7 +130,14 @@ export default function Scanner({ user, onBack }) {
 
   // Calculate amounts automatically
   React.useEffect(() => {
-    const baseAmt = parseFloat(amount) || 0;
+    const q = parseFloat(qty);
+    const r = parseFloat(rate);
+    let baseAmt = parseFloat(amount) || 0;
+    if (!isNaN(q) && !isNaN(r)) {
+      baseAmt = q * r;
+      setAmount(baseAmt.toString());
+    }
+
     let calcGst = 0;
     if (gstApplicable) {
       calcGst = baseAmt * (parseFloat(gstRate) / 100);
@@ -145,10 +164,10 @@ export default function Scanner({ user, onBack }) {
     const t = baseAmt + calcGst + union;
     setTotalAmount(t > 0 ? t.toFixed(2) : '');
 
-    const advance = parseFloat(rentAdvance) || 0;
+    const advance = parseFloat(advanceAmount) || 0;
     const bal = t - advance;
     setBalanceAmount(bal > 0 ? bal.toFixed(2) : '');
-  }, [amount, gstApplicable, gstType, gstRate, rentAdvance, unionCharges]);
+  }, [qty, rate, gstApplicable, gstType, gstRate, advanceAmount, unionCharges]);
 
   const uniqueVehicleTypes = [...new Set(vehiclesList.map(v => v.vehicle_type).filter(Boolean))];
 
@@ -458,13 +477,16 @@ export default function Scanner({ user, onBack }) {
           image_url: compressedBase64 || null,
           branch: userProfile?.branch || null,
           details: {
+            unitItem, qty, rate, billNo, billDate, billingGstin, billingPartyName, 
+            advance: advanceAmount, paymentToName, accountName,
             vehicleNo, odometerReading, workshopName, paymentType, putDescription, toWhom,
             lrNo, lrDate, totalWeight, totalBox, destination, approximateKm, vehicleType, 
             vehicleRent, unionCharges, rentAdvance, vendor, balanceAmount,
             bankName, accountNumber, ifscCode, branchName,
             cgstAmount: parseFloat(cgstAmount) || 0,
             sgstAmount: parseFloat(sgstAmount) || 0,
-            igstAmount: parseFloat(igstAmount) || 0
+            igstAmount: parseFloat(igstAmount) || 0,
+            gstRate
           }
       };
       
@@ -809,8 +831,30 @@ export default function Scanner({ user, onBack }) {
           )}
 
           <div style={{ opacity: ((mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') && !gdmNumber.trim()) ? 0.5 : 1, pointerEvents: ((mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') && !gdmNumber.trim()) ? 'none' : 'auto' }}>
+            
+            <h3 style={{ color: 'var(--primary)', marginBottom: '15px', borderBottom: '2px solid var(--primary)', paddingBottom: '5px', marginTop: '20px' }}>4. Bill & Vendor Details</h3>
+            
+            <div className="input-group"><label>Unit / Item</label><input type="text" className="input-field" value={unitItem} onChange={e => setUnitItem(e.target.value)} placeholder="e.g. Daily Rent, Oil & consumables" /></div>
+            
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <div className="input-group" style={{ flex: 1 }}><label>Qty</label><input type="number" inputMode="decimal" className="input-field" value={qty} onChange={e => setQty(e.target.value)} /></div>
+              <div className="input-group" style={{ flex: 1 }}><label>Rate</label><input type="number" inputMode="decimal" className="input-field" value={rate} onChange={e => setRate(e.target.value)} /></div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <div className="input-group" style={{ flex: 1 }}><label>Bill No</label><input type="text" className="input-field" value={billNo} onChange={e => setBillNo(e.target.value)} /></div>
+              <div className="input-group" style={{ flex: 1 }}><label>Bill Date</label><input type="date" className="input-field" value={billDate} onChange={e => setBillDate(e.target.value)} /></div>
+            </div>
+
+            <div className="input-group"><label>Billing Party Name</label><input type="text" className="input-field" value={billingPartyName} onChange={e => setBillingPartyName(e.target.value)} /></div>
+            <div className="input-group"><label>Billing Party GSTIN</label><input type="text" className="input-field" value={billingGstin} onChange={e => setBillingGstin(e.target.value)} /></div>
+            <div className="input-group"><label>Advance Paid (₹)</label><input type="number" inputMode="decimal" className="input-field" value={advanceAmount} onChange={e => setAdvanceAmount(e.target.value)} /></div>
+            <div className="input-group"><label>Payment To Name</label><input type="text" className="input-field" value={paymentToName} onChange={e => setPaymentToName(e.target.value)} /></div>
+            
+            <h3 style={{ color: 'var(--primary)', marginBottom: '15px', borderBottom: '2px solid var(--primary)', paddingBottom: '5px', marginTop: '20px' }}>5. Tax & Amount Details</h3>
+
             <div className="input-group">
-              <label>Amount (Without GST) (Extracted via AI)</label>
+              <label>Amount (Without GST) (Auto-calculated if Qty & Rate are set)</label>
               <input type="number" inputMode="decimal" className="input-field" value={amount} onChange={e => setAmount(e.target.value)} required />
             </div>
 
