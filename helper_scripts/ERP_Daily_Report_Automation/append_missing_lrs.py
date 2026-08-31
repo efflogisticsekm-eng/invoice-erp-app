@@ -6,6 +6,8 @@ from bs4 import BeautifulSoup
 import time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
+import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "libs"))
 from playwright.sync_api import sync_playwright
@@ -49,10 +51,18 @@ def generate_date_batches(start_str, end_str, batch_days=3):
     return batches
 
 def get_or_create_sheet():
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
-    client = gspread.authorize(creds)
+    creds_path = CREDENTIALS_FILE
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    
+    google_creds_env = os.getenv("GOOGLE_CREDENTIALS_JSON")
     try:
+        if google_creds_env:
+            creds_dict = json.loads(google_creds_env)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        else:
+            creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
+            
+        client = gspread.authorize(creds)
         return client.open(GOOGLE_SHEET_NAME)
     except Exception as e:
         print(f"Error accessing sheet: {e}")
@@ -119,24 +129,34 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
     batches = generate_date_batches(start_date_str, end_date_str, batch_days=3)
     print(f"🚀 Starting V7 HTML-Batched Extraction for {len(batches)} batches...")
     
-    consignor_mapping = {}
-    print("📋 Loading Consignor Prefix Mapping from Google Sheet...")
+    lr_mapping = {}
+    print("📋 Loading Consignor Mapping from LR Data Google Sheet...")
     spreadsheet = get_or_create_sheet()
     if not spreadsheet:
         return
         
     try:
-        ws = spreadsheet.worksheet("CONSIGNOR CODE")
-        mapping_vals = ws.get_all_values()[1:]
-        for row in mapping_vals:
-            if len(row) >= 2:
-                code_val = row[1].strip().upper()
-                consignor = row[0].strip()
-                if code_val:
-                    consignor_mapping[code_val] = consignor
-        print(f"✅ Loaded {len(consignor_mapping)} consignor prefix mappings.")
+        ws = spreadsheet.worksheet("LR Data")
+        headers = ws.row_values(1)
+        headers_upper = [h.strip().upper() for h in headers]
+        lr_idx = headers_upper.index("LR NO") if "LR NO" in headers_upper else -1
+        cons_idx = headers_upper.index("CONSIGNOR") if "CONSIGNOR" in headers_upper else -1
+        if cons_idx == -1 and "CONSIGNOR_NAME" in headers_upper:
+            cons_idx = headers_upper.index("CONSIGNOR_NAME")
+            
+        if lr_idx != -1 and cons_idx != -1:
+            mapping_vals = ws.get_all_values()[1:]
+            for row in mapping_vals:
+                if len(row) > max(lr_idx, cons_idx):
+                    lr_val = row[lr_idx].strip().upper()
+                    consignor = row[cons_idx].strip()
+                    if lr_val:
+                        lr_mapping[lr_val] = consignor
+            print(f"✅ Loaded {len(lr_mapping)} LR to Consignor mappings.")
+        else:
+            print("⚠️ Required columns not found in LR Data.")
     except Exception as e:
-        print(f"⚠️ Could not load consignor mapping: {e}")
+        print(f"⚠️ Could not load LR mapping: {e}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-gpu"])
@@ -215,10 +235,9 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
                             continue
                             
                         found_consignor = ""
-                        for code, consignor_name in consignor_mapping.items():
-                            if lr_no.startswith(code):
-                                found_consignor = consignor_name
-                                break
+                        lr_no_upper = lr_no.strip().upper()
+                        if lr_no_upper in lr_mapping:
+                            found_consignor = lr_mapping[lr_no_upper]
                                 
                         # Build standard row
                         row_dict = {col: "" for col in EXPECTED_COLUMNS}
@@ -320,19 +339,21 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--historical", action="store_true")
+    parser.add_argument("--from-date", type=str, help="Start date (DD/MM/YYYY)")
+    parser.add_argument("--to-date", type=str, help="End date (DD/MM/YYYY)")
     args = parser.parse_args()
     
     if args.historical:
         print("Running historical rebuild (01/07/2026 to 26/08/2026)...")
         run_smart_html_extraction(start_date_str="01/07/2026", end_date_str="26/08/2026", append_mode=False)
+    elif args.from_date and args.to_date:
+        print(f"Running manual extraction for {args.from_date} to {args.to_date}...")
+        run_smart_html_extraction(start_date_str=args.from_date, end_date_str=args.to_date, append_mode=True)
     else:
         # Fetch last 7 days to safely cover weekends and holidays without duplicates
         today = datetime.now()
-        yesterday = today - timedelta(days=1)
         seven_days_ago = today - timedelta(days=7)
-        
-        start_ds = seven_days_ago.strftime("%d/%m/%Y")
-        end_ds = yesterday.strftime("%d/%m/%Y")
-        
-        print(f"Running daily append for the last 7 days ({start_ds} to {end_ds})...")
-        run_smart_html_extraction(start_date_str=start_ds, end_date_str=end_ds, append_mode=True)
+        start_str = seven_days_ago.strftime("%d/%m/%Y")
+        end_str = today.strftime("%d/%m/%Y")
+        print(f"Running daily append mode ({start_str} to {end_str})...")
+        run_smart_html_extraction(start_date_str=start_str, end_date_str=end_str, append_mode=True)

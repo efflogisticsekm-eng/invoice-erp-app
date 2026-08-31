@@ -124,13 +124,20 @@ def discover_consignors_and_gdms():
     gdms = set()
     
     creds_path = "ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
-    if not os.path.exists(creds_path):
-        print(f"Google credentials not found at {creds_path}. Skipping sheet discovery.", flush=True)
+    google_creds_env = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    
+    if not google_creds_env and not os.path.exists(creds_path):
+        print(f"Google credentials not found. Skipping sheet discovery.", flush=True)
         return consignors, gdms
         
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
+        if google_creds_env:
+            import json
+            creds_dict = json.loads(google_creds_env)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        else:
+            creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
         client = gspread.authorize(creds)
         # Wrapped in a retry loop to handle transient 503 errors
         all_sheets = []
@@ -706,16 +713,27 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     
                     try:
                         import pandas as pd
+                        import csv
                         try:
                             chunk_df = pd.read_excel(chunk_file_path)
                         except Exception:
-                            try:
-                                chunk_df = pd.read_html(chunk_file_path)[0]
-                            except Exception:
-                                chunk_df = pd.read_csv(chunk_file_path)
+                            # Try custom CSV parser for uneven columns (barcodes)
+                            cleaned_rows = []
+                            with open(chunk_file_path, "r", encoding="utf-8-sig") as f_csv:
+                                reader = csv.reader(f_csv)
+                                header = next(reader)
+                                num_cols = len(header)
+                                cleaned_rows.append(header)
+                                for row in reader:
+                                    if len(row) > num_cols:
+                                        row[num_cols-1] = ",".join(row[num_cols-1:])
+                                        row = row[:num_cols]
+                                    elif len(row) < num_cols:
+                                        row.extend([""] * (num_cols - len(row)))
+                                    cleaned_rows.append(row)
+                            chunk_df = pd.DataFrame(cleaned_rows[1:], columns=cleaned_rows[0])
                         lr_dfs.append(chunk_df)
                     except Exception as chunk_e:
-                        print(f"Error parsing chunk {chunk_idx}: {chunk_e}")
                         print(f"Error parsing chunk {chunk_idx}: {chunk_e}")
                     current_start = current_end + timedelta(days=1)
                     chunk_idx += 1
@@ -2609,9 +2627,19 @@ def main():
                 ("LR Data", df_whole)
             ]
 
+            creds_path = "/Users/anwar/Antigravity-Related/ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
             scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-            creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
-            client = gspread.authorize(creds)
+            google_creds_env = os.getenv("GOOGLE_CREDENTIALS_JSON")
+            
+            if google_creds_env:
+                import json
+                creds_dict = json.loads(google_creds_env)
+                creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+                client = gspread.authorize(creds)
+            elif os.path.exists(creds_path):
+                creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
+                client = gspread.authorize(creds)
+            
             sh = client.open(sheet_title)
 
             for tab_name, dataset_df in target_tabs:
@@ -2626,18 +2654,27 @@ def main():
 
                 try:
                     ws = sh.worksheet(tab_name)
-                    ws.clear()
-                    if ws.row_count < len(data_to_sync) + 100:
-                        ws.resize(rows=len(data_to_sync) + 100, cols=max(30, len(dataset_df.columns)))
+                    if not args.from_date:
+                        ws.clear()
+                        if ws.row_count < len(data_to_sync) + 100:
+                            ws.resize(rows=len(data_to_sync) + 100, cols=max(30, len(dataset_df.columns)))
                 except gspread.exceptions.WorksheetNotFound:
                     ws = sh.add_worksheet(title=tab_name, rows=str(max(1000, len(data_to_sync)+100)), cols=str(max(30, len(dataset_df.columns))))
 
-                chunk_size = 5000
-                for i in range(0, len(data_to_sync), chunk_size):
-                    chunk = data_to_sync[i:i+chunk_size]
-                    start_row = i + 1
-                    ws.update(range_name=f"A{start_row}", values=chunk)
-                print(f"  ✅ Tab '{tab_name}' synced ({len(data_to_sync)-1} rows).", flush=True)
+                if args.from_date:
+                    # Append mode: skip header row
+                    chunk_size = 5000
+                    rows_to_append = dataset_df.values.tolist()
+                    print(f"  Appending {len(rows_to_append)} rows to '{tab_name}'...", flush=True)
+                    ws.append_rows(rows_to_append, value_input_option='USER_ENTERED')
+                else:
+                    # Overwrite mode
+                    chunk_size = 5000
+                    for i in range(0, len(data_to_sync), chunk_size):
+                        chunk = data_to_sync[i:i+chunk_size]
+                        start_row = i + 1
+                        ws.update(range_name=f"A{start_row}", values=chunk)
+                print(f"  ✅ Tab '{tab_name}' synced.", flush=True)
 
             print("🎉 Success! Reconciled Audit, All Data, Topay, and Paid tabs synced to Google Sheets.", flush=True)
 
@@ -2662,6 +2699,11 @@ def main():
                         ash = client.open(archive_title)
                     except gspread.exceptions.SpreadsheetNotFound:
                         ash = client.create(archive_title)
+                        try:
+                            ash.share("efflogistics.ekm@gmail.com", perm_type="user", role="writer")
+                            print(f"📧 Shared newly created archive sheet with efflogistics.ekm@gmail.com", flush=True)
+                        except Exception as share_err:
+                            print(f"⚠️ Could not share the archive sheet: {share_err}", flush=True)
                     try:
                         aws = ash.worksheet("Archive")
                     except gspread.exceptions.WorksheetNotFound:
