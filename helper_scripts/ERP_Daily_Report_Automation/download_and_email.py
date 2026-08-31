@@ -375,10 +375,8 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
     # Resolve the target date for reporting.
     # If running before 12:00 PM (noon) IST, treat it as a delayed run for the previous calendar day.
     if mode in ("daily_evening_report", "evening", "afternoon_open_lrs"):
-        if now_ist.hour < 12:
-            target_date = now_ist - timedelta(days=1)
-        else:
-            target_date = now_ist
+        # Always use yesterday as the target date for the daily report
+        target_date = now_ist - timedelta(days=1)
     else:
         target_date = now_ist
         
@@ -2448,12 +2446,9 @@ def main():
         ist_tz = timezone(timedelta(hours=5, minutes=30))
         now_ist = datetime.now(ist_tz)
         
-        # If running before 12:00 PM (noon) IST, treat it as a delayed run for the previous calendar day.
-        if now_ist.hour < 12:
-            target_date = now_ist - timedelta(days=1)
-        else:
-            target_date = now_ist
-            
+        # Always use yesterday as the target date for the daily report
+        target_date = now_ist - timedelta(days=1)
+        
         today_str = target_date.strftime("%Y-%m-%d")
         # On Monday evenings (or when the target date is Monday), default starting date is Saturday (2 days ago)
         # Resolve yesterday_str by looking back to find the last working day (non-Sunday, non-holiday)
@@ -2622,9 +2617,9 @@ def main():
                     df_whole[col] = df_whole[col].astype(str)
 
             target_tabs = [
-                ("Reconciled Audit", result_df),
+                ("LR Data", df_whole),
                 ("Despatch Data", df_despatch_raw),
-                ("LR Data", df_whole)
+                ("Reconciled Audit", result_df)
             ]
 
             creds_path = "/Users/anwar/Antigravity-Related/ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
