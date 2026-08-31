@@ -2,8 +2,8 @@ name: Daily ERP Automation
 
 on:
   schedule:
-    # Runs at 06:30 UTC which is 12:00 PM IST every Monday to Saturday (1-6)
-    - cron: '30 6 * * 1-6'
+    # Runs at 08:00 UTC which is 1:30 PM IST every Monday to Saturday (1-6)
+    - cron: '0 8 * * 1-6'
   workflow_dispatch: # Allows manual trigger from the Actions tab
 
 jobs:
