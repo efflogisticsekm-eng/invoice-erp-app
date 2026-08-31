@@ -32,6 +32,8 @@ jobs:
           SENDER_EMAIL: "efflogistics.ekm@gmail.com"
           SENDER_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
           RECEIVER_EMAIL: "efflogistics.ekm@gmail.com"
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           cd helper_scripts/ERP_Daily_Report_Automation
           # Run the main flow with --mode daily_evening_report
