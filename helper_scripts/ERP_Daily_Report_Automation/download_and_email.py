@@ -2471,7 +2471,7 @@ def main():
         
         # Email report (Disabled by user request)
         is_delayed = check_if_delayed("daily_evening_report")
-        # email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors, delay_tables_html, is_delayed=is_delayed)
+        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors, delay_tables_html, is_delayed=is_delayed)
         print("Daily Evening report flow execution completed successfully.")
         
     elif args.mode == "morning":
@@ -2488,7 +2488,7 @@ def main():
         
         # Email report (Disabled by user request)
         is_delayed = check_if_delayed("morning")
-        # email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors, delay_tables_html, is_delayed=is_delayed)
+        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors, delay_tables_html, is_delayed=is_delayed)
         print("Morning flow execution completed successfully.")
 
     elif args.mode == "afternoon_open_lrs":
