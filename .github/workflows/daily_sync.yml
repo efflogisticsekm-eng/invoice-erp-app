@@ -2,9 +2,18 @@ name: Daily ERP Automation
 
 on:
   schedule:
-    # Runs at 08:00 UTC which is 1:30 PM IST every Monday to Saturday (1-6)
-    - cron: '0 8 * * 1-6'
-  workflow_dispatch: # Allows manual trigger from the Actions tab
+    # Runs at 06:30 UTC which is 12:00 PM (Noon) IST every Monday to Saturday (1-6)
+    - cron: '30 6 * * 1-6'
+  workflow_dispatch:
+    inputs:
+      from_date:
+        description: 'From Date (YYYY-MM-DD)'
+        required: false
+        type: string
+      to_date:
+        description: 'To Date (YYYY-MM-DD)'
+        required: false
+        type: string
 
 jobs:
   run-sync:
@@ -36,13 +45,21 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           cd helper_scripts/ERP_Daily_Report_Automation
-          # Run the main flow with --mode daily_evening_report
-          # This pulls yesterday's and today's data, emails the report, and updates sheets
-          python download_and_email.py --mode daily_evening_report
+          if [ -n "${{ github.event.inputs.from_date }}" ] && [ -n "${{ github.event.inputs.to_date }}" ]; then
+            python download_and_email.py --mode daily_evening_report --from-date "${{ github.event.inputs.from_date }}" --to-date "${{ github.event.inputs.to_date }}"
+          else
+            python download_and_email.py --mode daily_evening_report
+          fi
 
       - name: Run Append Missing LRs Flow
         env:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: |
           cd helper_scripts/ERP_Daily_Report_Automation
-          python append_missing_lrs.py
+          if [ -n "${{ github.event.inputs.from_date }}" ] && [ -n "${{ github.event.inputs.to_date }}" ]; then
+            FROM_DATE_DMY=$(date -d "${{ github.event.inputs.from_date }}" +'%d/%m/%Y')
+            TO_DATE_DMY=$(date -d "${{ github.event.inputs.to_date }}" +'%d/%m/%Y')
+            python append_missing_lrs.py --from-date "$FROM_DATE_DMY" --to-date "$TO_DATE_DMY"
+          else
+            python append_missing_lrs.py
+          fi

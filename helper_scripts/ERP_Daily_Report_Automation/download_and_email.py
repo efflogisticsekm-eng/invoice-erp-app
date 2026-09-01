@@ -39,7 +39,7 @@ RECIPIENT_PHONE_NUMBER = os.getenv("RECIPIENT_PHONE_NUMBER")
 # Try loading from local .env files
 from dotenv import load_dotenv
 from pathlib import Path
-env_path = Path("/Users/anwar/Antigravity-Related/ERP nxt Data collection/Invoice_Extractor_Tool/.env")
+env_path = Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "ERP nxt Data collection/Invoice_Extractor_Tool/.env"))
 if env_path.exists():
     load_dotenv(dotenv_path=env_path)
 
@@ -79,7 +79,7 @@ RECIPIENT_PHONE_NUMBER = clean_env_var(RECIPIENT_PHONE_NUMBER)
 if RECIPIENT_PHONE_NUMBER:
     RECIPIENT_PHONE_NUMBER = "".join(c for c in RECIPIENT_PHONE_NUMBER if c.isdigit())
 
-DOWNLOAD_DIR = os.path.expanduser("~/Downloads/erp_temp_downloads")
+DOWNLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "erp_temp_downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # Helper to load pandas dataframe from excel or csv
@@ -2519,15 +2519,15 @@ def main():
         print("Reconciliation downloads completed successfully. Commencing discrepancy analysis...", flush=True)
         
         # Invoke freight calculation engine
-        sys.path.append("/Users/anwar/Antigravity-Related/EFF PARCEL FREIGHT WORKING")
+        sys.path.append("../../EFF PARCEL FREIGHT WORKING")
         from freight_calculator import process_freight_data
         
         # Target Google Sheet Title
         sheet_title = "Topay & Paid Parcel Billing"
-        creds_path = "/Users/anwar/Antigravity-Related/ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
+        creds_path = "../../ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
         
         # Load local excel or fetch from Google Sheet dynamically
-        rates_excel = "/Users/anwar/Antigravity-Related/EFF PARCEL FREIGHT WORKING/All Consignors - RATES Combined.xlsx"
+        rates_excel = "../../EFF PARCEL FREIGHT WORKING/All Consignors - RATES Combined.xlsx"
         
         try:
             print("Running freight calculation engine...", flush=True)
@@ -2622,7 +2622,7 @@ def main():
                 ("Reconciled Audit", result_df)
             ]
 
-            creds_path = "/Users/anwar/Antigravity-Related/ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
+            creds_path = "../../ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
             scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
             google_creds_env = os.getenv("GOOGLE_CREDENTIALS_JSON")
             

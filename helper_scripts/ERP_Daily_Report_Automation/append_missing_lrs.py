@@ -17,7 +17,7 @@ from playwright.sync_api import sync_playwright
 ###########################################
 START_DATE_STR = "01/07/2026"
 END_DATE_STR = "26/08/2026"
-CREDENTIALS_FILE = "/Users/anwar/Antigravity-Related/ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
+CREDENTIALS_FILE = "../../ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
 GOOGLE_SHEET_NAME = "Topay & Paid Parcel Billing"
 
 EXPECTED_COLUMNS = [
