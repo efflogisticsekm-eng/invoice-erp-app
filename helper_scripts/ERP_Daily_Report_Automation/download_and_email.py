@@ -2540,7 +2540,7 @@ def main():
         print("Reconciliation downloads completed successfully. Commencing discrepancy analysis...", flush=True)
         
         # Invoke freight calculation engine
-        sys.path.append("../../EFF PARCEL FREIGHT WORKING")
+        sys.path.append("EFF PARCEL FREIGHT WORKING")
         from freight_calculator import process_freight_data
         
         # Target Google Sheet Title
@@ -2548,7 +2548,7 @@ def main():
         creds_path = "../../ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
         
         # Load local excel or fetch from Google Sheet dynamically
-        rates_excel = "../../EFF PARCEL FREIGHT WORKING/All Consignors - RATES Combined.xlsx"
+        rates_excel = "EFF PARCEL FREIGHT WORKING/All Consignors - RATES Combined.xlsx"
         
         try:
             print("Running freight calculation engine...", flush=True)
