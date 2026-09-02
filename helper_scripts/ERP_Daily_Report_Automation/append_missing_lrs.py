@@ -1,3 +1,4 @@
+import dateutil.parser
 import os
 import sys
 import pandas as pd
@@ -40,8 +41,8 @@ EXPECTED_COLUMNS = [
 ]
 
 def generate_date_batches(start_str, end_str, batch_days=3):
-    start = datetime.strptime(start_str, "%d/%m/%Y")
-    end = datetime.strptime(end_str, "%d/%m/%Y")
+    start = dateutil.parser.parse(start_str)
+    end = dateutil.parser.parse(end_str)
     batches = []
     curr = start
     while curr <= end:

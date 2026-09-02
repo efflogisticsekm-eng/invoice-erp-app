@@ -2550,10 +2550,31 @@ def main():
         # Load local excel or fetch from Google Sheet dynamically
         rates_excel = "EFF PARCEL FREIGHT WORKING/All Consignors - RATES Combined.xlsx"
         
+
+        def robust_read_df(filepath):
+            if not filepath or not os.path.exists(filepath):
+                return pd.DataFrame()
+            try:
+                return pd.read_excel(filepath)
+            except Exception:
+                try:
+                    dfs = pd.read_html(filepath)
+                    if dfs: return dfs[0]
+                except Exception:
+                    try: return pd.read_csv(filepath)
+                    except Exception: pass
+            return pd.DataFrame()
+
         try:
             print("Running freight calculation engine...", flush=True)
-            result_df, summary_stats, df_whole = process_freight_data(lr_file, rates_excel)
-            print(f"Calculations complete: {summary_stats}", flush=True)
+            try:
+                result_df, summary_stats, df_whole = process_freight_data(lr_file, rates_excel)
+                print(f"Calculations complete: {summary_stats}", flush=True)
+            except FileNotFoundError as fnf:
+                print(f"Rates file not found: {fnf}. Skipping freight calculation.", flush=True)
+                df_whole = robust_read_df(lr_file)
+                result_df = pd.DataFrame()
+
             
             # Extract records older than 52 days for archiving (only on automated daily runs without date overrides)
             if not args.from_date:
@@ -2591,20 +2612,6 @@ def main():
                             df_sub[col] = pd.to_numeric(df_sub[col], errors='coerce').apply(lambda x: f"{x:.2f}" if pd.notna(x) else "")
                         else:
                             df_sub[col] = df_sub[col].astype(str)
-
-            def robust_read_df(filepath):
-                if not filepath or not os.path.exists(filepath):
-                    return pd.DataFrame()
-                try:
-                    return pd.read_excel(filepath)
-                except Exception:
-                    try:
-                        dfs = pd.read_html(filepath)
-                        if dfs: return dfs[0]
-                    except Exception:
-                        try: return pd.read_csv(filepath)
-                        except Exception: pass
-                return pd.DataFrame()
 
             # Prepare clean position-based Despatch Data
             df_despatch_raw = pd.DataFrame()
