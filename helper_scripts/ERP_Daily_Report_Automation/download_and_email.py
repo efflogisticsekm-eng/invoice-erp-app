@@ -4,6 +4,8 @@ sys.path.append("/Users/anwar/Library/Python/3.9/lib/python/site-packages")
 import time
 import smtplib
 import argparse
+import dateutil.parser
+
 import tempfile
 import json
 from datetime import datetime, timedelta, timezone
@@ -2393,7 +2395,18 @@ def email_report(processed_file_path, raw_lr_path, raw_despatch_path, dashboard_
         raise e
 
 # 9. Main orchestrator
+
+def parse_any_date(date_str):
+    if not date_str:
+        return date_str
+    try:
+        dt = dateutil.parser.parse(date_str, dayfirst=True)
+        return dt.strftime("%Y-%m-%d")
+    except:
+        return date_str
+
 def main():
+
     parser = argparse.ArgumentParser(description="ERP Dispatch & Delivery Performance Report")
     parser.add_argument("--mode", choices=["evening", "morning", "daily_evening_report", "afternoon_open_lrs", "reconcile", "petty_cash"], required=True, help="Run mode")
     parser.add_argument("--from-date", help="Override from date (YYYY-MM-DD)")
