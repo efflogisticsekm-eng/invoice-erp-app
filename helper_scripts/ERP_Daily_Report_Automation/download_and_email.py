@@ -2576,33 +2576,37 @@ def main():
                 result_df = pd.DataFrame()
 
             
-            # Extract records older than 52 days for archiving (only on automated daily runs without date overrides)
-            if not args.from_date:
-                result_df['parsed_dt'] = pd.to_datetime(result_df['DATE'], format='%d/%m/%Y', errors='coerce')
-                cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=52)
-                df_archive = result_df[pd.notna(result_df['parsed_dt']) & (result_df['parsed_dt'] < cutoff_date)].copy().drop(columns=['parsed_dt'])
-                result_df = result_df[result_df['parsed_dt'].isna() | (result_df['parsed_dt'] >= cutoff_date)].copy().drop(columns=['parsed_dt'])
+            df_topay = pd.DataFrame()
+            df_paid = pd.DataFrame()
+            cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=52)
+            
+            if not result_df.empty:
+                # Extract records older than 52 days for archiving (only on automated daily runs without date overrides)
+                if not args.from_date:
+                    result_df['parsed_dt'] = pd.to_datetime(result_df['DATE'], format='%d/%m/%Y', errors='coerce')
+                    df_archive = result_df[pd.notna(result_df['parsed_dt']) & (result_df['parsed_dt'] < cutoff_date)].copy().drop(columns=['parsed_dt'])
+                    result_df = result_df[result_df['parsed_dt'].isna() | (result_df['parsed_dt'] >= cutoff_date)].copy().drop(columns=['parsed_dt'])
 
-            # Filter payment buckets before formatting floats to string
-            ptype_col = 'PAYMENT TYPE' if 'PAYMENT TYPE' in result_df.columns else ''
-            topay_mask = pd.to_numeric(result_df['To Pay'], errors='coerce') > 0
-            paid_mask = pd.to_numeric(result_df['Paid'], errors='coerce') > 0
-            if ptype_col:
-                topay_mask = topay_mask | result_df[ptype_col].astype(str).str.upper().str.contains('TO PAY|TOPAY')
-                paid_mask = paid_mask | result_df[ptype_col].astype(str).str.upper().str.contains('PAID')
+                # Filter payment buckets before formatting floats to string
+                ptype_col = 'PAYMENT TYPE' if 'PAYMENT TYPE' in result_df.columns else ''
+                topay_mask = pd.to_numeric(result_df['To Pay'], errors='coerce') > 0
+                paid_mask = pd.to_numeric(result_df['Paid'], errors='coerce') > 0
+                if ptype_col:
+                    topay_mask = topay_mask | result_df[ptype_col].astype(str).str.upper().str.contains('TO PAY|TOPAY')
+                    paid_mask = paid_mask | result_df[ptype_col].astype(str).str.upper().str.contains('PAID')
 
-            df_topay = result_df[topay_mask].copy()
-            df_paid = result_df[paid_mask].copy()
+                df_topay = result_df[topay_mask].copy()
+                df_paid = result_df[paid_mask].copy()
 
-            # Format dataframe for google sheets transfer (replace nan values, format headers)
-            result_df = result_df.fillna("")
-            num_cols = ['WEIGHT', 'Existing ERP Total', 'Calculated Total Freight', 'Account Pay', 'To Pay', 'Paid', 
-                        'Calculated Stationary Charge', 'Calculated Unloading Charge', 'Grand Total with UL', 'Amount Difference']
-            for col in result_df.columns:
-                if col in num_cols:
-                    result_df[col] = pd.to_numeric(result_df[col], errors='coerce').apply(lambda x: f"{x:.2f}" if pd.notna(x) else "")
-                else:
-                    result_df[col] = result_df[col].astype(str)
+                # Format dataframe for google sheets transfer (replace nan values, format headers)
+                result_df = result_df.fillna("")
+                num_cols = ['WEIGHT', 'Existing ERP Total', 'Calculated Total Freight', 'Account Pay', 'To Pay', 'Paid', 
+                            'Calculated Stationary Charge', 'Calculated Unloading Charge', 'Grand Total with UL', 'Amount Difference']
+                for col in result_df.columns:
+                    if col in num_cols:
+                        result_df[col] = pd.to_numeric(result_df[col], errors='coerce').apply(lambda x: f"{x:.2f}" if pd.notna(x) else "")
+                    else:
+                        result_df[col] = result_df[col].astype(str)
 
             for df_sub in [df_topay, df_paid]:
                 if not df_sub.empty:
