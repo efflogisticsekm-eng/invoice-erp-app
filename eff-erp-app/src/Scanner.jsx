@@ -8,7 +8,7 @@ export default function Scanner({ user, onBack }) {
   const [step, setStep] = useState(1); // 1: Upload, 2: Confirm
   
   // Form fields
-  const [mainCategory, setMainCategory] = useState('Vehicle Rent');
+  const [mainCategory, setMainCategory] = useState('Other');
   const [otherItem, setOtherItem] = useState('Traveling Exp'); // Stores the sub-category when 'Other' is selected
   const [subCategory, setSubCategory] = useState(''); // Stores 'Maintenance Type' for Vehicle Maintenance
   
@@ -108,8 +108,9 @@ export default function Scanner({ user, onBack }) {
       try {
         let query = supabase.from('vehicles').select('*');
         const allAccessRoles = ['Asst VM', 'VM(Vehicle Manager)', 'RM', 'HO', 'FM', 'CEO', 'MD'];
+        const allAccessNames = ['Arun Vehicle', 'Mohan Vehicle'];
         
-        if (userProfile && !allAccessRoles.includes(userRole)) {
+        if (userProfile && !allAccessRoles.includes(userRole) && !allAccessNames.includes(userProfile.full_name)) {
           if (userProfile.branch) {
             query = query.ilike('branch', userProfile.branch);
           }
@@ -323,23 +324,44 @@ export default function Scanner({ user, onBack }) {
         base64Image = base64DataUrl.split(',')[1];
       }
       
-      // Remove frontend API key check as we will use Edge Function instead
+      const apiKey = atob(import.meta.env.VITE_OPENAI_API_KEY_B64 || "");
+      if (!apiKey) {
+        throw new Error("OpenAI API Key not found in .env");
+      }
 
       const vehicleListString = vehiclesList.map(v => v.vehicle_no).join(', ');
+      const prompt = `Extract details from this receipt/invoice for the expense category: "${mainCategory === 'Other' ? otherItem : mainCategory}". Return ONLY a valid JSON object with the keys: 'partyName' (the name of the shop, vendor, or workshop. CRITICAL: DO NOT extract "EFF LOGISTICS" or "EFF LOGISTICS PRIVATE LIMITED". If the only name is EFF LOGISTICS, return ""), 'totalAmount' (the grand total amount as a number), 'cgst' (the CGST amount as a number, or 0), 'sgst' (the SGST amount as a number, or 0), 'igst' (the IGST amount as a number, or 0), 'gstTotal' (the total tax/GST amount as a number. If only a single GST amount is present, put it here, otherwise sum the CGST, SGST, IGST into this), 'gstRate' (the TOTAL GST percentage rate applied. If you see CGST 9% and SGST 9%, the total rate is 18. Return only the combined percentage number like 5, 12, 18, 28), 'subTotal' (the amount before tax), 'billNo' (the invoice number or bill number), 'billDate' (the date of the invoice in YYYY-MM-DD format), and 'gstin' (Extract the 15-digit GST number of the SELLER. Look at the top for the shop/vendor's GSTIN. DO NOT extract "32AAGCE4200M1ZY" under any circumstances. If "32AAGCE4200M1ZY" is the only GST number on the bill, return an empty string ""). Also extract 'vehicleNo' (Extract any vehicle registration number found in the bill like KL41X4096, even if it is handwritten or in PO No. Return the raw vehicle number string found). Do not include markdown formatting or any other text, just the raw JSON.`;
 
-      console.log("Sending image to Supabase Edge Function (scan-receipt)...");
+      console.log("Sending image directly to OpenAI API...");
       
-      const { data, error } = await supabase.functions.invoke('scan-receipt', {
-        body: {
-          base64Image: base64Image,
-          category: mainCategory === 'Other' ? otherItem : mainCategory,
-          vehicleListString: vehicleListString
-        }
+      const openAiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+              ]
+            }
+          ],
+          max_tokens: 500,
+          temperature: 0.0
+        })
       });
-      
-      if (error || data.error) {
-        throw new Error(error?.message || data.error || "Edge function failed");
+
+      if (!openAiResponse.ok) {
+        const errorText = await openAiResponse.text();
+        throw new Error(`OpenAI API error: ${errorText}`);
       }
+
+      const data = await openAiResponse.json();
 
       let content = data.choices[0].message.content.trim();
       let extracted;
@@ -353,16 +375,36 @@ export default function Scanner({ user, onBack }) {
       console.log("OpenAI Extracted Data:", extracted);
 
       if (extracted.partyName) {
-        if (mainCategory === 'Vehicle Maintenance') setWorkshopName(extracted.partyName);
-        else if (mainCategory === 'Vehicle Rent') setVendor(extracted.partyName);
-        else setToWhom(extracted.partyName);
+        let pName = extracted.partyName;
+        if (pName.toUpperCase().includes("EFF LOGISTICS")) {
+          pName = "";
+        }
+        if (pName) {
+          if (mainCategory === 'Vehicle Maintenance') setWorkshopName(pName);
+          else if (mainCategory === 'Vehicle Rent') setVendor(pName);
+          else setToWhom(pName);
+        }
       }
       
       if (extracted.vehicleNo) {
-        setVehicleNo(extracted.vehicleNo);
+        const rawVeh = extracted.vehicleNo.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+        const found = vehiclesList.find(v => v.vehicle_no.replace(/[^A-Za-z0-9]/g, '').toLowerCase() === rawVeh);
+        if (found) {
+          setVehicleNo(found.vehicle_no);
+        } else {
+          alert(`Vehicle Error: The vehicle number "${extracted.vehicleNo}" found on the bill is not assigned to your branch or does not exist. Please check the bill or select manually.`);
+          setVehicleNo('');
+        }
       }
-      if (extracted.totalAmount !== undefined) {
-        // totalAmount is now derived. We don't overwrite it manually.
+      if (extracted.billNo) setBillNo(extracted.billNo);
+      if (extracted.billDate) setBillDate(extracted.billDate);
+      
+      if (extracted.gstin) {
+        if (extracted.gstin.trim().toUpperCase() === "32AAGCE4200M1ZY") {
+          setBillingGstin('');
+        } else {
+          setBillingGstin(extracted.gstin);
+        }
       }
       
       const parseAmt = (val) => {
@@ -373,6 +415,9 @@ export default function Scanner({ user, onBack }) {
 
       const tAmt = parseAmt(extracted.totalAmount);
       let gAmt = parseAmt(extracted.gstTotal);
+      if (gAmt === 0) {
+        gAmt = parseAmt(extracted.cgst) + parseAmt(extracted.sgst) + parseAmt(extracted.igst);
+      }
       const sTotalAmt = parseAmt(extracted.subTotal);
       
       if (sTotalAmt) {
@@ -385,6 +430,30 @@ export default function Scanner({ user, onBack }) {
 
       if (gAmt > 0) {
         setGstApplicable(true);
+        setGstAmount(gAmt.toString());
+        
+        if (parseAmt(extracted.cgst) > 0 || parseAmt(extracted.sgst) > 0) {
+          setCgstAmount(parseAmt(extracted.cgst).toString());
+          setSgstAmount(parseAmt(extracted.sgst).toString());
+        }
+        if (parseAmt(extracted.igst) > 0) {
+          setIgstAmount(parseAmt(extracted.igst).toString());
+        }
+        
+        // Auto-select percentage if extracted
+        if (extracted.gstRate) {
+          const rate = parseFloat(extracted.gstRate.toString().replace(/[^0-9.]/g, ''));
+          if (rate === 5 || rate === 12 || rate === 18) {
+            setGstRate(rate.toString());
+          }
+        }
+        
+        // Auto-select type based on IGST
+        if (parseAmt(extracted.igst) > 0) {
+          setGstType('IGST');
+        } else {
+          setGstType('Kerala');
+        }
       }
 
     } catch (error) {
@@ -417,6 +486,19 @@ export default function Scanner({ user, onBack }) {
     
     try {
       const finalCategory = mainCategory === 'Other' ? otherItem : mainCategory;
+      
+      if (mainCategory === 'Vehicle Maintenance') {
+        if (!subCategory) {
+          alert('Please select a Maintenance Type.');
+          setLoading(false);
+          return;
+        }
+        if (!odometerReading) {
+          alert('Please enter the Odometer Reading.');
+          setLoading(false);
+          return;
+        }
+      }
 
       const computeNextLevel = (cat, subCat, role) => {
         let chain = [];
@@ -623,9 +705,10 @@ export default function Scanner({ user, onBack }) {
               {(() => {
                 const MAIN_CATEGORIES = ['Vehicle Rent', 'Vehicle Rent Balance Payment', 'Vehicle Maintenance', 'Other'];
                 const PERMISSIONS = {
-                  'Vehicle Rent': { blocked: ['Asst VM', 'VM', 'VM(Vehicle Manager)', 'FM', 'HR', 'MD', 'CEO', 'RM', 'Asst.HR'] },
-                  'Vehicle Rent Balance Payment': { blocked: ['Asst VM', 'VM', 'VM(Vehicle Manager)', 'FM', 'HR', 'MD', 'CEO', 'RM', 'Asst.HR'] },
-                  'default': { blocked: ['Asst VM', 'Asst.HR', 'HR'] }
+                  'Vehicle Rent': { blocked: ['Arun Vehicle', 'CFA-Honda', 'HO', 'Hr', 'RM', 'Regional Manager'] },
+                  'Vehicle Rent Balance Payment': { blocked: ['Arun Vehicle', 'CFA-Honda', 'HO', 'Hr', 'RM', 'Regional Manager'] },
+                  'Vehicle Maintenance': { blocked: ['CFA-Honda', 'CFA-Eloor', 'CFA-CLT', 'Hr', 'HR Manager', 'HR'] },
+                  'default': { blocked: ['Hr'] }
                 };
 
                 return MAIN_CATEGORIES.filter(cat => {
@@ -654,19 +737,27 @@ export default function Scanner({ user, onBack }) {
                   ];
                   
                   const PERMISSIONS = {
-                    'Sub Contractor Payment': { allowed: ['KRL', 'RM', 'FM', 'CEO', 'MD'] },
-                    'TDS': { allowed: ['FM', 'CEO', 'MD'] },
-                    'Office Rent': { allowed: ['KRL', 'HO', 'RM', 'HR', 'FM', 'CEO', 'MD'] },
-                    'Subscription': { allowed: ['HO', 'Asst.HR', 'HR', 'FM', 'CEO', 'MD'] },
-                    'Bonnus': { allowed: ['HO', 'Asst.HR', 'RM', 'HR', 'FM', 'CEO', 'MD'] },
-                    
-                    'Telephone Bill': { blocked: ['Asst VM', 'VM', 'VM(Vehicle Manager)', 'HR'] },
-                    'Internet Bill': { blocked: ['Asst VM', 'VM', 'VM(Vehicle Manager)', 'HR'] },
-                    'Petty Cash': { blocked: ['Asst VM', 'Asst.HR', 'VM', 'VM(Vehicle Manager)', 'HR'] },
-                    'Salary': { blocked: ['Asst VM', 'VM', 'VM(Vehicle Manager)'] },
-                    'Staff Accomodation Rent': { blocked: ['Asst VM', 'CFA-Eloor', 'Kollam Parcel', 'Asian TCR', 'MPM Parcel', 'KSD Parcel', 'Asst.HR', 'VM', 'VM(Vehicle Manager)', 'HR'] },
-                    'Ware house Rent': { blocked: ['Asst VM', 'CFA-Eloor', 'Kollam Parcel', 'Asian TCR', 'MPM Parcel', 'KSD Parcel', 'Asst.HR', 'VM', 'VM(Vehicle Manager)', 'HR'] },
-                    'default': { blocked: ['Asst VM', 'Asst.HR', 'HR'] }
+                    'Traveling Exp': { blocked: ['HO', 'Hr'] },
+                    'Hotel Rooms': { blocked: ['KRL', 'Hr'] },
+                    'Stationary Purchase': { blocked: ['Hr'] },
+                    'Telephone Bill': { blocked: ['Arun Vehicle', 'CFA-Honda', 'CFA-Eloor', 'Asian TCR', 'CFA-CLT', 'KNR Parcel', 'KSD Parcel', 'Hr', 'Mohan Vehicle', 'VM', 'RM', 'Regional Manager'] },
+                    'Internet Bill': { blocked: ['Arun Vehicle', 'CFA-Honda', 'CFA-Eloor', 'Asian TCR', 'CFA-CLT', 'KNR Parcel', 'KSD Parcel', 'Hr', 'Mohan Vehicle', 'VM', 'RM', 'Regional Manager'] },
+                    'Staff Accomodation Rent': { blocked: ['Arun Vehicle', 'CFA-Honda', 'CFA-Eloor', 'Kollam Parcel', 'Asian TCR', 'CFA-CLT', 'Kottayam Parcel', 'MPM Parcel', 'KSD Parcel', 'Hr', 'Mohan Vehicle', 'VM', 'RM', 'Regional Manager'] },
+                    'Ware house Rent': { allowed: ['HO', 'HR Manager', 'HR', 'FM', 'CEO', 'MD'] },
+                    'Union Charge': { blocked: ['CFA-Honda', 'CFA-Eloor', 'CFA-CLT', 'Hr', 'Mohan Vehicle', 'VM'] },
+                    'Fuel Charge': { blocked: ['Hr'] },
+                    'Sub Contractor Payment': { allowed: ['KRL', 'HO', 'CEO', 'MD'] },
+                    'GST': { allowed: ['HO', 'CEO', 'MD'] },
+                    'TDS': { allowed: ['HO', 'CEO', 'MD'] },
+                    'Office Rent': { allowed: ['KRL', 'HO', 'CEO', 'MD'] },
+                    'Subscription': { allowed: ['Edathala Parcel', 'CFA-Honda', 'KRL', 'HO', 'RM', 'Regional Manager', 'HR', 'HR Manager', 'FM', 'CEO', 'MD'] },
+                    'Uniform': { allowed: ['HO', 'RM', 'Regional Manager', 'HR', 'HR Manager', 'FM', 'CEO', 'MD'] },
+                    'Bonnus': { allowed: ['KRL', 'HO', 'Mohan Vehicle', 'VM', 'RM', 'Regional Manager', 'HR', 'HR Manager', 'FM', 'CEO', 'MD'] },
+                    'Petty Cash': { blocked: ['CFA-Honda', 'Hr', 'RM', 'Regional Manager', 'HR', 'HR Manager'] },
+                    'Man Power out sourse': { blocked: ['Arun Vehicle', 'Hr'] },
+                    'Salary': { blocked: ['Arun Vehicle', 'Hr'] },
+                    'Donation': { blocked: ['Arun Vehicle', 'Hr'] },
+                    'default': { blocked: ['Hr'] }
                   };
 
                   return OTHER_CATEGORIES.filter(cat => {
@@ -725,7 +816,7 @@ export default function Scanner({ user, onBack }) {
           {mainCategory === 'Vehicle Maintenance' && (
             <>
               <div className="input-group">
-                <label>Maintenance Type (Sub Category)</label>
+                <label>Maintenance Type (Sub Category) <span style={{color: 'red'}}>*</span></label>
                 <select className="input-field" value={subCategory} onChange={e => setSubCategory(e.target.value)}>
                   <option value="">-- Select Type --</option>
                   <option value="Periodical Maintenance">Periodical Maintenance</option>
@@ -759,8 +850,19 @@ export default function Scanner({ user, onBack }) {
                 </select>
               </div>
               <div className="input-group"><label>Description / Sub Type</label><input type="text" className="input-field" placeholder="e.g. Oil Change, GPS, Break Pad" value={putDescription} onChange={e => setPutDescription(e.target.value)} /></div>
-              <div className="input-group"><label>Odometer Reading</label><input type="text" className="input-field" value={odometerReading} onChange={e => setOdometerReading(e.target.value)} /></div>
-              <div className="input-group"><label>Workshop Name</label><input type="text" className="input-field" value={workshopName} onChange={e => setWorkshopName(e.target.value)} /></div>
+              <div className="input-group"><label>Odometer Reading <span style={{color: 'red'}}>*</span></label><input type="text" className="input-field" value={odometerReading} onChange={e => setOdometerReading(e.target.value)} /></div>
+              <div className="input-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                  <label style={{ marginBottom: 0 }}>Workshop Name</label>
+                  <label style={{ fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', color: 'var(--primary)' }}>
+                    <input type="checkbox" onChange={(e) => {
+                      if (e.target.checked) setWorkshopName(billingPartyName);
+                    }} />
+                    Same as Billing Party Name
+                  </label>
+                </div>
+                <input type="text" className="input-field" value={workshopName} onChange={e => setWorkshopName(e.target.value)} />
+              </div>
             </>
           )}
 
@@ -830,11 +932,27 @@ export default function Scanner({ user, onBack }) {
             </>
           )}
 
-          <div style={{ opacity: ((mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') && !gdmNumber.trim()) ? 0.5 : 1, pointerEvents: ((mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') && !gdmNumber.trim()) ? 'none' : 'auto' }}>
+          <div style={{ 
+            opacity: (((mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') && !gdmNumber.trim()) || (mainCategory === 'Vehicle Maintenance' && !vehicleNo)) ? 0.5 : 1, 
+            pointerEvents: (((mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') && !gdmNumber.trim()) || (mainCategory === 'Vehicle Maintenance' && !vehicleNo)) ? 'none' : 'auto' 
+          }}>
             
             <h3 style={{ color: 'var(--primary)', marginBottom: '15px', borderBottom: '2px solid var(--primary)', paddingBottom: '5px', marginTop: '20px' }}>4. Bill & Vendor Details</h3>
             
-            <div className="input-group"><label>Unit / Item</label><input type="text" className="input-field" value={unitItem} onChange={e => setUnitItem(e.target.value)} placeholder="e.g. Daily Rent, Oil & consumables" /></div>
+            <div className="input-group">
+              <label>Unit / Item</label>
+              {(mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') ? (
+                <select className="input-field" value={unitItem} onChange={e => setUnitItem(e.target.value)}>
+                  <option value="">-- Select Option --</option>
+                  <option value="Fixed Rent">Fixed Rent</option>
+                  <option value="KM Rent">KM Rent</option>
+                  <option value="Daily Rent">Daily Rent</option>
+                  <option value="Kilo Rent">Kilo Rent</option>
+                </select>
+              ) : (
+                <input type="text" className="input-field" value={unitItem} onChange={e => setUnitItem(e.target.value)} placeholder="e.g. Daily Rent, Oil & consumables" />
+              )}
+            </div>
             
             <div style={{ display: 'flex', gap: '10px' }}>
               <div className="input-group" style={{ flex: 1 }}><label>Qty</label><input type="number" inputMode="decimal" className="input-field" value={qty} onChange={e => setQty(e.target.value)} /></div>
@@ -846,10 +964,36 @@ export default function Scanner({ user, onBack }) {
               <div className="input-group" style={{ flex: 1 }}><label>Bill Date</label><input type="date" className="input-field" value={billDate} onChange={e => setBillDate(e.target.value)} /></div>
             </div>
 
-            <div className="input-group"><label>Billing Party Name</label><input type="text" className="input-field" value={billingPartyName} onChange={e => setBillingPartyName(e.target.value)} /></div>
+            <div className="input-group">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                <label style={{ marginBottom: 0 }}>Billing Party Name</label>
+                {mainCategory === 'Vehicle Maintenance' && (
+                  <label style={{ fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', color: 'var(--primary)' }}>
+                    <input type="checkbox" onChange={(e) => {
+                      if (e.target.checked) setBillingPartyName(workshopName);
+                    }} />
+                    Same as Workshop Name
+                  </label>
+                )}
+              </div>
+              <input type="text" className="input-field" value={billingPartyName} onChange={e => setBillingPartyName(e.target.value)} />
+            </div>
             <div className="input-group"><label>Billing Party GSTIN</label><input type="text" className="input-field" value={billingGstin} onChange={e => setBillingGstin(e.target.value)} /></div>
             <div className="input-group"><label>Advance Paid (₹)</label><input type="number" inputMode="decimal" className="input-field" value={advanceAmount} onChange={e => setAdvanceAmount(e.target.value)} /></div>
-            <div className="input-group"><label>Payment To Name</label><input type="text" className="input-field" value={paymentToName} onChange={e => setPaymentToName(e.target.value)} /></div>
+            <div className="input-group">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                <label style={{ marginBottom: 0 }}>Payment To Name</label>
+                {mainCategory === 'Vehicle Maintenance' && (
+                  <label style={{ fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', color: 'var(--primary)' }}>
+                    <input type="checkbox" onChange={(e) => {
+                      if (e.target.checked) setPaymentToName(billingPartyName);
+                    }} />
+                    Same as Billing Party Name
+                  </label>
+                )}
+              </div>
+              <input type="text" className="input-field" value={paymentToName} onChange={e => setPaymentToName(e.target.value)} />
+            </div>
             
             <h3 style={{ color: 'var(--primary)', marginBottom: '15px', borderBottom: '2px solid var(--primary)', paddingBottom: '5px', marginTop: '20px' }}>5. Tax & Amount Details</h3>
 
@@ -908,9 +1052,24 @@ export default function Scanner({ user, onBack }) {
                           </div>
                         </div>
                         
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                          <div className="input-group">
+                            <label>CGST Amount</label>
+                            <input type="number" inputMode="decimal" className="input-field" value={cgstAmount} onChange={e => setCgstAmount(e.target.value)} />
+                          </div>
+                          <div className="input-group">
+                            <label>SGST Amount</label>
+                            <input type="number" inputMode="decimal" className="input-field" value={sgstAmount} onChange={e => setSgstAmount(e.target.value)} />
+                          </div>
+                          <div className="input-group">
+                            <label>IGST Amount</label>
+                            <input type="number" inputMode="decimal" className="input-field" value={igstAmount} onChange={e => setIgstAmount(e.target.value)} />
+                          </div>
+                        </div>
+                        
                         <div className="input-group" style={{ marginBottom: 0 }}>
-                          <label style={{ fontWeight: 'bold' }}>Total GST Amount (Auto)</label>
-                          <input type="number" inputMode="decimal" className="input-field" value={gstAmount} readOnly style={{ background: '#f3f4f6' }} />
+                          <label style={{ fontWeight: 'bold' }}>Total GST Amount</label>
+                          <input type="number" inputMode="decimal" className="input-field" value={gstAmount} onChange={e => setGstAmount(e.target.value)} />
                         </div>
                       </div>
                     )}
