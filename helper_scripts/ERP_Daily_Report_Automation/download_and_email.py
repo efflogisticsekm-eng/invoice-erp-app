@@ -2400,7 +2400,15 @@ def main():
     parser.add_argument("--to-date", help="Override to date (YYYY-MM-DD)")
     parser.add_argument("--from-time", help="Override from time (HH:MM:SS)")
     parser.add_argument("--to-time", help="Override to time (HH:MM:SS)")
+    
     args = parser.parse_args()
+    
+    # Fix the dates right away
+    if getattr(args, 'from_date', None):
+        args.from_date = parse_any_date(args.from_date)
+    if getattr(args, 'to_date', None):
+        args.to_date = parse_any_date(args.to_date)
+
     
     print(f"[{datetime.now()}] Starting daily report automation runner in mode: {args.mode}")
 
