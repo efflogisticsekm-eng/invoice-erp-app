@@ -165,10 +165,10 @@ export default function Scanner({ user, onBack }) {
     const t = baseAmt + calcGst + union;
     setTotalAmount(t > 0 ? t.toFixed(2) : '');
 
-    const advance = parseFloat(advanceAmount) || 0;
+    const advance = parseFloat(rentAdvance) || 0;
     const bal = t - advance;
     setBalanceAmount(bal > 0 ? bal.toFixed(2) : '');
-  }, [qty, rate, gstApplicable, gstType, gstRate, advanceAmount, unionCharges]);
+  }, [qty, rate, gstApplicable, gstType, gstRate, rentAdvance, unionCharges]);
 
   const uniqueVehicleTypes = [...new Set(vehiclesList.map(v => v.vehicle_type).filter(Boolean))];
 
@@ -979,7 +979,7 @@ export default function Scanner({ user, onBack }) {
               <input type="text" className="input-field" value={billingPartyName} onChange={e => setBillingPartyName(e.target.value)} />
             </div>
             <div className="input-group"><label>Billing Party GSTIN</label><input type="text" className="input-field" value={billingGstin} onChange={e => setBillingGstin(e.target.value)} /></div>
-            <div className="input-group"><label>Advance Paid (₹)</label><input type="number" inputMode="decimal" className="input-field" value={advanceAmount} onChange={e => setAdvanceAmount(e.target.value)} /></div>
+
             <div className="input-group">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
                 <label style={{ marginBottom: 0 }}>Payment To Name</label>
