@@ -33,7 +33,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r helper_scripts/ERP_Daily_Report_Automation/requirements.txt
-        pip install gspread google-auth beautifulsoup4 openpyxl pandas numpy
+        pip install gspread oauth2client google-auth beautifulsoup4 openpyxl pandas numpy
         playwright install --with-deps chromium
 
     - name: Create Google Credentials File
