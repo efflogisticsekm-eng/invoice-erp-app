@@ -2545,7 +2545,7 @@ def main():
         
         # Target Google Sheet Title
         sheet_title = "Topay & Paid Parcel Billing"
-        creds_path = "../../ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
+        creds_path = "ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
         
         # Load local excel or fetch from Google Sheet dynamically
         rates_excel = "EFF PARCEL FREIGHT WORKING/All Consignors - RATES Combined.xlsx"
@@ -2650,7 +2650,7 @@ def main():
                 ("Reconciled Audit", result_df)
             ]
 
-            creds_path = "../../ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
+            creds_path = "ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
             scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
             google_creds_env = os.getenv("GOOGLE_CREDENTIALS_JSON")
             
