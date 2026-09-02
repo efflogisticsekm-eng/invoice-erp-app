@@ -134,9 +134,13 @@ export default function Scanner({ user, onBack }) {
     const q = parseFloat(qty);
     const r = parseFloat(rate);
     let baseAmt = parseFloat(amount) || 0;
-    if (!isNaN(q) && !isNaN(r)) {
-      baseAmt = q * r;
-      setAmount(baseAmt.toString());
+    
+    if (qty !== '' && rate !== '' && !isNaN(q) && !isNaN(r)) {
+      const calculatedAmt = q * r;
+      baseAmt = calculatedAmt;
+      if (amount !== calculatedAmt.toString()) {
+        setAmount(calculatedAmt.toString());
+      }
     }
 
     let calcGst = 0;
@@ -167,8 +171,8 @@ export default function Scanner({ user, onBack }) {
 
     const advance = parseFloat(rentAdvance) || 0;
     const bal = t - advance;
-    setBalanceAmount(bal > 0 ? bal.toFixed(2) : '');
-  }, [qty, rate, gstApplicable, gstType, gstRate, rentAdvance, unionCharges]);
+    setBalanceAmount(bal >= 0 ? bal.toFixed(2) : '');
+  }, [qty, rate, amount, gstApplicable, gstType, gstRate, rentAdvance, unionCharges]);
 
   const uniqueVehicleTypes = [...new Set(vehiclesList.map(v => v.vehicle_type).filter(Boolean))];
 
@@ -547,6 +551,13 @@ export default function Scanner({ user, onBack }) {
       await supabase.from('profiles').upsert(profileData, { onConflict: 'id', ignoreDuplicates: true });
 
       // 2. Insert Expense Request (using Standard Client)
+      let finalPaymentToName = '';
+      if (paymentType === 'Credit') {
+        finalPaymentToName = vendor;
+      } else if (paymentType === 'Cash') {
+        finalPaymentToName = toWhom;
+      }
+
       const expenseData = {
           user_id: user.id,
           category: finalCategory,
@@ -560,7 +571,7 @@ export default function Scanner({ user, onBack }) {
           branch: userProfile?.branch || null,
           details: {
             unitItem, qty, rate, billNo, billDate, billingGstin, billingPartyName, 
-            advance: advanceAmount, paymentToName, accountName,
+            advance: advanceAmount, paymentToName: finalPaymentToName, accountName,
             vehicleNo, odometerReading, workshopName, paymentType, putDescription, toWhom,
             lrNo, lrDate, totalWeight, totalBox, destination, approximateKm, vehicleType, 
             vehicleRent, unionCharges, rentAdvance, vendor, balanceAmount,
@@ -980,20 +991,7 @@ export default function Scanner({ user, onBack }) {
             </div>
             <div className="input-group"><label>Billing Party GSTIN</label><input type="text" className="input-field" value={billingGstin} onChange={e => setBillingGstin(e.target.value)} /></div>
 
-            <div className="input-group">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
-                <label style={{ marginBottom: 0 }}>Payment To Name</label>
-                {mainCategory === 'Vehicle Maintenance' && (
-                  <label style={{ fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', color: 'var(--primary)' }}>
-                    <input type="checkbox" onChange={(e) => {
-                      if (e.target.checked) setPaymentToName(billingPartyName);
-                    }} />
-                    Same as Billing Party Name
-                  </label>
-                )}
-              </div>
-              <input type="text" className="input-field" value={paymentToName} onChange={e => setPaymentToName(e.target.value)} />
-            </div>
+
             
             <h3 style={{ color: 'var(--primary)', marginBottom: '15px', borderBottom: '2px solid var(--primary)', paddingBottom: '5px', marginTop: '20px' }}>5. Tax & Amount Details</h3>
 
