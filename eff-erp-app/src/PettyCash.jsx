@@ -156,6 +156,10 @@ export default function PettyCash({ user, profile, onBack }) {
         if (webhookUrl) {
             await fetch(webhookUrl, {
                 method: 'POST',
+                mode: 'no-cors',
+                headers: {
+                  'Content-Type': 'text/plain',
+                },
                 body: JSON.stringify({
                     source: 'PettyCash',
                     branch: profile?.branch || 'HO',
