@@ -140,8 +140,8 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
             
             d_log_from = b_start.strftime("%d/%m/%Y")
             d_log_to = b_end.strftime("%d/%m/%Y")
-            d_input_from = b_start.strftime("%d/%m/%Y")
-            d_input_to = b_end.strftime("%d/%m/%Y")
+            d_input_from = b_start.strftime("%Y-%m-%d")
+            d_input_to = b_end.strftime("%Y-%m-%d")
             
             print(f"\n=======================================================")
             print(f"📅 Fetching HTML data for batch {d_log_from} to {d_log_to}")
