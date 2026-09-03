@@ -59,7 +59,11 @@ jobs:
           DATE_ARGS="$DATE_ARGS --to-date ${{ github.event.inputs.to_date }}"
         fi
         python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode reconcile $DATE_ARGS
-        python helper_scripts/ERP_Daily_Report_Automation/append_missing_lrs.py $DATE_ARGS
+        if [ "${{ github.event_name }}" = "schedule" ]; then
+          python helper_scripts/ERP_Daily_Report_Automation/append_missing_lrs.py $DATE_ARGS --auto
+        else
+          python helper_scripts/ERP_Daily_Report_Automation/append_missing_lrs.py $DATE_ARGS --manual
+        fi
 
     - name: Upload Debug Artifacts
       if: always()
