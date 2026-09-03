@@ -59,7 +59,11 @@ jobs:
           if [ -n "${{ github.event.inputs.from_date }}" ] && [ -n "${{ github.event.inputs.to_date }}" ]; then
             FROM_DATE_DMY=$(date -d "${{ github.event.inputs.from_date }}" +'%d/%m/%Y')
             TO_DATE_DMY=$(date -d "${{ github.event.inputs.to_date }}" +'%d/%m/%Y')
-            python append_missing_lrs.py --from-date "$FROM_DATE_DMY" --to-date "$TO_DATE_DMY"
+            python append_missing_lrs.py --from-date "$FROM_DATE_DMY" --to-date "$TO_DATE_DMY" --manual
           else
-            python append_missing_lrs.py
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              python append_missing_lrs.py --auto
+            else
+              python append_missing_lrs.py --manual
+            fi
           fi

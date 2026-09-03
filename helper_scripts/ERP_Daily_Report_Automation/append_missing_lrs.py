@@ -2,15 +2,16 @@ import dateutil.parser
 import os
 import sys
 import pandas as pd
-from datetime import datetime, timedelta
+import re
+from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
 import time
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from google.oauth2.service_account import Credentials
 import json
+from dateutil import parser
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "libs"))
+sys.path.append(os.path.join(os.path.dirname(__file__), "libs"))
 from playwright.sync_api import sync_playwright
 
 ###########################################
@@ -41,8 +42,8 @@ EXPECTED_COLUMNS = [
 ]
 
 def generate_date_batches(start_str, end_str, batch_days=3):
-    start = dateutil.parser.parse(start_str)
-    end = dateutil.parser.parse(end_str)
+    start = dateutil.parser.parse(start_str, dayfirst=True)
+    end = dateutil.parser.parse(end_str, dayfirst=True)
     batches = []
     curr = start
     while curr <= end:
@@ -86,49 +87,21 @@ def upload_dataframe_to_worksheet(spreadsheet, df, worksheet_name, append_mode=T
     else:
         data = df.values.tolist()
         if data:
-            worksheet.append_rows(data, value_input_option="USER_ENTERED")
-            print(f"✅ Appended {len(df)} rows to '{worksheet_name}'!")
-
-def get_header_mapping(headers):
-    # Maps screen column index -> standard column name
-    mapping = {}
-    for i, h_raw in enumerate(headers):
-        h = h_raw.upper().strip()
-        if h in ["SL NO", "SL NO.", "SL"]:
-            mapping[i] = "Sl No"
-        elif h == "DATE":
-            mapping[i] = "Date"
-        elif h in ["LR NO", "LR"]:
-            mapping[i] = "LR No"
-        elif h in ["CONSIGNEE", "PARTY"]:
-            mapping[i] = "Consignee"
-        elif h in ["PLACE", "DESTINATION"]:
-            mapping[i] = "Destination"
-        elif h in ["INVOICE", "INVOICE NO", "INVOICE NUMBER"]:
-            mapping[i] = "Invoice No"
-        elif h in ["QTY", "BOX QTY", "BOX COUNT"]:
-            mapping[i] = "Box Count"
-        elif h in ["BOX STR", "BOXES"]:
-            mapping[i] = "Boxes"
-        elif h in ["PRODUCT TYPE", "BOX TYPE", "PRODUCT TYPE/BOX TYPE"]:
-            mapping[i] = "Product Type/Box Type"
-        elif h in ["AMOUNT", "LR AMOUNT", "FRIGHT"]:
-            mapping[i] = "Lr Amount"
-        elif h in ["LC/UC", "LC"]:
-            mapping[i] = "LC/UC"
-        elif h in ["STATIONARY", "STATIONARY CHARGE"]:
-            mapping[i] = "Stationary Charge"
-        elif h == "WEIGHT":
-            mapping[i] = "Weight"
-        elif h in ["PAYMENT TYPE", "TYPE"]:
-            mapping[i] = "Payment type"
-        elif h == "TOTAL":
-            mapping[i] = "Total"
-    return mapping
+            for attempt in range(3):
+                try:
+                    worksheet.append_rows(data, value_input_option="USER_ENTERED")
+                    print(f"✅ Appended {len(df)} rows to '{worksheet_name}'!")
+                    break
+                except Exception as e:
+                    if '503' in str(e):
+                        print(f"503 Service Unavailable, retrying in {2**attempt}s...")
+                        time.sleep(2**attempt)
+                    else:
+                        raise e
 
 def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DATE_STR, append_mode=False):
     batches = generate_date_batches(start_date_str, end_date_str, batch_days=3)
-    print(f"🚀 Starting V7 HTML-Batched Extraction for {len(batches)} batches...")
+    print(f"🚀 Starting HTML-Batched Extraction for {len(batches)} batches...")
     
     lr_mapping = {}
     print("📋 Loading Consignor Mapping from LR Data Google Sheet...")
@@ -167,8 +140,8 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
             
             d_log_from = b_start.strftime("%d/%m/%Y")
             d_log_to = b_end.strftime("%d/%m/%Y")
-            d_input_from = b_start.strftime("%m/%d/%Y")
-            d_input_to = b_end.strftime("%m/%d/%Y")
+            d_input_from = b_start.strftime("%d/%m/%Y")
+            d_input_to = b_end.strftime("%d/%m/%Y")
             
             print(f"\n=======================================================")
             print(f"📅 Fetching HTML data for batch {d_log_from} to {d_log_to}")
@@ -181,19 +154,15 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
                 page.click("button[type='submit']")
                 page.wait_for_timeout(2000)
                 
-                # We need to get all consignors active to search them individually?
-                # No, if we don't pass a consignor_id, the HTML table returns ALL consignors combined!!
-                # The user's screen shows all records.
                 page.goto("https://eff.aadhocc.in/eff_2021/main/bill_clear", timeout=60000)
                 page.wait_for_timeout(2000)
                 
+                # Fill dates using page.fill to ensure UI events trigger
                 page.fill("input[name='fromDate']", d_input_from)
                 page.fill("input[name='toDate']", d_input_to)
                 
-                # We just click search without selecting a consignor. 
-                # This will load ALL consignors for these dates into multiple tables!
                 page.click("input[name='search']")
-                page.wait_for_timeout(7000) # Wait for all tables to load
+                page.wait_for_timeout(15000) # Increased timeout to ensure full render
                 
                 html = page.content()
                 soup = BeautifulSoup(html, "html.parser")
@@ -203,18 +172,17 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
                     print(f"  ❌ No tables found on screen for batch {d_log_from}-{d_log_to}.")
                     continue
                     
-                print(f"  Found {len(tables)} tables to process.")
                 batch_master_data = []
                 data_rows = 0
                 
                 for table in tables:
-                    # Skip layout tables that contain nested tables
+                    # Skip layout tables
                     if table.find("table"):
                         continue
                         
                     rows = table.find_all("tr")
                     if len(rows) < 2:
-                        continue # No data rows
+                        continue 
                         
                     for row in rows:
                         cols = [td.get_text(separator=' ', strip=True) for td in row.find_all(["td", "th"])]
@@ -223,12 +191,12 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
                         if "Total :" in cols[0] or "Grand Total" in cols[0] or "TOTAL" in cols[-1].upper():
                             continue
                             
-                        # If cols[1] is a header string, it's a repeated header
                         if len(cols) > 2 and cols[1].upper().strip() in ["SL NO", "SL NO.", "DATE"]:
                             continue
                             
-                        # Only process rows that have exactly 15 or 16 columns
-                        if len(cols) not in [15, 16]:
+                        # Must have at least 13 columns to safely extract from end
+                        N = len(cols)
+                        if N < 13:
                             continue
                             
                         lr_no = cols[3]
@@ -240,7 +208,6 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
                         if lr_no_upper in lr_mapping:
                             found_consignor = lr_mapping[lr_no_upper]
                                 
-                        # Build standard row
                         row_dict = {col: "" for col in EXPECTED_COLUMNS}
                         row_dict["Consignor Name"] = found_consignor
                         row_dict["Sl No"] = cols[1]
@@ -250,26 +217,33 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
                         row_dict["Destination"] = cols[5]
                         row_dict["Invoice No"] = cols[6]
                         row_dict["Box Count"] = cols[7]
-                        row_dict["Boxes"] = cols[8]
                         
-                        if len(cols) == 16:
-                            row_dict["Product Type/Box Type"] = cols[9]
-                            row_dict["Lr Amount"] = cols[10]
-                            row_dict["LC/UC"] = cols[11]
-                            row_dict["Stationary Charge"] = cols[12]
-                            row_dict["Weight"] = cols[13]
-                            row_dict["Payment type"] = cols[14]
-                            row_dict["Total"] = cols[15]
-                        elif len(cols) == 15:
-                            row_dict["Product Type/Box Type"] = ""
-                            row_dict["Lr Amount"] = cols[9]
-                            row_dict["LC/UC"] = cols[10]
-                            row_dict["Stationary Charge"] = cols[11]
-                            row_dict["Weight"] = cols[12]
-                            row_dict["Payment type"] = cols[13]
-                            row_dict["Total"] = cols[14]
+                        # Parse from end
+                        row_dict["Total"] = cols[N-1]
+                        row_dict["Payment type"] = cols[N-2]
+                        row_dict["Weight"] = cols[N-3]
+                        row_dict["Stationary Charge"] = cols[N-4]
+                        row_dict["LC/UC"] = cols[N-5]
+                        row_dict["Lr Amount"] = cols[N-6]
                         
-                        # Ensure Stationary Charge is numeric default
+                        # Boxes and Product Type (everything between Box Count and Lr Amount)
+                        # We know Box Count is index 7. Lr Amount is N-6.
+                        # So indices 8 to N-7 contain the Box info.
+                        box_info = " ".join([cols[i] for i in range(8, N-5)])
+                        row_dict["Boxes"] = cols[8] if N > 8 else ""
+                        row_dict["Product Type/Box Type"] = cols[9] if N > 9 else ""
+                        
+                        # Parse date to YYYY-MM-DD
+                        d_val = row_dict["Date"]
+                        parsed_d = None
+                        if d_val:
+                            try:
+                                parsed_d = parser.parse(d_val, dayfirst=True)
+                            except:
+                                pass
+                        if parsed_d:
+                            row_dict["Date"] = parsed_d.strftime("%Y-%m-%d")
+                            
                         if not row_dict["Stationary Charge"]:
                             row_dict["Stationary Charge"] = 0
                         
@@ -278,10 +252,8 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
                         
                 print(f"  ✅ Extracted {data_rows} total rows from this batch.")
                         
-                # Batch finished. Build DataFrame and upload!
                 if batch_master_data:
                     batch_df = pd.DataFrame(batch_master_data)
-                    # Enforce column order and fillnas
                     for col in EXPECTED_COLUMNS:
                         if col not in batch_df.columns:
                             if col == "Stationary Charge":
@@ -290,17 +262,19 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
                                 batch_df[col] = ""
                     batch_df = batch_df[EXPECTED_COLUMNS]
                     
-                    # Convert numerics
                     for col in ["Lr Amount", "LC/UC", "Stationary Charge", "Weight", "Total"]:
                         batch_df[col] = pd.to_numeric(batch_df[col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
                         
+                    # Sort by Date before uploading
+                    batch_df['Date_Sort'] = pd.to_datetime(batch_df['Date'], format='%Y-%m-%d', errors='coerce')
+                    batch_df = batch_df.sort_values(by='Date_Sort', ascending=True).drop(columns=['Date_Sort'])
+                    
                     print(f"\n  📤 Uploading batch {d_log_from} to {d_log_to} ({len(batch_df)} rows)...")
                     
-                    # --- NEW: Deduplication Logic ---
                     print("  🔍 Checking for existing LR Numbers in 'All Data' to prevent duplicates...")
                     try:
                         all_data_ws = spreadsheet.worksheet("All Data")
-                        existing_lrs = all_data_ws.col_values(4)[1:] # LR No is column 4
+                        existing_lrs = all_data_ws.col_values(4)[1:]
                         existing_lrs_set = set([str(lr).strip() for lr in existing_lrs if str(lr).strip()])
                         
                         initial_len = len(batch_df)
@@ -308,7 +282,6 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
                         print(f"  ✨ Removed {initial_len - len(batch_df)} duplicate rows. {len(batch_df)} new rows to insert.")
                     except Exception as e:
                         print(f"  ⚠️ Could not fetch existing LRs for deduplication: {e}")
-                    # --------------------------------
                     
                     if batch_df.empty:
                         print("  ⏭️ No new rows to append for this batch. Skipping upload.")
@@ -340,21 +313,38 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--historical", action="store_true")
+    parser.add_argument("--auto", action="store_true")
+    parser.add_argument("--manual", action="store_true")
     parser.add_argument("--from-date", type=str, help="Start date (DD/MM/YYYY)")
     parser.add_argument("--to-date", type=str, help="End date (DD/MM/YYYY)")
     args = parser.parse_args()
     
     if args.historical:
-        print("Running historical rebuild (01/07/2026 to 26/08/2026)...")
-        run_smart_html_extraction(start_date_str="01/07/2026", end_date_str="26/08/2026", append_mode=False)
+        print("Running historical rebuild (01/07/2026 to 02/09/2026)...")
+        run_smart_html_extraction(start_date_str="01/07/2026", end_date_str="02/09/2026", append_mode=False)
     elif args.from_date and args.to_date:
-        print(f"Running manual extraction for {args.from_date} to {args.to_date}...")
+        print(f"Running manual range: {args.from_date} to {args.to_date}")
         run_smart_html_extraction(start_date_str=args.from_date, end_date_str=args.to_date, append_mode=True)
     else:
-        # Fetch last 7 days to safely cover weekends and holidays without duplicates
-        today = datetime.now()
-        seven_days_ago = today - timedelta(days=7)
-        start_str = seven_days_ago.strftime("%d/%m/%Y")
-        end_str = today.strftime("%d/%m/%Y")
-        print(f"Running daily append mode ({start_str} to {end_str})...")
+        ist = timezone(timedelta(hours=5, minutes=30))
+        today = datetime.now(ist)
+        
+        # Enforce 12 Noon rule ONLY for automated runs.
+        if args.auto:
+            print("Running in AUTO mode...")
+            if today.hour < 12:
+                print("Before 12 PM IST. Fetching up to day before yesterday.")
+                target_end_date = today - timedelta(days=2)
+            else:
+                print("After 12 PM IST. Fetching up to yesterday.")
+                target_end_date = today - timedelta(days=1)
+        else:
+            print("Running in MANUAL mode...")
+            # Manual fetches always fetch up to yesterday, bypassing 12 noon rule.
+            target_end_date = today - timedelta(days=1)
+            
+        start_date = target_end_date - timedelta(days=7)
+        start_str = start_date.strftime("%d/%m/%Y")
+        end_str = target_end_date.strftime("%d/%m/%Y")
+        print(f"Running append mode ({start_str} to {end_str})...")
         run_smart_html_extraction(start_date_str=start_str, end_date_str=end_str, append_mode=True)
