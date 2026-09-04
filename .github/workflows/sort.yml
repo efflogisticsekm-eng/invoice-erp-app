@@ -13,4 +13,5 @@ jobs:
     - name: Run sort
       env:
         GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS }}
-      run: python helper_scripts/ERP_Daily_Report_Automation/sort_google_sheets.py
+      run: python helper_scripts/ERP_Daily_Report_Automation/trim_old_data.py
+        python helper_scripts/ERP_Daily_Report_Automation/sort_google_sheets.py

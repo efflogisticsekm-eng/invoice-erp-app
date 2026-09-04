@@ -69,7 +69,10 @@ jobs:
           python helper_scripts/ERP_Daily_Report_Automation/append_missing_lrs.py $DATE_ARGS --manual
         fi
         
-        echo "Step 3: Sorting Google Sheets"
+        echo "Step 3: Trimming old data"
+        python helper_scripts/ERP_Daily_Report_Automation/trim_old_data.py
+        
+        echo "Step 4: Sorting Google Sheets"
         python helper_scripts/ERP_Daily_Report_Automation/sort_google_sheets.py
 
     - name: Upload Debug Artifacts
