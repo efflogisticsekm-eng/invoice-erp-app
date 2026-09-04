@@ -1,0 +1,16 @@
+name: Sort Google Sheets
+on:
+  workflow_dispatch:
+jobs:
+  sort:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - run: pip install gspread oauth2client google-auth pandas
+    - name: Run sort
+      env:
+        GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS }}
+      run: python helper_scripts/ERP_Daily_Report_Automation/sort_google_sheets.py

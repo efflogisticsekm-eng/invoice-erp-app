@@ -68,6 +68,9 @@ jobs:
         else
           python helper_scripts/ERP_Daily_Report_Automation/append_missing_lrs.py $DATE_ARGS --manual
         fi
+        
+        echo "Step 3: Sorting Google Sheets"
+        python helper_scripts/ERP_Daily_Report_Automation/sort_google_sheets.py
 
     - name: Upload Debug Artifacts
       if: always()
