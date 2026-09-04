@@ -694,6 +694,22 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     page.set_default_navigation_timeout(300000)
                     page.set_default_timeout(300000)
                     
+                    print(f"Downloading LR raw report Chunk {chunk_idx}...")
+                    lr_btn = page.locator("a.export_lr_excel, button#excelExport1, #excelExport1").first
+                    
+                    # Make the button visible so we don't have to use force=True, which sometimes fails if element is detached
+                    page.evaluate("""(selector) => {
+                        let btn = document.querySelector(selector);
+                        if(btn) {
+                            btn.style.display = 'block';
+                            btn.style.visibility = 'visible';
+                        }
+                    }""", "a.export_lr_excel, button#excelExport1, #excelExport1")
+                    
+                    chunk_file_path = os.path.join(DOWNLOAD_DIR, f"lr_raw_chunk_{chunk_idx}.xlsx")
+                    with page.expect_download(timeout=300000) as download_info_lr:
+                        lr_btn.click(force=True, no_wait_after=True)
+                        
                     download_lr = download_info_lr.value
                     download_lr.save_as(chunk_file_path)
                     print(f"LR raw report Chunk {chunk_idx} saved.")
