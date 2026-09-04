@@ -51,6 +51,7 @@ jobs:
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         PYTHONPATH: "EFF PARCEL FREIGHT WORKING:helper_scripts/ERP_Daily_Report_Automation"
       run: |
+        set -e
         DATE_ARGS=""
         if [ -n "${{ github.event.inputs.from_date }}" ]; then
           DATE_ARGS="$DATE_ARGS --from-date ${{ github.event.inputs.from_date }}"
@@ -58,7 +59,10 @@ jobs:
         if [ -n "${{ github.event.inputs.to_date }}" ]; then
           DATE_ARGS="$DATE_ARGS --to-date ${{ github.event.inputs.to_date }}"
         fi
+        echo "Running step 1: download_and_email.py"
         python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode reconcile $DATE_ARGS
+        
+        echo "Step 1 succeeded. Running step 2: append_missing_lrs.py"
         if [ "${{ github.event_name }}" = "schedule" ]; then
           python helper_scripts/ERP_Daily_Report_Automation/append_missing_lrs.py $DATE_ARGS --auto
         else

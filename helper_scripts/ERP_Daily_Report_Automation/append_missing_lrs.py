@@ -162,7 +162,12 @@ def run_smart_html_extraction(start_date_str=START_DATE_STR, end_date_str=END_DA
                 page.fill("input[name='toDate']", d_input_to)
                 
                 page.click("input[name='search']")
-                page.wait_for_timeout(15000) # Increased timeout to ensure full render
+                try:
+                    # Smart wait: wait for the results table to appear instead of a fixed 15s delay
+                    page.wait_for_selector("table tr td", timeout=60000)
+                    page.wait_for_timeout(3000) # Give it an extra 3s to finish rendering
+                except Exception as e:
+                    print(f"  ⚠️ Timeout or error waiting for Bill Clear results table: {e}")
                 
                 html = page.content()
                 soup = BeautifulSoup(html, "html.parser")
