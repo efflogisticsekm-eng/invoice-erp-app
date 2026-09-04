@@ -90,7 +90,7 @@ export default function DatabaseExplorer() {
     }
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (pkValue) => {
     if (!window.confirm("Are you sure you want to permanently delete this record from Supabase?")) return;
 
     setLoading(true);
@@ -100,7 +100,12 @@ export default function DatabaseExplorer() {
     try {
       const isProd = import.meta.env.PROD;
       const baseUrl = isProd ? '' : 'http://localhost:3001';
-      await axios.post(`${baseUrl}/api/explorer/delete/${activeTable}`, { id });
+      
+      const payload = activeTable === 'customer_branch_mapping' 
+        ? { original_customer_name: pkValue } 
+        : { id: pkValue };
+        
+      await axios.post(`${baseUrl}/api/explorer/delete/${activeTable}`, payload);
       setMessage("Record permanently deleted.");
       fetchData();
     } catch (err) {
@@ -114,6 +119,9 @@ export default function DatabaseExplorer() {
     setEditingRow(row);
     // clone all properties except metadata
     const clone = { ...row };
+    if (activeTable === 'customer_branch_mapping') {
+      clone.original_customer_name = row.customer_name;
+    }
     delete clone.id;
     delete clone.created_at;
     setEditForm(clone);
@@ -128,6 +136,7 @@ export default function DatabaseExplorer() {
       const sheetName = activeTable === 'live_scanned_invoices' ? 'Scanned Invoices' :
                         activeTable === 'pod_register' ? 'POD Register' :
                         activeTable === 'supervisor_branch_mapping' ? 'Supervisor Mapping' :
+                        activeTable === 'customer_branch_mapping' ? 'Customer Mapping' :
                         activeTable === 'holidays' ? 'Holidays' : 'All Invoices';
       
       // Filter rows based on search term
@@ -174,6 +183,7 @@ export default function DatabaseExplorer() {
       String(r.phone_number || '').toLowerCase().includes(term) ||
       String(r.remarks || '').toLowerCase().includes(term) ||
       String(r.supervisor_name || '').toLowerCase().includes(term) ||
+      String(r.customer_name || '').toLowerCase().includes(term) ||
       String(r.branch || '').toLowerCase().includes(term) ||
       String(r.date || '').toLowerCase().includes(term) ||
       String(r.description || '').toLowerCase().includes(term)
@@ -212,11 +222,15 @@ export default function DatabaseExplorer() {
             <span>Reload Data</span>
           </button>
 
-          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'holidays') && (
+          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'holidays' || activeTable === 'unloading_master') && (
             <button
               onClick={() => {
                 if (activeTable === 'supervisor_branch_mapping') {
                   setCreateForm({ supervisor_name: '', branch: '' });
+                } else if (activeTable === 'customer_branch_mapping') {
+                  setCreateForm({ customer_name: '', branch: '' });
+                } else if (activeTable === 'unloading_master') {
+                  setCreateForm({ consignor: '', consignee: '', rate_logic: 'Item/ Box Type', box_type: '', rate: '' });
                 } else {
                   setCreateForm({ date: '', description: '' });
                 }
@@ -224,7 +238,7 @@ export default function DatabaseExplorer() {
               }}
               className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-emerald-950/20 cursor-pointer"
             >
-              <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : '+ Add Holiday'}</span>
+              <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : activeTable === 'customer_branch_mapping' ? '+ Add Customer' : activeTable === 'unloading_master' ? '+ Add Rate' : '+ Add Holiday'}</span>
             </button>
           )}
 
@@ -246,7 +260,9 @@ export default function DatabaseExplorer() {
           { id: 'live_scanned_invoices', name: 'Scanned Invoices' },
           { id: 'pod_register', name: 'POD Register (Signature/Seals)' },
           { id: 'supervisor_branch_mapping', name: 'Supervisor Mapping' },
+          { id: 'customer_branch_mapping', name: 'Customer Mapping' },
           { id: 'holidays', name: 'Holidays List' },
+          { id: 'unloading_master', name: 'Unloading Master' },
           { id: 'all_invoices', name: 'All Invoices (Backup)' }
         ].map(tab => {
           const isActive = activeTable === tab.id;
@@ -310,10 +326,10 @@ export default function DatabaseExplorer() {
                 <thead>
                   <tr className="bg-slate-900 border-b border-slate-800 text-slate-400 font-bold">
                     <th className="p-3.5">ID</th>
-                    {activeTable === 'supervisor_branch_mapping' ? (
+                    {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' ? (
                       <>
-                        <th className="p-3.5">Created At</th>
-                        <th className="p-3.5">Supervisor Name</th>
+                        {activeTable === 'supervisor_branch_mapping' && <th className="p-3.5">Created At</th>}
+                        <th className="p-3.5">{activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : 'Customer Name'}</th>
                         <th className="p-3.5">Branch Name</th>
                       </>
                     ) : activeTable === 'holidays' ? (
@@ -321,6 +337,14 @@ export default function DatabaseExplorer() {
                         <th className="p-3.5">Created At</th>
                         <th className="p-3.5">Date</th>
                         <th className="p-3.5">Description</th>
+                      </>
+                    ) : activeTable === 'unloading_master' ? (
+                      <>
+                        <th className="p-3.5">Consignor</th>
+                        <th className="p-3.5">Consignee</th>
+                        <th className="p-3.5">Rate Logic</th>
+                        <th className="p-3.5">Box Type</th>
+                        <th className="p-3.5 text-right">Rate</th>
                       </>
                     ) : (
                       <>
@@ -354,10 +378,10 @@ export default function DatabaseExplorer() {
                     <tr key={row.id} className="hover:bg-slate-900/50 transition">
                       <td className="p-3.5 font-mono text-slate-500">#{row.id}</td>
                       
-                      {activeTable === 'supervisor_branch_mapping' ? (
+                      {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' ? (
                         <>
-                          <td className="p-3.5 font-mono">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>
-                          <td className="p-3.5 font-semibold text-white">{row.supervisor_name}</td>
+                          {activeTable === 'supervisor_branch_mapping' && <td className="p-3.5 font-mono">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>}
+                          <td className="p-3.5 font-semibold text-white">{activeTable === 'supervisor_branch_mapping' ? row.supervisor_name : row.customer_name}</td>
                           <td className="p-3.5 font-semibold text-primary">{row.branch}</td>
                         </>
                       ) : activeTable === 'holidays' ? (
@@ -365,6 +389,14 @@ export default function DatabaseExplorer() {
                           <td className="p-3.5 font-mono">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>
                           <td className="p-3.5 font-semibold text-white font-mono">{row.date}</td>
                           <td className="p-3.5 text-primary font-semibold">{row.description || '-'}</td>
+                        </>
+                      ) : activeTable === 'unloading_master' ? (
+                        <>
+                          <td className="p-3.5 font-semibold text-white">{row.consignor || '-'}</td>
+                          <td className="p-3.5 text-white">{row.consignee || '-'}</td>
+                          <td className="p-3.5 text-slate-400 font-semibold">{row.rate_logic || '-'}</td>
+                          <td className="p-3.5 text-primary font-bold">{row.box_type || '-'}</td>
+                          <td className="p-3.5 font-mono font-bold text-right text-emerald-400">₹{row.rate || '0'}</td>
                         </>
                       ) : (
                         <>
@@ -402,7 +434,7 @@ export default function DatabaseExplorer() {
                             <Edit2 size={13} />
                           </button>
                           <button
-                            onClick={() => handleDelete(row.id)}
+                            onClick={() => handleDelete(activeTable === 'customer_branch_mapping' ? row.customer_name : row.id)}
                             className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition cursor-pointer"
                           >
                             <Trash2 size={13} />
@@ -456,15 +488,24 @@ export default function DatabaseExplorer() {
             </div>
 
             <form onSubmit={handleUpdate} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              {activeTable === 'supervisor_branch_mapping' ? (
+              {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' ? (
                 <>
                   <div>
-                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Supervisor Name</label>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">
+                      {activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : 'Customer Name'}
+                    </label>
                     <input
                       type="text"
-                      value={editForm.supervisor_name || ''}
-                      onChange={e => setEditForm({ ...editForm, supervisor_name: e.target.value })}
-                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
+                      value={activeTable === 'supervisor_branch_mapping' ? (editForm.supervisor_name || '') : (editForm.customer_name || '')}
+                      onChange={e => {
+                        if (activeTable === 'supervisor_branch_mapping') {
+                          setEditForm({ ...editForm, supervisor_name: e.target.value })
+                        } else {
+                          setEditForm({ ...editForm, customer_name: e.target.value })
+                        }
+                      }}
+                      disabled={activeTable === 'customer_branch_mapping'}
+                      className={`w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none ${activeTable === 'customer_branch_mapping' ? 'opacity-50 cursor-not-allowed' : ''}`}
                       required
                     />
                   </div>
@@ -499,6 +540,34 @@ export default function DatabaseExplorer() {
                       onChange={e => setEditForm({ ...editForm, description: e.target.value })}
                       className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
                     />
+                  </div>
+                </>
+              ) : activeTable === 'unloading_master' ? (
+                <>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Consignor</label>
+                    <input type="text" value={editForm.consignor || ''} onChange={e => setEditForm({...editForm, consignor: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Consignee</label>
+                    <input type="text" value={editForm.consignee || ''} onChange={e => setEditForm({...editForm, consignee: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate Logic</label>
+                      <select value={editForm.rate_logic || ''} onChange={e => setEditForm({...editForm, rate_logic: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required>
+                        <option value="Item/ Box Type">Item/ Box Type</option>
+                        <option value="Weight">Weight</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Box Type</label>
+                      <input type="text" value={editForm.box_type || ''} onChange={e => setEditForm({...editForm, box_type: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate (₹)</label>
+                    <input type="number" step="0.01" value={editForm.rate || ''} onChange={e => setEditForm({...editForm, rate: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
                   </div>
                 </>
               ) : (
@@ -663,15 +732,23 @@ export default function DatabaseExplorer() {
             </div>
 
             <form onSubmit={handleCreate} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              {activeTable === 'supervisor_branch_mapping' ? (
+              {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' ? (
                 <>
                   <div>
-                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Supervisor Name</label>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">
+                      {activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : 'Customer Name'}
+                    </label>
                     <input
                       type="text"
-                      value={createForm.supervisor_name || ''}
-                      onChange={e => setCreateForm({ ...createForm, supervisor_name: e.target.value })}
-                      placeholder="e.g. BIPIN"
+                      value={activeTable === 'supervisor_branch_mapping' ? (createForm.supervisor_name || '') : (createForm.customer_name || '')}
+                      onChange={e => {
+                        if (activeTable === 'supervisor_branch_mapping') {
+                          setCreateForm({ ...createForm, supervisor_name: e.target.value })
+                        } else {
+                          setCreateForm({ ...createForm, customer_name: e.target.value })
+                        }
+                      }}
+                      placeholder={activeTable === 'supervisor_branch_mapping' ? "e.g. BIPIN" : "e.g. GEM PAINTS"}
                       className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
                       required
                     />
@@ -711,9 +788,37 @@ export default function DatabaseExplorer() {
                     />
                   </div>
                 </>
+              ) : activeTable === 'unloading_master' ? (
+                <>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Consignor</label>
+                    <input type="text" value={createForm.consignor || ''} onChange={e => setCreateForm({...createForm, consignor: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Consignee</label>
+                    <input type="text" value={createForm.consignee || ''} onChange={e => setCreateForm({...createForm, consignee: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate Logic</label>
+                      <select value={createForm.rate_logic || ''} onChange={e => setCreateForm({...createForm, rate_logic: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required>
+                        <option value="Item/ Box Type">Item/ Box Type</option>
+                        <option value="Weight">Weight</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Box Type</label>
+                      <input type="text" value={createForm.box_type || ''} onChange={e => setCreateForm({...createForm, box_type: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate (₹)</label>
+                    <input type="number" step="0.01" value={createForm.rate || ''} onChange={e => setCreateForm({...createForm, rate: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                </>
               ) : (
                 <div className="text-slate-400 text-xs">
-                  Create is only supported for Supervisor Mapping and Holidays tables.
+                  Create is only supported for mapping tables and Holidays.
                 </div>
               )}
 
