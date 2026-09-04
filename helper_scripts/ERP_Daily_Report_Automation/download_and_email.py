@@ -694,25 +694,6 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     page.set_default_navigation_timeout(300000)
                     page.set_default_timeout(300000)
                     
-                    export_href = f"https://eff.aadhocc.in/eff_2021/main/lr/export_lr_excel?search_date={from_date_lr}&search_date_to={to_date_lr}&lr_current_status=-1"
-                    
-                    # We inject a temporary anchor tag to force download via playwright
-                    page.evaluate("""(url) => {
-                        var tempLink = document.createElement('a');
-                        tempLink.id = 'direct_lr_export';
-                        tempLink.href = url;
-                        tempLink.innerText = 'Download';
-                        document.body.appendChild(tempLink);
-                    }""", export_href)
-                    
-                    print(f"Downloading LR raw report Chunk {chunk_idx}...")
-                    lr_btn = page.locator("#direct_lr_export")
-                    chunk_file_path = os.path.join(DOWNLOAD_DIR, f"lr_raw_chunk_{chunk_idx}.xlsx")
-                    with page.expect_download(timeout=300000) as download_info_lr:
-                        lr_btn.click(force=True, no_wait_after=True)
-                        
-                    # Cleanup temp link
-                    page.evaluate("document.getElementById(direct_lr_export).remove()")
                     download_lr = download_info_lr.value
                     download_lr.save_as(chunk_file_path)
                     print(f"LR raw report Chunk {chunk_idx} saved.")
