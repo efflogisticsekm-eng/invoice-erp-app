@@ -701,6 +701,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                         var tempLink = document.createElement('a');
                         tempLink.id = 'direct_lr_export';
                         tempLink.href = url;
+                        tempLink.innerText = 'Download';
                         document.body.appendChild(tempLink);
                     }""", export_href)
                     
@@ -708,7 +709,7 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     lr_btn = page.locator("#direct_lr_export")
                     chunk_file_path = os.path.join(DOWNLOAD_DIR, f"lr_raw_chunk_{chunk_idx}.xlsx")
                     with page.expect_download(timeout=300000) as download_info_lr:
-                        lr_btn.click(no_wait_after=True)
+                        lr_btn.click(force=True, no_wait_after=True)
                         
                     # Cleanup temp link
                     page.evaluate("document.getElementById(direct_lr_export).remove()")
