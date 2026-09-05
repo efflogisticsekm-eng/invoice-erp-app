@@ -1772,13 +1772,32 @@ app.get('/api/explorer/data/:table', async (req, res) => {
     return res.status(400).json({ error: "Invalid table name" });
   }
   try {
-    let query = supabase.from(table).select('*');
-    if (table !== 'customer_branch_mapping') {
-      query = query.order('id', { ascending: false });
+    let allData = [];
+    let from = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      let query = supabase.from(table).select('*').range(from, from + pageSize - 1);
+      if (table !== 'customer_branch_mapping') {
+        query = query.order('id', { ascending: false });
+      }
+      const { data, error } = await query;
+      if (error) {
+        return res.status(500).json({ error: error.message });
+      }
+      
+      if (data && data.length > 0) {
+        allData = [...allData, ...data];
+      }
+      
+      if (!data || data.length < pageSize) {
+        hasMore = false;
+      } else {
+        from += pageSize;
+      }
     }
-    const { data, error } = await query;
-    if (error) return res.status(500).json({ error: error.message });
-    return res.json({ data: data || [] });
+    return res.json({ data: allData });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
