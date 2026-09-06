@@ -34,7 +34,7 @@ jobs:
     - name: Test site connectivity
       run: |
         echo "Testing HTTP connection to IOC Xtrapower with browser User-Agent..."
-        curl -i -s -L -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -X GET --max-time 15 "https://beta.iocxtrapower.com/account/login?returnUrl=%2F" || echo "curl connection failed"
+        curl -i -s -L -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -X GET --max-time 15 "https://www.iocxtrapower.com/account/login?returnUrl=%2F" || echo "curl connection failed"
 
     - name: Run Report Automation Script
       env:

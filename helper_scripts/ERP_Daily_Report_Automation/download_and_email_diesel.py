@@ -119,7 +119,7 @@ async def download_transactions(username, password, temp_dir, target_date=None):
         context = await browser.new_context(viewport={"width": 1280, "height": 800})
         page = await context.new_page()
         
-        login_url = "https://beta.iocxtrapower.com/account/login?returnUrl=%2F"
+        login_url = "https://www.iocxtrapower.com/account/login?returnUrl=%2F"
         print(f"Navigating to login page: {login_url}...")
         await page.goto(login_url, timeout=60000)
         await page.wait_for_timeout(3000)
