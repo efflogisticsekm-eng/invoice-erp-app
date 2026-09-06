@@ -377,8 +377,10 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
     # Resolve the target date for reporting.
     # If running before 12:00 PM (noon) IST, treat it as a delayed run for the previous calendar day.
     if mode in ("daily_evening_report", "evening", "afternoon_open_lrs"):
-        # Always use yesterday as the target date for the daily report
-        target_date = now_ist - timedelta(days=1)
+        if now_ist.hour < 12:
+            target_date = now_ist - timedelta(days=1)
+        else:
+            target_date = now_ist
     else:
         target_date = now_ist
         
