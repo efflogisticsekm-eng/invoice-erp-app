@@ -1,0 +1,52 @@
+name: Read Formula
+on: workflow_dispatch
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: pip install gspread oauth2client
+    - name: Create Python Script
+      run: |
+        cat << 'EOF' > read.py
+        import gspread
+        from oauth2client.service_account import ServiceAccountCredentials
+        import os
+        import json
+
+        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        creds_json = json.loads(os.environ['GOOGLE_CREDENTIALS_JSON'])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+        client = gspread.authorize(creds)
+
+        dest_sheet_id = '1G9ApdBn7jq3H7L7KZoMlwkBwDvCcKJ37go8QpaYpo6Y' # Topay & Paid Parcel Billing
+        sh = client.open_by_key(dest_sheet_id)
+
+        try:
+            worksheet = sh.worksheet("LR Data")
+            print("LR Data A1 formula:", worksheet.acell('A1', value_render_option='FORMULA').value)
+            print("LR Data A1 value:", worksheet.acell('A1', value_render_option='FORMATTED_VALUE').value)
+            
+            # Write a simple clean formula
+            worksheet.update('A1', [['=IMPORTRANGE("1kZYGIOJxMRn-TOhDs7Q3rEfkNPpXbGsNDcGAphL5kWQ", "LR Data!A1:Z")']], value_input_option='USER_ENTERED')
+            print("Re-injected clean formula to LR Data")
+        except Exception as e:
+            print("Error LR Data:", e)
+
+        try:
+            worksheet2 = sh.worksheet("Despatch Data")
+            worksheet2.update('A1', [['=IMPORTRANGE("1kZYGIOJxMRn-TOhDs7Q3rEfkNPpXbGsNDcGAphL5kWQ", "Despatch Data!A1:Z")']], value_input_option='USER_ENTERED')
+            print("Re-injected clean formula to Despatch Data")
+        except Exception as e:
+            print("Error Despatch Data:", e)
+        EOF
+    - name: Run Script
+      env:
+        GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS }}
+      run: python read.py
