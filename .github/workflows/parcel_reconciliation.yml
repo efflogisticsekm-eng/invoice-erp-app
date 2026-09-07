@@ -2,9 +2,9 @@ name: Daily Topay & Paid Parcel Reconciliation
 run-name: Parcel Reconciliation Run
 
 on:
-  schedule:
-    # 06:30 UTC is 12:00 PM IST (12:00 Noon IST)
-    - cron: '30 6 * * *'
+  # schedule:
+  #   # 06:30 UTC is 12:00 PM IST (12:00 Noon IST)
+  #   - cron: '30 6 * * *'
   workflow_dispatch:
     inputs:
       from_date:
