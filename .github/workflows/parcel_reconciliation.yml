@@ -42,6 +42,8 @@ jobs:
       run: |
         mkdir -p "ERP nxt Data collection/Invoice_Extractor_Tool"
         echo "$GOOGLE_CREDENTIALS_JSON" > "ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
+        echo "SERVICE_ACCOUNT_EMAIL=$(cat 'ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json' | jq -r .client_email)"
+        echo "The Service Account Email is: $(cat 'ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json' | jq -r .client_email)"
 
     - name: Run Parcel Freight Reconciliation
       env:
