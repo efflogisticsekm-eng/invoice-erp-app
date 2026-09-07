@@ -62,12 +62,12 @@ jobs:
         echo "Running step 1: download_and_email.py"
         python helper_scripts/ERP_Daily_Report_Automation/download_and_email.py --mode reconcile $DATE_ARGS
         
-        echo "Step 1 succeeded. Running step 2: append_missing_lrs.py"
-        if [ "${{ github.event_name }}" = "schedule" ]; then
-          python helper_scripts/ERP_Daily_Report_Automation/append_missing_lrs.py $DATE_ARGS --auto
-        else
-          python helper_scripts/ERP_Daily_Report_Automation/append_missing_lrs.py $DATE_ARGS --manual
-        fi
+        echo "Step 1 succeeded. Running step 2: append_missing_lrs.py (DISABLED)"
+        # if [ "${{ github.event_name }}" = "schedule" ]; then
+        #   python helper_scripts/ERP_Daily_Report_Automation/append_missing_lrs.py $DATE_ARGS --auto
+        # else
+        #   python helper_scripts/ERP_Daily_Report_Automation/append_missing_lrs.py $DATE_ARGS --manual
+        # fi
         
         echo "Step 3: Trimming old data"
         python helper_scripts/ERP_Daily_Report_Automation/trim_old_data.py
