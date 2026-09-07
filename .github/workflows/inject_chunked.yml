@@ -1,0 +1,64 @@
+name: Inject Chunked Formulas
+on: workflow_dispatch
+jobs:
+  inject_chunked:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: pip install gspread oauth2client
+    - name: Create Python Script
+      run: |
+        cat << 'EOF' > inject_chunked.py
+        import gspread
+        from oauth2client.service_account import ServiceAccountCredentials
+        import os
+        import json
+
+        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        creds_json = json.loads(os.environ['GOOGLE_CREDENTIALS_JSON'])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+        client = gspread.authorize(creds)
+
+        dest_sheet_id = '1G9ApdBn7jq3H7L7KZoMlwkBwDvCcKJ37go8QpaYpo6Y' # Topay & Paid Parcel Billing
+        url = "1kZYGIOJxMRn-TOhDs7Q3rEfkNPpXbGsNDcGAphL5kWQ"
+        sh = client.open_by_key(dest_sheet_id)
+
+        # LR Data: 19 columns (A to S), 22280 rows
+        try:
+            worksheet = sh.worksheet("LR Data")
+            chunks = []
+            for i in range(1, 25000, 5000):
+                chunks.append(f'IMPORTRANGE("{url}", "LR Data!A{i}:S{i+4999}")')
+            
+            # Filter out blank rows entirely with QUERY to make the array clean
+            inner = "{" + "; ".join(chunks) + "}"
+            formula = f'=QUERY({inner}, "SELECT * WHERE Col1 IS NOT NULL", 1)'
+            worksheet.update('A1', [[formula]], value_input_option='USER_ENTERED')
+            print("Injected chunked formula into LR Data")
+        except Exception as e:
+            print("Error LR Data:", e)
+
+        # Despatch Data: 28 columns (A to AB), 21539 rows
+        try:
+            worksheet2 = sh.worksheet("Despatch Data")
+            chunks2 = []
+            for i in range(1, 25000, 5000):
+                chunks2.append(f'IMPORTRANGE("{url}", "Despatch Data!A{i}:AB{i+4999}")')
+            
+            inner2 = "{" + "; ".join(chunks2) + "}"
+            formula2 = f'=QUERY({inner2}, "SELECT * WHERE Col1 IS NOT NULL", 1)'
+            worksheet2.update('A1', [[formula2]], value_input_option='USER_ENTERED')
+            print("Injected chunked formula into Despatch Data")
+        except Exception as e:
+            print("Error Despatch Data:", e)
+        EOF
+    - name: Run Script
+      env:
+        GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS }}
+      run: python inject_chunked.py
