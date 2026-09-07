@@ -1,0 +1,49 @@
+name: Get Error Message
+on: workflow_dispatch
+jobs:
+  get_error:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: pip install google-api-python-client oauth2client
+    - name: Create Python Script
+      run: |
+        cat << 'EOF' > get_error.py
+        from oauth2client.service_account import ServiceAccountCredentials
+        from googleapiclient.discovery import build
+        import os
+        import json
+
+        scope = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+        creds_json = json.loads(os.environ['GOOGLE_CREDENTIALS_JSON'])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+        service = build('sheets', 'v4', credentials=creds)
+
+        dest_sheet_id = '1G9ApdBn7jq3H7L7KZoMlwkBwDvCcKJ37go8QpaYpo6Y' # Topay & Paid Parcel Billing
+        
+        result = service.spreadsheets().get(
+            spreadsheetId=dest_sheet_id,
+            ranges=['LR Data!A1', 'Despatch Data!A1'],
+            includeGridData=True
+        ).execute()
+
+        for sheet in result.get('sheets', []):
+            title = sheet['properties']['title']
+            try:
+                cell = sheet['data'][0]['rowData'][0]['values'][0]
+                error = cell.get('effectiveValue', {}).get('errorValue', {})
+                print(f"[{title}] Error Message: {error.get('message', 'No error message')}")
+                print(f"[{title}] User Entered Value: {cell.get('userEnteredValue', {})}")
+            except Exception as e:
+                print(f"[{title}] Could not parse cell data: {e}")
+        EOF
+    - name: Run Script
+      env:
+        GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS }}
+      run: python get_error.py
