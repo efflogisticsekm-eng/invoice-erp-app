@@ -2542,11 +2542,9 @@ def main():
     elif args.mode == "reconcile":
         print("Fetching data from Aadhocc Daily Audit data sheet...", flush=True)
         import gspread
-        from google.oauth2.service_account import Credentials
         import pandas as pd
         import json
         import os
-        from datetime import datetime, timedelta
         
         creds_path = "ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
