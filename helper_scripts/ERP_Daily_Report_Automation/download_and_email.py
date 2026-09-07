@@ -2540,8 +2540,59 @@ def main():
             print("Failed to download LR file. Aborting.")
             
     elif args.mode == "reconcile":
-        # Download reports needed for reconciliation (raw LR, raw Despatch, bill clear reports, and GDM details)
-        lr_file, despatch_file, from_date, to_date = download_erp_reports(mode="reconcile", from_override=args.from_date, to_override=args.to_date)
+        print("Fetching data from Aadhocc Daily Audit data sheet...", flush=True)
+        import gspread
+        from google.oauth2.service_account import Credentials
+        import pandas as pd
+        import json
+        import os
+        from datetime import datetime, timedelta
+        
+        creds_path = "ERP nxt Data collection/Invoice_Extractor_Tool/credentials.json"
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        google_creds_env = os.getenv("GOOGLE_CREDENTIALS_JSON")
+        if google_creds_env:
+            creds_dict = json.loads(google_creds_env)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            client = gspread.authorize(creds)
+        elif os.path.exists(creds_path):
+            creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
+            client = gspread.authorize(creds)
+        else:
+            raise FileNotFoundError(f"Google credentials not found at {creds_path} or in env")
+            
+        audit_sheet_id = "1kZYGIOJxMRn-TOhDs7Q3rEfkNPpXbGsNDcGAphL5kWQ"
+        sh = client.open_by_key(audit_sheet_id)
+        
+        DOWNLOAD_DIR = os.path.join(os.getcwd(), "downloads_reconcile")
+        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+        
+        all_lr_file = os.path.join(DOWNLOAD_DIR, "all_lr.csv")
+        lr_data_file = os.path.join(DOWNLOAD_DIR, "lr_data.csv")
+        despatch_file = os.path.join(DOWNLOAD_DIR, "despatch_data.csv")
+        
+        def fetch_tab_to_csv(tab_name, csv_path):
+            try:
+                ws = sh.worksheet(tab_name)
+                data = ws.get_all_values()
+                if data:
+                    df = pd.DataFrame(data[1:], columns=data[0])
+                    df.to_csv(csv_path, index=False)
+                    print(f"Fetched {len(df)} rows from '{tab_name}'")
+                else:
+                    pd.DataFrame().to_csv(csv_path, index=False)
+            except Exception as e:
+                print(f"Error fetching '{tab_name}': {e}")
+                pd.DataFrame().to_csv(csv_path, index=False)
+                
+        fetch_tab_to_csv("All LR", all_lr_file)
+        fetch_tab_to_csv("LR Data", lr_data_file)
+        fetch_tab_to_csv("Despatch Data", despatch_file)
+        
+        from_date = args.from_date if args.from_date else (datetime.now() - timedelta(days=52)).strftime("%Y-%m-%d")
+        to_date = args.to_date if args.to_date else datetime.now().strftime("%Y-%m-%d")
+        
+        lr_file = all_lr_file 
         print("Reconciliation downloads completed successfully. Commencing discrepancy analysis...", flush=True)
         
         # Invoke freight calculation engine
@@ -2653,8 +2704,24 @@ def main():
                 for col in df_whole.columns:
                     df_whole[col] = df_whole[col].astype(str)
 
+            try:
+                df_lr_data_raw = pd.read_csv(lr_data_file, low_memory=False, index_col=False)
+            except Exception:
+                df_lr_data_raw = robust_read_df(lr_data_file).fillna("")
+                
+            if not df_lr_data_raw.empty and req_from_dt is not None:
+                for col in df_lr_data_raw.columns:
+                    if 'DATE' in str(col).upper():
+                        df_lr_data_raw['parsed_dt'] = pd.to_datetime(df_lr_data_raw[col], dayfirst=True, errors='coerce')
+                        df_lr_data_raw = df_lr_data_raw[df_lr_data_raw['parsed_dt'].isna() | (df_lr_data_raw['parsed_dt'] >= req_from_dt)].drop(columns=['parsed_dt'])
+                        break
+            if not df_lr_data_raw.empty:
+                for col in df_lr_data_raw.columns:
+                    df_lr_data_raw[col] = df_lr_data_raw[col].astype(str)
+
             target_tabs = [
-                ("LR Data", df_whole),
+                ("All LR", df_whole),
+                ("LR Data", df_lr_data_raw),
                 ("Despatch Data", df_despatch_raw),
                 ("Reconciled Audit", result_df)
             ]
