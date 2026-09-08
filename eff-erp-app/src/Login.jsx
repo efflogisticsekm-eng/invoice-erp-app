@@ -64,7 +64,7 @@ export default function Login({ onLogin }) {
         <p style={{ color: 'var(--text-muted)' }}>{isSignUp ? 'Create Test Account' : 'Login to submit and approve bills'}</p>
       </div>
 
-      <form onSubmit={handleAuth} className="card">
+      <form onSubmit={handleAuth} className="card form-grid">
         {error && <div style={{ color: 'white', background: 'var(--error)', padding: '10px', borderRadius: '8px', marginBottom: '15px', fontSize: '14px' }}>{error}</div>}
         
         {isSignUp && (

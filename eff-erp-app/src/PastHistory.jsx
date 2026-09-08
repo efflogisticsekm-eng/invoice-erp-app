@@ -112,12 +112,12 @@ export default function PastHistory({ user, profile, onBack }) {
       {loading ? (
         <p>Loading...</p>
       ) : requests.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
+        <div className="card form-grid" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
           <p>No past history found.</p>
         </div>
       ) : (
         requests.map(req => (
-          <div key={req.id} className="card" style={{ marginBottom: '10px', padding: '15px' }}>
+          <div key={req.id} className="card form-grid" style={{ marginBottom: '10px', padding: '15px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
               <strong style={{ fontSize: '15px' }}>{req.profiles?.full_name || 'Unknown'}</strong>
               <span style={{ color: 'var(--primary)', fontWeight: 'bold', fontSize: '16px' }}>₹{req.total_amount}</span>

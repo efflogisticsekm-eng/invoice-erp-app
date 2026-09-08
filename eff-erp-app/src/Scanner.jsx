@@ -703,7 +703,7 @@ export default function Scanner({ user, onBack }) {
 
       <div style={{ maxWidth: '600px', margin: '0 auto', background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
         
-        <form onSubmit={handleSubmit} className="card" style={{ marginTop: '0px' }}>
+        <form onSubmit={handleSubmit} className="card form-grid" style={{ marginTop: '0px' }}>
           <h3 style={{ color: 'var(--primary)', marginBottom: '15px', borderBottom: '2px solid var(--primary)', paddingBottom: '5px' }}>1. Select Expense Category</h3>
           
           
@@ -888,7 +888,7 @@ export default function Scanner({ user, onBack }) {
                   </button>
                 </div>
               </div>
-              <div style={{ opacity: gdmNumber.trim() ? 1 : 0.5, pointerEvents: gdmNumber.trim() ? 'auto' : 'none' }}>
+              <div className="form-grid full-width" style={{ opacity: gdmNumber.trim() ? 1 : 0.5, pointerEvents: gdmNumber.trim() ? 'auto' : 'none' }}>
                 <div className="input-group"><label>LR No's</label><input type="text" className="input-field" value={lrNo} onChange={e => setLrNo(e.target.value)} /></div>
                 <div className="input-group"><label>Despatch Date</label><input type="date" className="input-field" value={lrDate} onChange={e => setLrDate(e.target.value)} /></div>
                 <div className="input-group"><label>Total Weight</label><input type="number" inputMode="decimal" className="input-field" value={totalWeight} onChange={e => setTotalWeight(e.target.value)} /></div>
@@ -926,7 +926,7 @@ export default function Scanner({ user, onBack }) {
                   </button>
                 </div>
               </div>
-              <div style={{ opacity: gdmNumber.trim() ? 1 : 0.5, pointerEvents: gdmNumber.trim() ? 'auto' : 'none' }}>
+              <div className="form-grid full-width" style={{ opacity: gdmNumber.trim() ? 1 : 0.5, pointerEvents: gdmNumber.trim() ? 'auto' : 'none' }}>
                 <div className="input-group"><label>LR No's</label><input type="text" className="input-field" value={lrNo} onChange={e => setLrNo(e.target.value)} /></div>
                 <div className="input-group"><label>Despatch Date</label><input type="date" className="input-field" value={lrDate} onChange={e => setLrDate(e.target.value)} /></div>
                 <div className="input-group"><label>Any Other Charge</label><input type="text" className="input-field" value={putDescription} onChange={e => setPutDescription(e.target.value)} /></div>

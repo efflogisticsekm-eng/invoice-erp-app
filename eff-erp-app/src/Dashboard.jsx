@@ -143,6 +143,15 @@ export default function Dashboard({ user, onLogout }) {
           >
             My Requests
           </button>
+
+          {/* User Guide spanning 2 columns */}
+          <button 
+            className="dashboard-grid-btn"
+            style={{ gridColumn: 'span 2', backgroundColor: '#e8f4fd', color: '#007aff', border: '1px dashed #007aff' }}
+            onClick={() => window.open('./guide.html', '_blank')}
+          >
+            📖 App User Guide
+          </button>
         </div>
       </div>
     </div>

@@ -110,3 +110,40 @@ body {
 .dashboard-grid-btn:active {
   opacity: 0.8;
 }
+
+
+/* PC View Enhancements */
+@media (min-width: 768px) {
+  #root {
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+  
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  
+  .form-grid > h2, 
+  .form-grid > h3, 
+  .form-grid > hr, 
+  .form-grid > button,
+  .form-grid > .full-width {
+    grid-column: 1 / -1;
+  }
+  
+  .form-grid > .input-group {
+    margin-bottom: 0;
+  }
+}
+
+@media (min-width: 1024px) {
+  #root {
+    max-width: 1200px;
+  }
+  .form-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}

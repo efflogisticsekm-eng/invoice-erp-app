@@ -106,31 +106,77 @@ function doGet(e) {
     item.boxes = boxesFullString; 
     item.topay = topayAmount; 
     
-    var boxQty = parseFloat(item.boxQtyOnly) || parseFloat(boxesFullString) || 1; 
     var itemBoxString = String(boxesFullString).toLowerCase();
-    
     var ulCharge = 0;
+
     if (unloadingData.length > 0) {
+      // 1. Find all applicable rules for this consignor & consignee
+      var applicableRules = [];
       for (var m = 1; m < unloadingData.length; m++) {
         var uRow = unloadingData[m];
-        var uConsignor = uRow[0]; // A
-        var uConsignee = uRow[1]; // B
-        
-        if (normalizeStr(uConsignor) === normalizeStr(item.consignor) && 
-            normalizeStr(uConsignee) === normalizeStr(item.consignee)) {
-            
-          var rateLogic = normalizeStr(uRow[2]); // C
-          var boxType = normalizeStr(uRow[3]); // D
-          var rate = parseFloat(uRow[4]) || 0; // E
+        if (normalizeStr(uRow[0]) === normalizeStr(item.consignor) && 
+            normalizeStr(uRow[1]) === normalizeStr(item.consignee)) {
+          applicableRules.push({
+            rateLogic: normalizeStr(uRow[2]),
+            boxType: normalizeStr(uRow[3]),
+            rate: parseFloat(uRow[4]) || 0
+          });
+        }
+      }
+
+      if (applicableRules.length > 0) {
+        var weightRule = applicableRules.find(function(r) { return r.rateLogic === "weight"; });
+        if (weightRule) {
+          ulCharge = item.weight * weightRule.rate;
+        } else {
+          // 2. Parse string like "11 x Bag , 1 x Box" or "10 x Bag+1 x Box"
+          var parts = itemBoxString.split(/,|\+/); 
+          var parsedSuccessfully = false;
           
-          if (rateLogic === "weight") {
-            ulCharge = item.weight * rate;
-            break; 
-          } else if (rateLogic === "item" || rateLogic === "boxtype" || rateLogic === "itemboxtype") {
-            if (boxType === "allboxtype" || boxType === "allanyitem" || normalizeStr(itemBoxString).indexOf(boxType) !== -1) {
-              ulCharge = boxQty * rate;
-              break;
+          for (var p = 0; p < parts.length; p++) {
+            var part = parts[p].trim();
+            if (!part) continue;
+            
+            // Extract number and text. E.g. "11 x bag" -> qty: 11, text: "bag"
+            var match = part.match(/^([\d.]+)\s*(?:x|[-*])?\s*(.+)$/);
+            if (match) {
+              parsedSuccessfully = true;
+              var qty = parseFloat(match[1]) || 1;
+              var bTypeStr = normalizeStr(match[2]);
+              
+              var matchedRule = applicableRules.find(function(r) {
+                return r.boxType === "allboxtype" || r.boxType === "allanyitem" || bTypeStr.indexOf(r.boxType) !== -1;
+              });
+              
+              if (matchedRule) {
+                ulCharge += qty * matchedRule.rate;
+              }
+            } else {
+              // Fallback for parts like "10" or "Box" without "x"
+              var qtyOnly = parseFloat(part);
+              if (!isNaN(qtyOnly)) {
+                 parsedSuccessfully = true;
+                 var textOnly = normalizeStr(part.replace(/[0-9.]+/g, ''));
+                 if(!textOnly) textOnly = normalizeStr(itemBoxString);
+                 var matchedRule2 = applicableRules.find(function(r) {
+                   return r.boxType === "allboxtype" || r.boxType === "allanyitem" || textOnly.indexOf(r.boxType) !== -1;
+                 });
+                 if (matchedRule2) {
+                   ulCharge += qtyOnly * matchedRule2.rate;
+                 }
+              }
             }
+          }
+          
+          // 3. Fallback if completely failed to parse dynamically
+          if (!parsedSuccessfully || ulCharge === 0) {
+             var fallbackQty = parseFloat(item.boxQtyOnly) || parseFloat(boxesFullString) || 1;
+             var fallbackRule = applicableRules.find(function(r) {
+               return r.boxType === "allboxtype" || r.boxType === "allanyitem" || normalizeStr(itemBoxString).indexOf(r.boxType) !== -1;
+             });
+             if (fallbackRule) {
+               ulCharge = fallbackQty * fallbackRule.rate;
+             }
           }
         }
       }

@@ -183,12 +183,12 @@ export default function MyRequests({ user, profile, onBack }) {
       {loading ? (
         <p>Loading...</p>
       ) : requests.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
+        <div className="card form-grid" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>
           <p>You have not submitted any requests yet.</p>
         </div>
       ) : (
         requests.map(req => (
-          <div key={req.id} className="card" style={{ marginBottom: '12px', padding: '15px' }}>
+          <div key={req.id} className="card form-grid" style={{ marginBottom: '12px', padding: '15px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>ID: #{req.id.substring(0, 8)}</span>
               {getStatusBadge(req)}

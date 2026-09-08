@@ -263,12 +263,12 @@ export default function Approvals({ user, profile, onBack }) {
       {loading ? (
         <p>Loading...</p>
       ) : requests.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+        <div className="card form-grid" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
           <p>No pending approvals for you.</p>
         </div>
       ) : (
         requests.map(req => (
-          <div key={req.id} className="card" style={{ marginBottom: '10px', padding: '15px' }}>
+          <div key={req.id} className="card form-grid" style={{ marginBottom: '10px', padding: '15px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
               <strong style={{ fontSize: '16px' }}>{req.profiles?.full_name || 'Unknown'}</strong>
               <span style={{ color: 'var(--primary)', fontWeight: 'bold', fontSize: '18px' }}>₹{req.total_amount}</span>
