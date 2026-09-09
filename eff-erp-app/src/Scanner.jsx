@@ -967,6 +967,14 @@ export default function Scanner({ user, onBack }) {
                     Same as Workshop Name
                   </label>
                 )}
+                {mainCategory === 'Other' && otherItem !== 'GST' && otherItem !== 'TDS' && (
+                  <label style={{ fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', color: 'var(--primary)' }}>
+                    <input type="checkbox" onChange={(e) => {
+                      if (e.target.checked) setBillingPartyName(toWhom);
+                    }} />
+                    Same as To Whom / Party Name
+                  </label>
+                )}
               </div>
               <input type="text" className="input-field" value={billingPartyName} onChange={e => setBillingPartyName(e.target.value)} />
             </div>

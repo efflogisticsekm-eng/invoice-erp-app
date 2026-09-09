@@ -61,8 +61,10 @@ export default function Approvals({ user, profile, onBack }) {
     const roleIndex = chain.indexOf(role);
     if (roleIndex !== -1 && roleIndex < chain.length - 1) {
       return chain[roleIndex + 1];
-    } else {
+    } else if (roleIndex === chain.length - 1) {
       return 'Approved'; // Final approver submitted it
+    } else {
+      return chain[0]; // Fallback if role is somehow missing
     }
   };
 
