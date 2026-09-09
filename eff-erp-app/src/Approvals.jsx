@@ -5,6 +5,7 @@ import { CheckCircle, XCircle, Camera, HelpCircle } from 'lucide-react';
 export default function Approvals({ user, profile, onBack }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [processingId, setProcessingId] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [activeRemarksReq, setActiveRemarksReq] = useState(null);
   const [remarksText, setRemarksText] = useState('');
@@ -70,6 +71,7 @@ export default function Approvals({ user, profile, onBack }) {
 
   const handleApprove = async (request) => {
     try {
+      setProcessingId(request.id);
       const nextLevelRaw = computeNextLevel(request.category, request.sub_category, profile.role);
       
       let nextLevel = 'Approved';
@@ -144,11 +146,14 @@ export default function Approvals({ user, profile, onBack }) {
       fetchRequests();
     } catch (err) {
       alert('Error: ' + err.message);
+    } finally {
+      setProcessingId(null);
     }
   };
 
   const handleReject = async (request, remarks) => {
     try {
+      setProcessingId(request.id);
       const updatedDetails = {
         ...(request.details || {}),
         remarksHistory: [
@@ -183,11 +188,14 @@ export default function Approvals({ user, profile, onBack }) {
       fetchRequests();
     } catch (err) {
       alert('Error: ' + err.message);
+    } finally {
+      setProcessingId(null);
     }
   };
 
   const handleClarification = async (request, remarks) => {
     try {
+      setProcessingId(request.id);
       const computePreviousLevel = (cat, subCat, currentRole) => {
         let chain = [];
         if (cat === 'Vehicle Maintenance') {
@@ -251,6 +259,8 @@ export default function Approvals({ user, profile, onBack }) {
       fetchRequests();
     } catch (err) {
       alert('Error: ' + err.message);
+    } finally {
+      setProcessingId(null);
     }
   };
 

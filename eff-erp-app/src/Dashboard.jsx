@@ -128,12 +128,15 @@ export default function Dashboard({ user, onLogout }) {
           </button>
           
           {/* GDM Expense Button */}
-          <button 
-            className="dashboard-grid-btn"
-            onClick={() => setView('gdm_expense')}
-          >
-            GDM Expense Entry
-          </button>
+          {!['Asst VM', 'Asst.HR', 'VM(Vehicle Manager)', 'VM', 'Asst HR'].includes(profile.role) && 
+           !['CFA-Honda', 'CFA-Eloor', 'KRL'].includes(profile.branch) && (
+            <button 
+              className="dashboard-grid-btn"
+              onClick={() => setView('gdm_expense')}
+            >
+              GDM Expense Entry
+            </button>
+          )}
           
           {/* My Requests spanning 2 columns */}
           <button 
