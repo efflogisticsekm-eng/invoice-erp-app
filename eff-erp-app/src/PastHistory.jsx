@@ -6,6 +6,7 @@ export default function PastHistory({ user, profile, onBack }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [syncingId, setSyncingId] = useState(null);
 
   useEffect(() => {
     fetchPastHistory();
@@ -49,9 +50,11 @@ export default function PastHistory({ user, profile, onBack }) {
 
   const handleRetrySync = async (req) => {
     try {
+      setSyncingId(req.id);
       const webhookUrl = import.meta.env.VITE_GOOGLE_WEBHOOK_URL || localStorage.getItem('google_webhook_url');
       if (!webhookUrl) {
         alert("Webhook URL is not set.");
+        setSyncingId(null);
         return;
       }
       
@@ -68,13 +71,12 @@ export default function PastHistory({ user, profile, onBack }) {
         details: req.details || {}
       };
 
-      const res = await fetch(webhookUrl, {
+      await fetch(webhookUrl, {
         method: 'POST',
+        mode: 'no-cors',
         body: JSON.stringify(payload)
       });
       
-      if (!res.ok) throw new Error('Network response was not ok');
-
       const updatedDetails = { ...(req.details || {}), sheetSync: 'Success' };
       await supabase.from('expense_requests').update({ details: updatedDetails }).eq('id', req.id);
       
@@ -82,6 +84,8 @@ export default function PastHistory({ user, profile, onBack }) {
       fetchPastHistory();
     } catch (err) {
       alert("Still failed to sync: " + err.message);
+    } finally {
+      setSyncingId(null);
     }
   };
 
@@ -149,7 +153,8 @@ export default function PastHistory({ user, profile, onBack }) {
             {req.status === 'Approved' && req.details?.sheetSync !== 'Success' && (
               <button 
                 onClick={() => handleRetrySync(req)}
-                style={{
+                disabled={syncingId === req.id}
+                style={{ 
                   background: '#ef4444',
                   color: 'white',
                   border: 'none',
@@ -160,13 +165,14 @@ export default function PastHistory({ user, profile, onBack }) {
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '6px',
-                  cursor: 'pointer',
+                  cursor: syncingId === req.id ? 'not-allowed' : 'pointer',
                   marginLeft: '10px',
                   marginBottom: '10px',
+                  opacity: syncingId === req.id ? 0.7 : 1,
                   boxShadow: '0 2px 4px rgba(239,68,68,0.3)'
                 }}
               >
-                ⚠️ Sync Failed - Click to Retry
+                {syncingId === req.id ? '⏳ Syncing...' : '⚠️ Sync Failed - Click to Retry'}
               </button>
             )}
 
