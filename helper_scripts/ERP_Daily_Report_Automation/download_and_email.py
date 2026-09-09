@@ -617,6 +617,18 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     with open(ui_times_file, "w") as f:
                         json.dump(ui_times, f)
                     print(f"Extracted {len(ui_times)} despatch times from UI.")
+                    # Despatch data completeness validation
+                    if os.path.exists(despatch_file_path):
+                        try:
+                            desp_df_check = load_df(despatch_file_path)
+                            excel_count = len(desp_df_check)
+                            ui_count = len(ui_times)
+                            if ui_count > 0 and excel_count > 0 and abs(excel_count - ui_count) > excel_count * 0.2:
+                                print(f"⚠️ DESPATCH DATA MISMATCH: Excel export has {excel_count} rows but UI scraping found {ui_count} records. Possible incomplete data.", flush=True)
+                            else:
+                                print(f"✅ Despatch data consistency check passed: Excel={excel_count}, UI={ui_count}", flush=True)
+                        except Exception as check_err:
+                            print(f"Note: Could not validate despatch data completeness: {check_err}", flush=True)
                 except Exception as e:
                     print("Error extracting UI times:", e)
             
@@ -697,24 +709,47 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                     page.set_default_timeout(300000)
                     
                     print(f"Downloading LR raw report Chunk {chunk_idx}...")
-                    lr_btn = page.locator("a.export_lr_excel, button#excelExport1, #excelExport1").first
-                    
-                    # Make the button visible so we don't have to use force=True, which sometimes fails if element is detached
-                    page.evaluate("""(selector) => {
-                        let btn = document.querySelector(selector);
-                        if(btn) {
-                            btn.style.display = 'block';
-                            btn.style.visibility = 'visible';
-                        }
-                    }""", "a.export_lr_excel, button#excelExport1, #excelExport1")
-                    
                     chunk_file_path = os.path.join(DOWNLOAD_DIR, f"lr_raw_chunk_{chunk_idx}.xlsx")
-                    with page.expect_download(timeout=300000) as download_info_lr:
-                        lr_btn.click(force=True, no_wait_after=True)
-                        
-                    download_lr = download_info_lr.value
-                    download_lr.save_as(chunk_file_path)
-                    print(f"LR raw report Chunk {chunk_idx} saved.")
+                    chunk_downloaded = False
+                    for dl_attempt in range(3):
+                        try:
+                            lr_btn = page.locator("a.export_lr_excel, button#excelExport1, #excelExport1").first
+                            
+                            # Make the button visible so we don't have to use force=True, which sometimes fails if element is detached
+                            page.evaluate("""(selector) => {
+                                let btn = document.querySelector(selector);
+                                if(btn) {
+                                    btn.style.display = 'block';
+                                    btn.style.visibility = 'visible';
+                                }
+                            }""", "a.export_lr_excel, button#excelExport1, #excelExport1")
+                            
+                            with page.expect_download(timeout=300000) as download_info_lr:
+                                lr_btn.click(force=True, no_wait_after=True)
+                                
+                            download_lr = download_info_lr.value
+                            download_lr.save_as(chunk_file_path)
+                            print(f"LR raw report Chunk {chunk_idx} saved.")
+                            chunk_downloaded = True
+                            break
+                        except Exception as dl_err:
+                            backoff_secs = 10 * (dl_attempt + 1)
+                            print(f"⚠️ LR Chunk {chunk_idx} download failed (attempt {dl_attempt+1}/3): {dl_err}. Retrying in {backoff_secs}s...", flush=True)
+                            if dl_attempt < 2:
+                                page.wait_for_timeout(backoff_secs * 1000)
+                                # Re-enter dates to refresh the page state
+                                try:
+                                    page.fill("#search_date", from_date_lr)
+                                    page.fill("#search_date_to", to_date_lr)
+                                    page.wait_for_timeout(1000)
+                                except Exception:
+                                    pass
+                            else:
+                                print(f"❌ LR Chunk {chunk_idx} download FAILED after 3 attempts. Data may be incomplete.", flush=True)
+                    if not chunk_downloaded:
+                        current_start = current_end + timedelta(days=1)
+                        chunk_idx += 1
+                        continue
                     
                     try:
                         import pandas as pd
@@ -747,9 +782,14 @@ def download_erp_reports(mode="morning", from_override=None, to_override=None):
                 if lr_dfs:
                     combined_lr_df = pd.concat(lr_dfs, ignore_index=True)
                     combined_lr_df.to_excel(lr_file_path, index=False)
-                    print("Combined LR raw report saved to:", lr_file_path)
+                    print(f"Combined LR raw report saved to: {lr_file_path} ({len(combined_lr_df)} total rows)")
+                    # Data completeness validation
+                    expected_chunks = chunk_idx - 1
+                    actual_chunks = len(lr_dfs)
+                    if actual_chunks < expected_chunks:
+                        print(f"⚠️ DATA COMPLETENESS WARNING: Only {actual_chunks}/{expected_chunks} LR chunks downloaded successfully. Report data may be incomplete.", flush=True)
                 else:
-                    print("Failed to download or parse any LR Data chunks.")
+                    print("❌ CRITICAL: Failed to download or parse any LR Data chunks. Report will have NO LR data.", flush=True)
 
                  
                 # --- NEW: Discover Active Consignors and GDMs from Google Sheets ---
@@ -2466,39 +2506,48 @@ def main():
         print("Evening flow execution completed successfully.")
         
     elif args.mode == "daily_evening_report":
-        # Download both reports
-        lr_file, despatch_file, from_date, to_date = download_erp_reports(mode="daily_evening_report", from_override=args.from_date, to_override=args.to_date)
-        
-        ist_tz = timezone(timedelta(hours=5, minutes=30))
-        now_ist = datetime.now(ist_tz)
-        
-        # Always use yesterday as the target date for the daily report
-        target_date = now_ist - timedelta(days=1)
-        
-        today_str = target_date.strftime("%Y-%m-%d")
-        # On Monday evenings (or when the target date is Monday), default starting date is Saturday (2 days ago)
-        # Resolve yesterday_str by looking back to find the last working day (non-Sunday, non-holiday)
-        lookback_date = target_date - timedelta(days=1)
-        while lookback_date.weekday() == 6 or lookback_date.strftime("%Y-%m-%d") in holidays_list:
-            lookback_date -= timedelta(days=1)
-        yesterday_str = lookback_date.strftime("%Y-%m-%d")
-        
-        if args.from_date:
-            yesterday_str = args.from_date
-        if args.to_date:
-            today_str = args.to_date
+        try:
+            # Download both reports
+            lr_file, despatch_file, from_date, to_date = download_erp_reports(mode="daily_evening_report", from_override=args.from_date, to_override=args.to_date)
             
-        start_time_override = getattr(args, 'from_time', None)
-        end_time_override = getattr(args, 'to_time', None)
+            ist_tz = timezone(timedelta(hours=5, minutes=30))
+            now_ist = datetime.now(ist_tz)
             
-        processed_file, dashboard_image_path, unmapped_supervisors, delay_tables_html = run_daily_evening_report_flow(
-            lr_file, despatch_file, supervisor_map, yesterday_str, today_str, start_time_override, end_time_override
-        )
-        
-        # Email report (Disabled by user request)
-        is_delayed = check_if_delayed("daily_evening_report")
-        email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors, delay_tables_html, is_delayed=is_delayed)
-        print("Daily Evening report flow execution completed successfully.")
+            # Always use yesterday as the target date for the daily report
+            target_date = now_ist - timedelta(days=1)
+            
+            today_str = target_date.strftime("%Y-%m-%d")
+            # On Monday evenings (or when the target date is Monday), default starting date is Saturday (2 days ago)
+            # Resolve yesterday_str by looking back to find the last working day (non-Sunday, non-holiday)
+            lookback_date = target_date - timedelta(days=1)
+            while lookback_date.weekday() == 6 or lookback_date.strftime("%Y-%m-%d") in holidays_list:
+                lookback_date -= timedelta(days=1)
+            yesterday_str = lookback_date.strftime("%Y-%m-%d")
+            
+            if args.from_date:
+                yesterday_str = args.from_date
+            if args.to_date:
+                today_str = args.to_date
+                
+            start_time_override = getattr(args, 'from_time', None)
+            end_time_override = getattr(args, 'to_time', None)
+                
+            processed_file, dashboard_image_path, unmapped_supervisors, delay_tables_html = run_daily_evening_report_flow(
+                lr_file, despatch_file, supervisor_map, yesterday_str, today_str, start_time_override, end_time_override
+            )
+            
+            # Email report (Disabled by user request)
+            is_delayed = check_if_delayed("daily_evening_report")
+            email_report(processed_file, lr_file, despatch_file, dashboard_image_path, from_date, to_date, unmapped_supervisors, delay_tables_html, is_delayed=is_delayed)
+            print("Daily Evening report flow execution completed successfully.")
+        except Exception as flow_err:
+            # Send WhatsApp failure alert so the team knows immediately
+            ist_tz_alert = timezone(timedelta(hours=5, minutes=30))
+            fail_time = datetime.now(ist_tz_alert).strftime("%d-%m-%Y %I:%M %p")
+            alert_msg = f"⚠️ Daily ERP Report FAILED at {fail_time}\n\nError: {str(flow_err)[:300]}\n\nThe system will auto-retry. If this persists, please check GitHub Actions."
+            send_whatsapp_message(alert_msg)
+            print(f"❌ Daily evening report flow failed: {flow_err}", flush=True)
+            raise flow_err
         
     elif args.mode == "morning":
         # Download both reports

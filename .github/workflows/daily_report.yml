@@ -8,6 +8,8 @@ on:
     # Retry every 30 minutes from 8:45 PM IST to 9:45 PM IST if failed
     - cron: '15,45 15 * * 1-6'
     - cron: '15 16 * * 1-6'
+    # Late-night safety retry at 11:00 PM IST (17:30 UTC)
+    - cron: '30 17 * * 1-6'
   workflow_dispatch:
     inputs:
       mode:

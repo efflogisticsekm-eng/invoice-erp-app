@@ -12,18 +12,20 @@ serve(async (req) => {
   }
 
   try {
-    const { base64Image, category, vehicleListString } = await req.json();
+    const { base64Image, prompt } = await req.json();
 
     if (!base64Image) {
       return new Response(JSON.stringify({ error: "Missing base64Image" }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    
+    if (!prompt) {
+      return new Response(JSON.stringify({ error: "Missing prompt" }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const apiKey = Deno.env.get('OPENAI_API_KEY');
     if (!apiKey) {
       return new Response(JSON.stringify({ error: "OpenAI API Key not configured on server" }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
-
-    const prompt = `Extract details from this receipt/invoice for the expense category: "${category}". Return ONLY a valid JSON object with the keys: 'partyName' (the name of the shop, vendor, or workshop), 'totalAmount' (the grand total amount as a number), 'cgst' (the CGST amount as a number, or 0), 'sgst' (the SGST amount as a number, or 0), 'igst' (the IGST amount as a number, or 0), 'gstTotal' (the total tax/GST amount as a number. If only a single GST amount is present, put it here, otherwise sum the CGST, SGST, IGST into this), and 'subTotal' (the amount before tax). Also extract 'vehicleNo' (Look for a vehicle registration number in the bill. Here are the valid vehicle numbers: ${vehicleListString || 'None provided'}. Match ignoring spaces, dashes, or special characters. Return the exact matching vehicle number from the list if found). Do not include markdown formatting or any other text, just the raw JSON.`;
 
     const openAiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',

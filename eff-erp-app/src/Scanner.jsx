@@ -328,44 +328,25 @@ export default function Scanner({ user, onBack }) {
         base64Image = base64DataUrl.split(',')[1];
       }
       
-      const apiKey = atob(import.meta.env.VITE_OPENAI_API_KEY_B64 || "");
-      if (!apiKey) {
-        throw new Error("OpenAI API Key not found in .env");
-      }
-
       const vehicleListString = vehiclesList.map(v => v.vehicle_no).join(', ');
       const prompt = `Extract details from this receipt/invoice for the expense category: "${mainCategory === 'Other' ? otherItem : mainCategory}". Return ONLY a valid JSON object with the keys: 'partyName' (the name of the shop, vendor, or workshop. CRITICAL: DO NOT extract "EFF LOGISTICS" or "EFF LOGISTICS PRIVATE LIMITED". If the only name is EFF LOGISTICS, return ""), 'totalAmount' (the grand total amount as a number), 'cgst' (the CGST amount as a number, or 0), 'sgst' (the SGST amount as a number, or 0), 'igst' (the IGST amount as a number, or 0), 'gstTotal' (the total tax/GST amount as a number. If only a single GST amount is present, put it here, otherwise sum the CGST, SGST, IGST into this), 'gstRate' (the TOTAL GST percentage rate applied. If you see CGST 9% and SGST 9%, the total rate is 18. Return only the combined percentage number like 5, 12, 18, 28), 'subTotal' (the amount before tax), 'billNo' (the invoice number or bill number), 'billDate' (the date of the invoice in YYYY-MM-DD format), and 'gstin' (Extract the 15-digit GST number of the SELLER. Look at the top for the shop/vendor's GSTIN. DO NOT extract "32AAGCE4200M1ZY" under any circumstances. If "32AAGCE4200M1ZY" is the only GST number on the bill, return an empty string ""). Also extract 'vehicleNo' (Extract any vehicle registration number found in the bill like KL41X4096, even if it is handwritten or in PO No. Return the raw vehicle number string found). Do not include markdown formatting or any other text, just the raw JSON.`;
 
-      console.log("Sending image directly to OpenAI API...");
+      console.log("Sending image to Supabase scan-receipt Edge Function...");
       
-      const openAiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "text", text: prompt },
-                { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-              ]
-            }
-          ],
-          max_tokens: 500,
-          temperature: 0.0
-        })
+      const { data, error } = await supabase.functions.invoke('scan-receipt', {
+        body: {
+          base64Image,
+          prompt
+        }
       });
 
-      if (!openAiResponse.ok) {
-        const errorText = await openAiResponse.text();
-        throw new Error(`OpenAI API error: ${errorText}`);
+      if (error) {
+        throw new Error(`Edge Function error: ${error.message || error}`);
       }
 
-      const data = await openAiResponse.json();
+      if (data && data.error) {
+        throw new Error(`OpenAI API error: ${data.error}`);
+      }
 
       let content = data.choices[0].message.content.trim();
       let extracted;
