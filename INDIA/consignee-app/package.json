@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "start": "concurrently \"node local-server.js\" \"vite\"",
-    "build": "vite build",
+    "build": "CI=false vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
