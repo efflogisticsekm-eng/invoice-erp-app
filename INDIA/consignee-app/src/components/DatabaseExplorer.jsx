@@ -137,6 +137,7 @@ export default function DatabaseExplorer() {
                         activeTable === 'pod_register' ? 'POD Register' :
                         activeTable === 'supervisor_branch_mapping' ? 'Supervisor Mapping' :
                         activeTable === 'customer_branch_mapping' ? 'Customer Mapping' :
+                        activeTable === 'vehicle_master' ? 'Vehicle Master' :
                         activeTable === 'holidays' ? 'Holidays' : 'All Invoices';
       
       // Filter rows based on search term
@@ -186,6 +187,8 @@ export default function DatabaseExplorer() {
       String(r.customer_name || '').toLowerCase().includes(term) ||
       String(r.branch || '').toLowerCase().includes(term) ||
       String(r.date || '').toLowerCase().includes(term) ||
+      String(r.vehicle_no || '').toLowerCase().includes(term) ||
+      String(r.vehicle_type || '').toLowerCase().includes(term) ||
       String(r.description || '').toLowerCase().includes(term)
     );
   });
@@ -222,7 +225,7 @@ export default function DatabaseExplorer() {
             <span>Reload Data</span>
           </button>
 
-          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'holidays' || activeTable === 'unloading_master') && (
+          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'holidays' || activeTable === 'unloading_master' || activeTable === 'vehicle_master') && (
             <button
               onClick={() => {
                 if (activeTable === 'supervisor_branch_mapping') {
@@ -231,6 +234,8 @@ export default function DatabaseExplorer() {
                   setCreateForm({ customer_name: '', branch: '' });
                 } else if (activeTable === 'unloading_master') {
                   setCreateForm({ consignor: '', consignee: '', rate_logic: 'Item/ Box Type', box_type: '', rate: '' });
+                } else if (activeTable === 'vehicle_master') {
+                  setCreateForm({ vehicle_no: '', branch: '', vehicle_type: '' });
                 } else {
                   setCreateForm({ date: '', description: '' });
                 }
@@ -238,7 +243,7 @@ export default function DatabaseExplorer() {
               }}
               className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-emerald-950/20 cursor-pointer"
             >
-              <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : activeTable === 'customer_branch_mapping' ? '+ Add Customer' : activeTable === 'unloading_master' ? '+ Add Rate' : '+ Add Holiday'}</span>
+              <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : activeTable === 'customer_branch_mapping' ? '+ Add Customer' : activeTable === 'unloading_master' ? '+ Add Rate' : activeTable === 'vehicle_master' ? '+ Add Vehicle' : '+ Add Holiday'}</span>
             </button>
           )}
 
@@ -261,6 +266,7 @@ export default function DatabaseExplorer() {
           { id: 'pod_register', name: 'POD Register (Signature/Seals)' },
           { id: 'supervisor_branch_mapping', name: 'Supervisor Mapping' },
           { id: 'customer_branch_mapping', name: 'Customer Mapping' },
+          { id: 'vehicle_master', name: 'Vehicle Master' },
           { id: 'holidays', name: 'Holidays List' },
           { id: 'unloading_master', name: 'Unloading Master' },
           { id: 'all_invoices', name: 'All Invoices (Backup)' }
@@ -326,11 +332,12 @@ export default function DatabaseExplorer() {
                 <thead>
                   <tr className="bg-slate-900 border-b border-slate-800 text-slate-400 font-bold">
                     <th className="p-3.5">ID</th>
-                    {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' ? (
+                    {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicle_master' ? (
                       <>
                         {activeTable === 'supervisor_branch_mapping' && <th className="p-3.5">Created At</th>}
-                        <th className="p-3.5">{activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : 'Customer Name'}</th>
+                        <th className="p-3.5">{activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicle_master' ? 'Vehicle No' : 'Customer Name'}</th>
                         <th className="p-3.5">Branch Name</th>
+                        {activeTable === 'vehicle_master' && <th className="p-3.5">Vehicle Type</th>}
                       </>
                     ) : activeTable === 'holidays' ? (
                       <>
@@ -378,11 +385,12 @@ export default function DatabaseExplorer() {
                     <tr key={row.id} className="hover:bg-slate-900/50 transition">
                       <td className="p-3.5 font-mono text-slate-500">#{row.id}</td>
                       
-                      {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' ? (
+                      {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicle_master' ? (
                         <>
                           {activeTable === 'supervisor_branch_mapping' && <td className="p-3.5 font-mono">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>}
-                          <td className="p-3.5 font-semibold text-white">{activeTable === 'supervisor_branch_mapping' ? row.supervisor_name : row.customer_name}</td>
+                          <td className="p-3.5 font-semibold text-white">{activeTable === 'supervisor_branch_mapping' ? row.supervisor_name : activeTable === 'vehicle_master' ? row.vehicle_no : row.customer_name}</td>
                           <td className="p-3.5 font-semibold text-primary">{row.branch}</td>
+                          {activeTable === 'vehicle_master' && <td className="p-3.5 font-semibold text-slate-300">{row.vehicle_type}</td>}
                         </>
                       ) : activeTable === 'holidays' ? (
                         <>
@@ -488,18 +496,20 @@ export default function DatabaseExplorer() {
             </div>
 
             <form onSubmit={handleUpdate} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' ? (
+              {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicle_master' ? (
                 <>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">
-                      {activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : 'Customer Name'}
+                      {activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicle_master' ? 'Vehicle No' : 'Customer Name'}
                     </label>
                     <input
                       type="text"
-                      value={activeTable === 'supervisor_branch_mapping' ? (editForm.supervisor_name || '') : (editForm.customer_name || '')}
+                      value={activeTable === 'supervisor_branch_mapping' ? (editForm.supervisor_name || '') : activeTable === 'vehicle_master' ? (editForm.vehicle_no || '') : (editForm.customer_name || '')}
                       onChange={e => {
                         if (activeTable === 'supervisor_branch_mapping') {
                           setEditForm({ ...editForm, supervisor_name: e.target.value })
+                        } else if (activeTable === 'vehicle_master') {
+                          setEditForm({ ...editForm, vehicle_no: e.target.value })
                         } else {
                           setEditForm({ ...editForm, customer_name: e.target.value })
                         }
@@ -519,6 +529,18 @@ export default function DatabaseExplorer() {
                       required
                     />
                   </div>
+                  {activeTable === 'vehicle_master' && (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Vehicle Type</label>
+                    <input
+                      type="text"
+                      value={editForm.vehicle_type || ''}
+                      onChange={e => setEditForm({ ...editForm, vehicle_type: e.target.value })}
+                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
+                      required
+                    />
+                  </div>
+                  )}
                 </>
               ) : activeTable === 'holidays' ? (
                 <>
@@ -732,23 +754,25 @@ export default function DatabaseExplorer() {
             </div>
 
             <form onSubmit={handleCreate} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' ? (
+              {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicle_master' ? (
                 <>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">
-                      {activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : 'Customer Name'}
+                      {activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicle_master' ? 'Vehicle No' : 'Customer Name'}
                     </label>
                     <input
                       type="text"
-                      value={activeTable === 'supervisor_branch_mapping' ? (createForm.supervisor_name || '') : (createForm.customer_name || '')}
+                      value={activeTable === 'supervisor_branch_mapping' ? (createForm.supervisor_name || '') : activeTable === 'vehicle_master' ? (createForm.vehicle_no || '') : (createForm.customer_name || '')}
                       onChange={e => {
                         if (activeTable === 'supervisor_branch_mapping') {
                           setCreateForm({ ...createForm, supervisor_name: e.target.value })
+                        } else if (activeTable === 'vehicle_master') {
+                          setCreateForm({ ...createForm, vehicle_no: e.target.value })
                         } else {
                           setCreateForm({ ...createForm, customer_name: e.target.value })
                         }
                       }}
-                      placeholder={activeTable === 'supervisor_branch_mapping' ? "e.g. BIPIN" : "e.g. GEM PAINTS"}
+                      placeholder={activeTable === 'supervisor_branch_mapping' ? "e.g. BIPIN" : activeTable === 'vehicle_master' ? "e.g. KL41T0343" : "e.g. GEM PAINTS"}
                       className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
                       required
                     />
@@ -764,6 +788,19 @@ export default function DatabaseExplorer() {
                       required
                     />
                   </div>
+                  {activeTable === 'vehicle_master' && (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Vehicle Type</label>
+                    <input
+                      type="text"
+                      value={createForm.vehicle_type || ''}
+                      onChange={e => setCreateForm({ ...createForm, vehicle_type: e.target.value })}
+                      placeholder="e.g. BOLERO 1.7 TON - 4 WHEEL"
+                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
+                      required
+                    />
+                  </div>
+                  )}
                 </>
               ) : activeTable === 'holidays' ? (
                 <>
