@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Search, Edit2, Trash2, Download, RefreshCw, X, Check, Save, Table, AlertTriangle, FileSpreadsheet } from 'lucide-react';
+import { Database, Search, Edit2, Trash2, Download, RefreshCw, X, Check, Save, Table, AlertTriangle, FileSpreadsheet, Upload } from 'lucide-react';
 import axios from 'axios';
 import * as XLSX from 'xlsx-js-style';
 
@@ -22,6 +22,10 @@ export default function DatabaseExplorer() {
   // Create Modal State
   const [creatingNew, setCreatingNew] = useState(false);
   const [createForm, setCreateForm] = useState({});
+
+  // Bulk Upload State
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkData, setBulkData] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -86,6 +90,50 @@ export default function DatabaseExplorer() {
     } catch (err) {
       console.error(err);
       setError("Failed to create database record: " + (err.response?.data?.error || err.message));
+      setLoading(false);
+    }
+  };
+
+  const handleBulkUpload = async (e) => {
+    e.preventDefault();
+    if (!bulkData.trim()) return;
+    
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      // Parse TSV (Tab Separated Values) or CSV
+      const rows = bulkData.trim().split('\n').map(line => line.split(/\t|,/));
+      const payload = [];
+
+      for (const row of rows) {
+        if (activeTable === 'vehicle_master') {
+          if (row.length >= 2) {
+            payload.push({
+              vehicle_no: row[0]?.trim(),
+              branch: row[1]?.trim(),
+              vehicle_type: row[2]?.trim() || ''
+            });
+          }
+        }
+      }
+
+      if (payload.length === 0) {
+        throw new Error("No valid data found to upload. Ensure format is Correct.");
+      }
+
+      const isProd = import.meta.env.PROD;
+      const baseUrl = isProd ? '' : 'http://localhost:3001';
+      await axios.post(`${baseUrl}/api/explorer/create/${activeTable}`, payload);
+      
+      setMessage(`${payload.length} records bulk uploaded successfully!`);
+      setBulkUploading(false);
+      setBulkData('');
+      fetchData();
+    } catch (err) {
+      console.error(err);
+      setError("Failed to bulk upload records: " + (err.response?.data?.error || err.message));
       setLoading(false);
     }
   };
@@ -226,25 +274,40 @@ export default function DatabaseExplorer() {
           </button>
 
           {(activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'holidays' || activeTable === 'unloading_master' || activeTable === 'vehicle_master') && (
-            <button
-              onClick={() => {
-                if (activeTable === 'supervisor_branch_mapping') {
-                  setCreateForm({ supervisor_name: '', branch: '' });
-                } else if (activeTable === 'customer_branch_mapping') {
-                  setCreateForm({ customer_name: '', branch: '' });
-                } else if (activeTable === 'unloading_master') {
-                  setCreateForm({ consignor: '', consignee: '', rate_logic: 'Item/ Box Type', box_type: '', rate: '' });
-                } else if (activeTable === 'vehicle_master') {
-                  setCreateForm({ vehicle_no: '', branch: '', vehicle_type: '' });
-                } else {
-                  setCreateForm({ date: '', description: '' });
-                }
-                setCreatingNew(true);
-              }}
-              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-emerald-950/20 cursor-pointer"
-            >
-              <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : activeTable === 'customer_branch_mapping' ? '+ Add Customer' : activeTable === 'unloading_master' ? '+ Add Rate' : activeTable === 'vehicle_master' ? '+ Add Vehicle' : '+ Add Holiday'}</span>
-            </button>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => {
+                  if (activeTable === 'supervisor_branch_mapping') {
+                    setCreateForm({ supervisor_name: '', branch: '' });
+                  } else if (activeTable === 'customer_branch_mapping') {
+                    setCreateForm({ customer_name: '', branch: '' });
+                  } else if (activeTable === 'unloading_master') {
+                    setCreateForm({ consignor: '', consignee: '', rate_logic: 'Item/ Box Type', box_type: '', rate: '' });
+                  } else if (activeTable === 'vehicle_master') {
+                    setCreateForm({ vehicle_no: '', branch: '', vehicle_type: '' });
+                  } else {
+                    setCreateForm({ date: '', description: '' });
+                  }
+                  setCreatingNew(true);
+                }}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-emerald-950/20 cursor-pointer"
+              >
+                <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : activeTable === 'customer_branch_mapping' ? '+ Add Customer' : activeTable === 'unloading_master' ? '+ Add Rate' : activeTable === 'vehicle_master' ? '+ Add Vehicle' : '+ Add Holiday'}</span>
+              </button>
+              
+              {activeTable === 'vehicle_master' && (
+                <button
+                  onClick={() => {
+                    setBulkData('');
+                    setBulkUploading(true);
+                  }}
+                  className="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-sky-950/20 cursor-pointer"
+                >
+                  <Upload size={14} />
+                  <span>Bulk Upload</span>
+                </button>
+              )}
+            </div>
           )}
 
           {rows.length > 0 && (
@@ -880,6 +943,55 @@ export default function DatabaseExplorer() {
           </div>
         </div>
       )}
+      {/* Bulk Upload Modal */}
+      {bulkUploading && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-fadeIn">
+            <div className="px-6 py-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
+              <h3 className="text-base font-bold text-white flex items-center space-x-2"><Upload size={18} className="text-sky-400" /><span>Bulk Upload / Paste Data</span></h3>
+              <button onClick={() => setBulkUploading(false)} className="text-slate-400 hover:text-white p-1 rounded-lg">
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleBulkUpload} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-2">
+                  Paste data from Excel (Copy from Excel and Paste here). 
+                  <br/><span className="text-sky-400">Format: Vehicle No | Branch | Vehicle Type</span>
+                </label>
+                <textarea
+                  rows="10"
+                  value={bulkData}
+                  onChange={e => setBulkData(e.target.value)}
+                  placeholder={"KL41T0343\tTRIVANDRUM\tBOLERO 1.7 TON - 4 WHEEL\nKL41T0344\tERNAKULAM\tTATA ACE"}
+                  className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-4 py-3 text-sm focus:border-sky-500 outline-none font-mono whitespace-pre"
+                  required
+                />
+              </div>
+
+              <div className="pt-4 flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setBulkUploading(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-slate-350 font-bold text-xs rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-black text-xs rounded-xl flex items-center space-x-1.5"
+                >
+                  <Save size={14} />
+                  <span>Upload Data</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

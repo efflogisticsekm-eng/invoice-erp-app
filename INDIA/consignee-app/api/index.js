@@ -1816,7 +1816,18 @@ app.post('/api/explorer/create/:table', express.json({ limit: '5mb' }), async (r
   delete newRow.created_at;
 
   try {
-    if (table === 'supervisor_branch_mapping' && newRow.supervisor_name) {
+    if (Array.isArray(newRow)) {
+      // Clean up array items
+      const rowsToInsert = newRow.map(row => {
+        const cleanRow = { ...row };
+        delete cleanRow.id;
+        delete cleanRow.created_at;
+        return cleanRow;
+      });
+      const { data, error } = await supabase.from(table).insert(rowsToInsert).select();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ status: "success", data });
+    } else if (table === 'supervisor_branch_mapping' && newRow.supervisor_name) {
       // Split by comma, trim spaces, filter empty values
       const names = newRow.supervisor_name.split(',').map(n => n.trim()).filter(Boolean);
       if (names.length === 0) {
