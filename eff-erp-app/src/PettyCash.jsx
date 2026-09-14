@@ -431,14 +431,24 @@ export default function PettyCash({ user, profile, onBack }) {
         
         <div style={{ marginBottom: '15px' }}>
           <label>{(formData.head === 'GDM Advance Payment' || formData.head === 'GDM Addtl Advance') ? 'Delivery Driver Name' : 'Payment To / From'}</label>
-          <input type="text" list="driver-list" value={paymentTo} onChange={(e) => setPaymentTo(e.target.value)} placeholder="Name of person receiving/giving cash" style={inputStyle} required disabled={(formData.head === 'GDM Advance Payment' || formData.head === 'GDM Addtl Advance') && isLoadingDrivers} />
+          {(formData.head === 'GDM Advance Payment' || formData.head === 'GDM Addtl Advance') ? (
+            <select
+              value={paymentTo}
+              onChange={(e) => setPaymentTo(e.target.value)}
+              style={inputStyle}
+              required
+              disabled={isLoadingDrivers}
+            >
+              <option value="">Select Delivery Driver</option>
+              {cachedDrivers.map((d, i) => (
+                <option key={i} value={d}>{d}</option>
+              ))}
+            </select>
+          ) : (
+            <input type="text" value={paymentTo} onChange={(e) => setPaymentTo(e.target.value)} placeholder="Name of person receiving/giving cash" style={inputStyle} required />
+          )}
           {(formData.head === 'GDM Advance Payment' || formData.head === 'GDM Addtl Advance') && isLoadingDrivers && <div style={{color: 'orange', fontSize: '11px', marginTop: '4px'}}>Loading drivers...</div>}
           {debugInfo && <div style={{color: 'red', fontSize: '11px', marginTop: '4px'}}>{debugInfo}</div>}
-          {(formData.head === 'GDM Advance Payment' || formData.head === 'GDM Addtl Advance') && cachedDrivers.length > 0 && (
-            <datalist id="driver-list">
-              {cachedDrivers.map((d, i) => <option key={i} value={d} />)}
-            </datalist>
-          )}
         </div>
 
         {needsVehicleNumber && (
