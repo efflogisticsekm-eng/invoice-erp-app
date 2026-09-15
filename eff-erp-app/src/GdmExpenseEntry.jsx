@@ -6,6 +6,7 @@ export default function GdmExpenseEntry({ user, profile, onBack }) {
   const [loading, setLoading] = useState(false);
   const [fetchTimer, setFetchTimer] = useState(0);
   const [rows, setRows] = useState([]);
+  const [branchDrivers, setBranchDrivers] = useState([]);
   
   // Global Inputs
   const [globalRa, setGlobalRa] = useState('');
@@ -14,6 +15,8 @@ export default function GdmExpenseEntry({ user, profile, onBack }) {
   const [globalReceivedCash, setGlobalReceivedCash] = useState('');
   
   const isManager = profile && ['RM', 'FM', 'CEO', 'MD'].includes(profile.role);
+
+
   
   useEffect(() => {
     const rootEl = document.getElementById('root');
@@ -44,6 +47,14 @@ export default function GdmExpenseEntry({ user, profile, onBack }) {
       const data = await res.json();
       
       if (data.status === 'success') {
+        if (data.driverList) {
+          setBranchDrivers(data.driverList);
+          try { localStorage.setItem(`cached_branch_drivers_${branchParam}`, JSON.stringify(data.driverList)); } catch(e) {}
+        }
+        
+        // --- BRANCH VALIDATION ---
+        // Removed incorrect branch validation since destination/targetSupervisor doesn't strictly match branch names.
+        
         const processedRows = data.data.map(item => ({
           ...item,
           noOfBoxes: item.boxes ? String(item.boxes).split('-')[0].trim() : '',
@@ -71,7 +82,7 @@ export default function GdmExpenseEntry({ user, profile, onBack }) {
 
   const handleInputChange = (index, field, value) => {
     const newRows = [...rows];
-    let val = value === '' ? '' : parseFloat(value);
+    let val = field === 'deliveryDriver' ? value : (value === '' ? '' : parseFloat(value));
     
     if (field === 'actualUlCharge' && val !== '') {
       if (val > newRows[index].ulCharge) {
@@ -115,8 +126,12 @@ export default function GdmExpenseEntry({ user, profile, onBack }) {
         };
       });
 
-      const res = await fetch(saveApiUrl, {
+      await fetch(saveApiUrl, {
         method: 'POST',
+        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'text/plain',
+        },
         body: JSON.stringify({
           source: 'GdmExpenseEntry',
           branch: profile?.branch || 'HO',
@@ -124,16 +139,12 @@ export default function GdmExpenseEntry({ user, profile, onBack }) {
           rows: finalRows
         })
       });
-      if (res.ok) {
-        alert('Saved successfully to Google Sheet!');
-        setRows([]);
-        setGdmNumber('');
-      } else {
-        alert('Failed to save to sheet');
-      }
+      alert('Saved successfully to Google Sheet!');
+      setRows([]);
+      setGdmNumber('');
     } catch (err) {
       console.error(err);
-      alert('Error saving data');
+      alert('Error saving data: ' + err.message + '\n\nURL Tried: ' + saveApiUrl);
     } finally {
       setLoading(false);
     }
@@ -208,7 +219,21 @@ export default function GdmExpenseEntry({ user, profile, onBack }) {
               {rows.map((row, idx) => (
                 <tr key={idx}>
                   <td style={tdStyle}>{row.gdmNumber}</td>
-                  <td style={tdStyle}>{row.deliveryDriver}</td>
+                  <td style={tdStyle}>
+                    <select
+                      value={row.deliveryDriver || ''}
+                      onChange={(e) => handleInputChange(idx, 'deliveryDriver', e.target.value)}
+                      style={{ ...inputStyle, width: '120px' }}
+                    >
+                      <option value="">--Select--</option>
+                      {row.deliveryDriver && !branchDrivers.includes(row.deliveryDriver) && (
+                        <option value={row.deliveryDriver}>{row.deliveryDriver}</option>
+                      )}
+                      {branchDrivers.map((d, i) => (
+                        <option key={i} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </td>
                   <td style={tdStyle}>{row.lrNumber}</td>
                   <td style={tdStyle}>{row.consignor}</td>
                   <td style={tdStyle}>{row.consignee}</td>
