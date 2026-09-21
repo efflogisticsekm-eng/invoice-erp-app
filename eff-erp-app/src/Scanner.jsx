@@ -63,6 +63,7 @@ export default function Scanner({ user, onBack }) {
   const [vehicleType, setVehicleType] = useState('');
   const [vehicleRent, setVehicleRent] = useState('');
   const [unionCharges, setUnionCharges] = useState('');
+  const [hasRentAdvance, setHasRentAdvance] = useState(false);
   const [rentAdvance, setRentAdvance] = useState('');
   const [balanceAmount, setBalanceAmount] = useState('');
   const [vendor, setVendor] = useState('');
@@ -76,6 +77,7 @@ export default function Scanner({ user, onBack }) {
   
   // Vehicles
   const [vehiclesList, setVehiclesList] = useState([]);
+  const [vendorsList, setVendorsList] = useState([]);
 
   React.useEffect(() => {
     const fetchProfile = async () => {
@@ -128,6 +130,14 @@ export default function Scanner({ user, onBack }) {
     };
     fetchVehicles();
   }, [userRole, userProfile]);
+
+  React.useEffect(()=>{
+    supabase.schema('erp').from('vendor_master').select('vendor_name,account_head,applicable_branches').eq('status','Active').then(({data,error})=>{if(data)setVendorsList(data)});
+  },[]);
+  const getFilteredVendors=(head)=>{
+    const br=(userProfile?.branch||'').toUpperCase();
+    return vendorsList.filter(v=>v.account_head===head&&((v.applicable_branches||'').toUpperCase().includes('ALL')||(v.applicable_branches||'').toUpperCase().split(',').map(x=>x.trim()).includes(br)));
+  };
 
   // Calculate amounts automatically
   React.useEffect(() => {
@@ -951,7 +961,7 @@ export default function Scanner({ user, onBack }) {
               <div className="input-group" style={{ flex: 1 }}><label>Rate</label><input type="number" inputMode="decimal" className="input-field" value={rate} onChange={e => setRate(e.target.value)} /></div>
             </div>
 
-            <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ display: 'flex', gap: '10px', flexDirection: (mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') ? 'column' : 'row' }}>
               <div className="input-group" style={{ flex: 1 }}><label>Bill No</label><input type="text" className="input-field" value={billNo} onChange={e => setBillNo(e.target.value)} /></div>
               <div className="input-group" style={{ flex: 1 }}><label>Bill Date</label><input type="date" className="input-field" value={billDate} onChange={e => setBillDate(e.target.value)} /></div>
             </div>
@@ -986,9 +996,6 @@ export default function Scanner({ user, onBack }) {
               </div>
               <input type="text" className="input-field" value={billingPartyName} onChange={e => setBillingPartyName(e.target.value)} />
             </div>
-            <div className="input-group"><label>Billing Party GSTIN</label><input type="text" className="input-field" value={billingGstin} onChange={e => setBillingGstin(e.target.value)} /></div>
-
-
             
             <h3 style={{ color: 'var(--primary)', marginBottom: '15px', borderBottom: '2px solid var(--primary)', paddingBottom: '5px', marginTop: '20px' }}>5. Tax & Amount Details</h3>
 
@@ -1061,6 +1068,11 @@ export default function Scanner({ user, onBack }) {
                             <input type="number" inputMode="decimal" className="input-field" value={igstAmount} onChange={e => setIgstAmount(e.target.value)} />
                           </div>
                         </div>
+
+                        <div className="input-group">
+                          <label>Billing Party GSTIN</label>
+                          <input type="text" className="input-field" value={billingGstin} onChange={e => setBillingGstin(e.target.value)} />
+                        </div>
                         
                         <div className="input-group" style={{ marginBottom: 0 }}>
                           <label style={{ fontWeight: 'bold' }}>Total GST Amount</label>
@@ -1084,7 +1096,18 @@ export default function Scanner({ user, onBack }) {
             </div>
 
             {(mainCategory === 'Vehicle Rent' || mainCategory === 'Vehicle Rent Balance Payment') && (
-               <div className="input-group"><label>Rent Advance</label><input type="number" inputMode="decimal" className="input-field" value={rentAdvance} onChange={e => setRentAdvance(e.target.value)} /></div>
+               <div className="input-group" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                   <input type="checkbox" checked={hasRentAdvance} onChange={e => {
+                     setHasRentAdvance(e.target.checked);
+                     if (!e.target.checked) setRentAdvance('');
+                   }} />
+                   Rent Advance / Paying Amount
+                 </label>
+                 {hasRentAdvance && (
+                   <input type="number" inputMode="decimal" className="input-field" value={rentAdvance} onChange={e => setRentAdvance(e.target.value)} placeholder="Enter amount" />
+                 )}
+               </div>
             )}
 
             <div className="input-group">
