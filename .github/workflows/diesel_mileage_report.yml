@@ -2,8 +2,9 @@ name: Daily IOC Xtrapower Diesel Report
 
 on:
   schedule:
-    # Runs daily at 12:15 AM IST (18:45 UTC the previous day)
+    # Schedule 1: 12:15 AM IST (18:45 UTC) - nightly mileage+balance report
     - cron: '45 18 * * *'
+    - cron: '30 10 * * *'  # Runs at 4:00 PM IST (10:30 UTC) - balance for 5 PM payment file
   workflow_dispatch:
     inputs:
       target_date:
