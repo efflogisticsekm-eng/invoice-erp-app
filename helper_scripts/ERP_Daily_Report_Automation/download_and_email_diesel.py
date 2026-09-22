@@ -119,7 +119,7 @@ async def download_transactions(username, password, temp_dir, target_date=None):
         context = await browser.new_context(viewport={"width": 1280, "height": 800})
         page = await context.new_page()
         
-        login_url = "https://www.iocxtrapower.com/account/login?returnUrl=%2F"
+        login_url = "https://beta.iocxtrapower.com/account/login?returnUrl=%2F"
         print(f"Navigating to login page: {login_url}...")
         await page.goto(login_url, timeout=60000)
         await page.wait_for_timeout(3000)
@@ -151,12 +151,47 @@ async def download_transactions(username, password, temp_dir, target_date=None):
         except Exception:
             pass
             
-        print("Navigating to Financials/Transaction Details...")
+        print("Navigating to Balance Info page...")
         financials_link = page.locator("a[href='/Transactions/BalanceInfo']").first
         await financials_link.wait_for(state="visible", timeout=5000)
         await financials_link.click()
-        await page.wait_for_timeout(4000)
-        
+        await page.wait_for_timeout(5000)
+
+        # --- Scrape card balance from BalanceInfo page ---
+        ioc_balance = None
+        try:
+            print("Scraping available card balance...")
+            page_text = await page.inner_text("body")
+            # Match patterns like "Available Balance : 45,230.50" or "Balance\n45230.50"
+            balance_patterns = [
+                r'(?:Available\s+Balance|Card\s+Balance|Wallet\s+Balance)[^\d\n]*?([\d,]+\.\d{2})',
+                r'Balance\s*[:\-]?\s*([\d,]+\.\d{2})',
+                r'Rs\.?\s*([\d,]+\.\d{2})',
+            ]
+            for pat in balance_patterns:
+                m = re.search(pat, page_text, re.IGNORECASE)
+                if m:
+                    ioc_balance = float(m.group(1).replace(',', ''))
+                    print(f"â Card balance found: Rs. {ioc_balance:,.2f}")
+                    break
+            if ioc_balance is None:
+                # Fallback: try all currency-looking numbers on the page and take the largest
+                all_amounts = re.findall(r'([\d,]{3,}(?:\.\d{2})?)', page_text)
+                candidates = []
+                for a in all_amounts:
+                    try:
+                        candidates.append(float(a.replace(',', '')))
+                    except ValueError:
+                        pass
+                if candidates:
+                    ioc_balance = max(candidates)
+                    print(f"â ï¸ Balance (best guess from page): Rs. {ioc_balance:,.2f}")
+                else:
+                    print("â ï¸ Could not find balance amount on BalanceInfo page.")
+        except Exception as e:
+            print(f"â ï¸ Balance scraping error: {e}")
+        # --- End balance scraping ---
+
         tx_details_link = page.locator("a[href='/Transactions/TransactionDetails']").first
         await tx_details_link.wait_for(state="visible", timeout=5000)
         await tx_details_link.click()
@@ -196,7 +231,7 @@ async def download_transactions(username, password, temp_dir, target_date=None):
         await download.save_as(raw_download_path)
         print(f"File successfully saved to: {raw_download_path}")
         await browser.close()
-        return raw_download_path
+        return raw_download_path, ioc_balance
 
 def process_data(raw_csv_path, target_date):
     print(f"Processing raw transactions from: {raw_csv_path}...")
@@ -495,7 +530,7 @@ def generate_excel_report(processed_df, target_date, output_path):
     writer.close()
     print("Excel report successfully created.")
 
-def generate_email_body_html(processed_df, target_date):
+def generate_email_body_html(processed_df, target_date, ioc_balance=None):
     print("Generating Email Body HTML grouped by Branch...")
     
     target_date_str = target_date.strftime("%d/%m/%Y")
@@ -528,11 +563,20 @@ def generate_email_body_html(processed_df, target_date):
     valid_mileages = day_df["Mileage (km/L)"].dropna()
     avg_mileage = valid_mileages.mean() if not valid_mileages.empty else np.nan
     
+    balance_row_html = ""
+    if ioc_balance is not None:
+        balance_row_html = f"""
+            <tr>
+                <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">IOC Card Available Balance</td>
+                <td style="padding: 10px; border: 1px solid #ddd; color: #8B0000; font-weight: bold; font-size: 16px;">Rs. {ioc_balance:,.2f}</td>
+            </tr>
+        """
+
     summary_section = f"""
     <div style="font-family: Arial, sans-serif; margin-bottom: 25px;">
         <h2 style="color: #1F497D; margin-bottom: 5px;">Daily IOC Xtrapower Diesel Report</h2>
         <p style="color: #666; margin-top: 0; font-size: 14px;">Report Date: <b>{target_date_str}</b> (12:00:00 AM to 11:59:59 PM)</p>
-        
+
         <table style="border-collapse: collapse; width: 100%; max-width: 500px; margin-top: 15px; margin-bottom: 20px; font-size: 14px;">
             <tr style="background-color: #f2f5f9;">
                 <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold; width: 60%;">Total Spend Today</td>
@@ -545,9 +589,10 @@ def generate_email_body_html(processed_df, target_date):
             <tr style="background-color: #f2f5f9;">
                 <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Fleet Average Mileage</td>
                 <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold; color: #2E6B34;">
-                    {"{:.2f} km/L".format(avg_mileage) if not pd.isna(avg_mileage) else "-"}
+                    {R{:.2f} km/L".format(avg_mileage) if not pd.isna(avg_mileage) else "-"}
                 </td>
             </tr>
+            {balance_row_html}
         </table>
     </div>
     """
@@ -650,17 +695,18 @@ def generate_email_body_html(processed_df, target_date):
     """
     return html_body
 
-def send_report_email(html_body, excel_path, target_date):
+def send_report_email(html_body, excel_path, target_date, ioc_balance=None):
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
     receiver_email = os.getenv("RECEIVER_EMAIL")
-    
+
     if not sender_email or not sender_password or not receiver_email:
-        print("⚠️ Email credentials (SENDER_EMAIL, SENDER_PASSWORD, RECEIVER_EMAIL) are missing. Skipping email sending.")
+        print("â ï¸ Email credentials (SENDER_EMAIL, SENDER_PASSWORD, RECEIVER_EMAIL) are missing. Skipping email sending.")
         return
-        
+
     date_str = target_date.strftime("%d/%m/%Y")
-    subject = f"Daily IOC Xtrapower Diesel Mileage & Amount Report - {date_str}"
+    balance_str = f" | Balance: Rs.{ioc_balance:,.2f}" if ioc_balance is not None else ""
+    subject = f"Daily IOC Xtrapower Diesel Mileage & Amount Report - {date_str}{balance_str}"
     
     msg = MIMEMultipart()
     msg["From"] = sender_email
@@ -690,9 +736,9 @@ def send_report_email(html_body, excel_path, target_date):
         recipients = [r.strip() for r in receiver_email.split(",") if r.strip()]
         server.send_message(msg, to_addrs=recipients)
         server.quit()
-        print("🎉 Diesel mileage report email sent successfully!")
+        print("ð Diesel mileage report email sent successfully!")
     except Exception as e:
-        print("❌ Error occurred during SMTP dispatch:", e)
+        print("â Error occurred during SMTP dispatch:", e)
         raise e
 
 async def main_orchestrator():
@@ -714,42 +760,43 @@ async def main_orchestrator():
     os.makedirs(temp_dir, exist_ok=True)
     
     raw_csv_path = None
+    ioc_balance = None
     if args.local_file:
         print(f"Using local file instead of scraping: {args.local_file}")
         raw_csv_path = args.local_file
     else:
         username = os.getenv("IOC_USERNAME", "EFFLOGISKRL")
         password = os.getenv("IOC_PASSWORD", "Eff@2026Logis")
-        
+
         try:
-            raw_csv_path = await download_transactions(username, password, temp_dir, target_date=target_date)
+            raw_csv_path, ioc_balance = await download_transactions(username, password, temp_dir, target_date=target_date)
         except Exception as e:
-            print(f"❌ Portal scraping failed: {e}")
+            print(f"â Portal scraping failed: {e}")
             sys.exit(1)
             
     try:
         processed_df = process_data(raw_csv_path, target_date)
     except Exception as e:
-        print(f"❌ Data processing failed: {e}")
+        print(f"â Data processing failed: {e}")
         sys.exit(1)
         
     excel_report_path = os.path.join(temp_dir, f"IOC_Diesel_Monthly_Grid_{target_date.strftime('%Y_%m')}.xlsx")
     try:
         generate_excel_report(processed_df, target_date, excel_report_path)
     except Exception as e:
-        print(f"❌ Excel generation failed: {e}")
+        print(f"â Excel generation failed: {e}")
         sys.exit(1)
         
     try:
-        email_body_html = generate_email_body_html(processed_df, target_date)
+        email_body_html = generate_email_body_html(processed_df, target_date, ioc_balance=ioc_balance)
     except Exception as e:
-        print(f"❌ Email HTML generation failed: {e}")
+        print(f"â Email HTML generation failed: {e}")
         sys.exit(1)
         
     try:
-        send_report_email(email_body_html, excel_report_path, target_date)
+        send_report_email(email_body_html, excel_report_path, target_date, ioc_balance=ioc_balance)
     except Exception as e:
-        print(f"❌ SMTP dispatch failed: {e}")
+        print(f"â SMTP dispatch failed: {e}")
         sys.exit(1)
         
     archive_dir = os.path.join(workspace_dir, "helper_scripts", "ERP_Daily_Report_Automation", "archive")
