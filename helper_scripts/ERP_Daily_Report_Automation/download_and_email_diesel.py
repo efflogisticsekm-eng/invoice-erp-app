@@ -115,14 +115,18 @@ async def download_transactions(username, password, temp_dir, target_date=None):
 
     async with async_playwright() as p:
         print("Starting Playwright Chromium browser...")
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(viewport={"width": 1280, "height": 800})
+        browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'])
+        context = await browser.new_context(viewport={"width": 1280, "height": 800}, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
         page = await context.new_page()
         
         login_url = "https://beta.iocxtrapower.com/account/login?returnUrl=%2F"
         print(f"Navigating to login page: {login_url}...")
-        await page.goto(login_url, timeout=60000)
-        await page.wait_for_timeout(3000)
+        await page.goto(login_url, timeout=60000, wait_until="domcontentloaded")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+        await page.wait_for_selector("#email", timeout=60000)
         
         await page.fill("#email", username)
         await page.fill("input[type='password']", password)
