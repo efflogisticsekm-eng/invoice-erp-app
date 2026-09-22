@@ -572,6 +572,7 @@ def generate_email_body_html(processed_df, target_date, ioc_balance=None):
             </tr>
         """
 
+    avg_m_str = "{:.2f} km/L".format(avg_mileage) if not pd.isna(avg_mileage) else "-"
     summary_section = f"""
     <div style="font-family: Arial, sans-serif; margin-bottom: 25px;">
         <h2 style="color: #1F497D; margin-bottom: 5px;">Daily IOC Xtrapower Diesel Report</h2>
@@ -589,7 +590,7 @@ def generate_email_body_html(processed_df, target_date, ioc_balance=None):
             <tr style="background-color: #f2f5f9;">
                 <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Fleet Average Mileage</td>
                 <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold; color: #2E6B34;">
-                    {R{:.2f} km/L".format(avg_mileage) if not pd.isna(avg_mileage) else "-"}
+                    {avg_m_str}
                 </td>
             </tr>
             {balance_row_html}
