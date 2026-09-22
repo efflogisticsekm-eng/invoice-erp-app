@@ -863,7 +863,7 @@ export default function Scanner({ user, onBack }) {
                     Same as Billing Party Name
                   </label>
                 </div>
-                <input type="text" className="input-field" value={workshopName} onChange={e => setWorkshopName(e.target.value)} />
+                {(()=>{const h=subCategory?'Vehicle Maintenance→'+subCategory:'Vehicle Maintenance';const vl=getFilteredVendors(h);return vl.length>0?<select className="input-field" value={workshopName} onChange={e=>setWorkshopName(e.target.value)}><option value="">-- Select Workshop --</option>{vl.map(v=><option key={v.vendor_name} value={v.vendor_name}>{v.vendor_name}</option>)}<option value="__manual__">Other (type manually)</option></select>:<input type="text" className="input-field" value={workshopName} onChange={e=>setWorkshopName(e.target.value)}/>;})()}
               </div>
             </>
           )}
