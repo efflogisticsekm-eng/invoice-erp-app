@@ -54,7 +54,7 @@ export default function DatabaseExplorer() {
     if (!normKey(form.consignee)) missing.push('Consignee');
     if (!normKey(form.rate_logic)) missing.push('Rate Logic');
     if (!normKey(form.box_type)) missing.push('Box Type');
-    if (form.rate === '' || form.rate === null || form.rate === undefined || isNaN(Number(form.rate)) || Number(form.rate) <= 0) missing.push('Rate');
+    if (form.rate === '' || form.rate === null || form.rate === undefined || isNaN(Number(form.rate)) || Number(form.rate) < 0) missing.push('Rate');
     return missing.length ? `Cannot save — please enter ${missing.join(', ')}. (${missing.join(', ')} നൽകാതെ save ചെയ്യാൻ പറ്റില്ല)` : null;
   };
 

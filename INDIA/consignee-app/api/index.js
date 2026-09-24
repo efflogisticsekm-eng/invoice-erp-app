@@ -1812,7 +1812,7 @@ async function checkUnloadingRow(row, excludeId = null) {
   if (!_umNorm(row.consignee)) missing.push('Consignee');
   if (!_umNorm(row.rate_logic)) missing.push('Rate Logic');
   if (!_umNorm(row.box_type)) missing.push('Box Type');
-  if (row.rate === '' || row.rate == null || isNaN(Number(row.rate)) || Number(row.rate) <= 0) missing.push('Rate');
+  if (row.rate === '' || row.rate == null || isNaN(Number(row.rate)) || Number(row.rate) < 0) missing.push('Rate');
   if (missing.length) return { status: 400, body: { error: `Cannot save — please enter ${missing.join(', ')}.` } };
   const key = _umKey(row);
   let from = 0;
