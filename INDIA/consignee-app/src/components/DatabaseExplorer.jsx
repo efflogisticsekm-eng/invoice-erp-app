@@ -191,7 +191,8 @@ export default function DatabaseExplorer() {
             payload.push({
               vehicle_no: row[0]?.trim(),
               branch: row[1]?.trim(),
-              vehicle_type: row[2]?.trim() || ''
+              vehicle_type: row[2]?.trim() || '',
+              driver_name: row[3]?.trim() || null
             });
           }
         }
@@ -321,6 +322,7 @@ export default function DatabaseExplorer() {
       String(r.date || '').toLowerCase().includes(term) ||
       String(r.vehicle_no || '').toLowerCase().includes(term) ||
       String(r.vehicle_type || '').toLowerCase().includes(term) ||
+      String(r.driver_name || '').toLowerCase().includes(term) ||
       String(r.description || '').toLowerCase().includes(term)
     );
   });
@@ -368,7 +370,7 @@ export default function DatabaseExplorer() {
                   } else if (activeTable === 'unloading_master') {
                     setCreateForm({ consignor: '', consignee: '', rate_logic: '', box_type: '', rate: '' });
                   } else if (activeTable === 'vehicles') {
-                    setCreateForm({ vehicle_no: '', branch: '', vehicle_type: '' });
+                    setCreateForm({ vehicle_no: '', branch: '', vehicle_type: '', driver_name: '' });
                   } else {
                     setCreateForm({ date: '', description: '' });
                   }
@@ -496,6 +498,7 @@ export default function DatabaseExplorer() {
                         <th className="p-3.5">{activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicles' ? 'Vehicle No' : 'Customer Name'}</th>
                         <th className="p-3.5">Branch Name</th>
                         {activeTable === 'vehicles' && <th className="p-3.5">Vehicle Type</th>}
+                        {activeTable === 'vehicles' && <th className="p-3.5">Driver Name</th>}
                       </>
                     ) : activeTable === 'holidays' ? (
                       <>
@@ -549,6 +552,7 @@ export default function DatabaseExplorer() {
                           <td className="p-3.5 font-semibold text-white">{activeTable === 'supervisor_branch_mapping' ? row.supervisor_name : activeTable === 'vehicles' ? row.vehicle_no : row.customer_name}</td>
                           <td className="p-3.5 font-semibold text-primary">{row.branch}</td>
                           {activeTable === 'vehicles' && <td className="p-3.5 font-semibold text-slate-300">{row.vehicle_type}</td>}
+                          {activeTable === 'vehicles' && <td className="p-3.5 font-semibold text-emerald-300">{row.driver_name || '-'}</td>}
                         </>
                       ) : activeTable === 'holidays' ? (
                         <>
@@ -715,6 +719,17 @@ export default function DatabaseExplorer() {
                       onChange={e => setEditForm({ ...editForm, vehicle_type: e.target.value })}
                       className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
                       required
+                    />
+                  </div>
+                  )}
+                  {activeTable === 'vehicles' && (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Driver Name (own vehicle regular driver)</label>
+                    <input
+                      type="text"
+                      value={editForm.driver_name || ''}
+                      onChange={e => setEditForm({ ...editForm, driver_name: e.target.value })}
+                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
                     />
                   </div>
                   )}
@@ -998,6 +1013,18 @@ export default function DatabaseExplorer() {
                     />
                   </div>
                   )}
+                  {activeTable === 'vehicles' && (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Driver Name (optional)</label>
+                    <input
+                      type="text"
+                      value={createForm.driver_name || ''}
+                      onChange={e => setCreateForm({ ...createForm, driver_name: e.target.value })}
+                      placeholder="e.g. RAJESH"
+                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
+                    />
+                  </div>
+                  )}
                 </>
               ) : activeTable === 'holidays' ? (
                 <>
@@ -1093,7 +1120,7 @@ export default function DatabaseExplorer() {
               <div>
                 <label className="block text-xs font-bold text-slate-400 mb-2">
                   Paste data from Excel (Copy from Excel and Paste here). 
-                  <br/><span className="text-sky-400">Format: Vehicle No | Branch | Vehicle Type</span>
+                  <br/><span className="text-sky-400">Format: Vehicle No | Branch | Vehicle Type | Driver Name (optional)</span>
                 </label>
                 <textarea
                   rows="10"
