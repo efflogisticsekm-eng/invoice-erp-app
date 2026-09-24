@@ -1803,6 +1803,30 @@ app.get('/api/explorer/data/:table', async (req, res) => {
   }
 });
 
+// ── Unloading Master guard: mandatory fields + no duplicate Consignor→Consignee→Rate Logic→Box Type ──
+const _umNorm = (v) => String(v ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+const _umKey = (r) => [r.consignor, r.consignee, r.rate_logic, r.box_type].map(_umNorm).join('|');
+async function checkUnloadingRow(row, excludeId = null) {
+  const missing = [];
+  if (!_umNorm(row.consignor)) missing.push('Consignor');
+  if (!_umNorm(row.consignee)) missing.push('Consignee');
+  if (!_umNorm(row.rate_logic)) missing.push('Rate Logic');
+  if (!_umNorm(row.box_type)) missing.push('Box Type');
+  if (row.rate === '' || row.rate == null || isNaN(Number(row.rate)) || Number(row.rate) <= 0) missing.push('Rate');
+  if (missing.length) return { status: 400, body: { error: `Cannot save — please enter ${missing.join(', ')}.` } };
+  const key = _umKey(row);
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase.from('unloading_master').select('id, consignor, consignee, rate_logic, box_type, rate').range(from, from + 999);
+    if (error) return { status: 500, body: { error: error.message } };
+    const dup = (data || []).find(r => r.id !== excludeId && _umKey(r) === key);
+    if (dup) return { status: 409, body: { error: `This Consignor → Consignee → Rate Logic → Box Type already exists (Rate ₹${dup.rate}). Please edit the existing entry instead of creating a new one.`, duplicate_id: dup.id } };
+    if (!data || data.length < 1000) break;
+    from += 1000;
+  }
+  return null;
+}
+
 app.post('/api/explorer/create/:table', express.json({ limit: '5mb' }), async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
@@ -1816,6 +1840,17 @@ app.post('/api/explorer/create/:table', express.json({ limit: '5mb' }), async (r
   delete newRow.created_at;
 
   try {
+    if (table === 'unloading_master') {
+      const rowsIn = Array.isArray(newRow) ? newRow : [newRow];
+      const seen = new Set();
+      for (const r of rowsIn) {
+        const bad = await checkUnloadingRow(r);
+        if (bad) return res.status(bad.status).json(bad.body);
+        const k = _umKey(r);
+        if (seen.has(k)) return res.status(409).json({ error: `Duplicate line in upload: ${r.consignor} → ${r.consignee} → ${r.rate_logic} → ${r.box_type}` });
+        seen.add(k);
+      }
+    }
     if (Array.isArray(newRow)) {
       // Clean up array items
       const rowsToInsert = newRow.map(row => {
@@ -1867,6 +1902,10 @@ app.post('/api/explorer/update/:table', express.json({ limit: '5mb' }), async (r
   delete updatedFields.created_at;
 
   try {
+    if (table === 'unloading_master') {
+      const bad = await checkUnloadingRow(updatedFields, pkValue);
+      if (bad) return res.status(bad.status).json(bad.body);
+    }
     const { data, error } = await supabase.from(table).update(updatedFields).eq(pkField, pkValue);
     if (error) return res.status(500).json({ error: error.message });
     return res.json({ status: "success" });

@@ -27,9 +27,52 @@ export default function DatabaseExplorer() {
   const [bulkUploading, setBulkUploading] = useState(false);
   const [bulkData, setBulkData] = useState('');
 
+  // Unloading Master validation warning shown inside the Add/Edit popup
+  // { text, duplicateRow? }
+  const [formWarning, setFormWarning] = useState(null);
+
   useEffect(() => {
+    setSearchTerm('');
+    setFormWarning(null);
     fetchData();
   }, [activeTable]);
+
+  // ── Unloading Master helpers ───────────────────────────────────────────────
+  const normKey = (v) => String(v ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const unloadingKey = (r) => [r.consignor, r.consignee, r.rate_logic, r.box_type].map(normKey).join('|');
+
+  // Returns the existing row that has the same Consignor→Consignee→Rate Logic→Box Type (ignores the row being edited)
+  const findUnloadingDuplicate = (form, excludeId = null) => {
+    const key = unloadingKey(form);
+    return rows.find(r => r.id !== excludeId && unloadingKey(r) === key) || null;
+  };
+
+  // Returns a warning text if a mandatory field is missing, else null
+  const unloadingMissingFields = (form) => {
+    const missing = [];
+    if (!normKey(form.consignor)) missing.push('Consignor');
+    if (!normKey(form.consignee)) missing.push('Consignee');
+    if (!normKey(form.rate_logic)) missing.push('Rate Logic');
+    if (!normKey(form.box_type)) missing.push('Box Type');
+    if (form.rate === '' || form.rate === null || form.rate === undefined || isNaN(Number(form.rate)) || Number(form.rate) <= 0) missing.push('Rate');
+    return missing.length ? `Cannot save — please enter ${missing.join(', ')}. (${missing.join(', ')} നൽകാതെ save ചെയ്യാൻ പറ്റില്ല)` : null;
+  };
+
+  const cleanUnloading = (form) => ({
+    ...form,
+    consignor: String(form.consignor ?? '').trim().replace(/\s+/g, ' '),
+    consignee: String(form.consignee ?? '').trim().replace(/\s+/g, ' '),
+    rate_logic: String(form.rate_logic ?? '').trim(),
+    box_type: String(form.box_type ?? '').trim().replace(/\s+/g, ' '),
+    rate: Number(form.rate)
+  });
+
+  const openEditFromDuplicate = (row) => {
+    setCreatingNew(false);
+    setCreateForm({});
+    setFormWarning(null);
+    startEdit(row);
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -52,44 +95,79 @@ export default function DatabaseExplorer() {
     e.preventDefault();
     if (!editingRow) return;
 
+    let payloadForm = editForm;
+    if (activeTable === 'unloading_master') {
+      const missing = unloadingMissingFields(editForm);
+      if (missing) { setFormWarning({ text: missing }); return; }
+      const dup = findUnloadingDuplicate(editForm, editingRow.id);
+      if (dup) {
+        setFormWarning({ text: `Another entry already exists for this Consignor → Consignee → Rate Logic → Box Type (Rate ₹${dup.rate}). Edit that entry instead of creating a second one.`, duplicateRow: dup });
+        return;
+      }
+      payloadForm = cleanUnloading(editForm);
+    }
+
     setLoading(true);
     setError(null);
     setMessage(null);
+    setFormWarning(null);
 
     try {
       const isProd = import.meta.env.PROD;
       const baseUrl = isProd ? '' : 'http://localhost:3001';
       await axios.post(`${baseUrl}/api/explorer/update/${activeTable}`, {
         id: editingRow.id,
-        ...editForm
+        ...payloadForm
       });
       setMessage("Record updated successfully!");
       setEditingRow(null);
       fetchData();
     } catch (err) {
       console.error(err);
-      setError("Failed to update database record: " + (err.response?.data?.error || err.message));
+      const dupId = err.response?.data?.duplicate_id;
+      const dupRow = dupId ? rows.find(r => r.id === dupId) : null;
+      setFormWarning({ text: err.response?.data?.error || err.message, duplicateRow: dupRow || undefined });
       setLoading(false);
     }
   };
 
   const handleCreate = async (e) => {
     e.preventDefault();
+
+    let payloadForm = createForm;
+    if (activeTable === 'unloading_master') {
+      const missing = unloadingMissingFields(createForm);
+      if (missing) { setFormWarning({ text: missing }); return; }
+      const dup = findUnloadingDuplicate(createForm);
+      if (dup) {
+        setFormWarning({ text: `This Consignor → Consignee → Rate Logic → Box Type already exists (Rate ₹${dup.rate}). A new entry is not allowed — please edit the existing one. (ഇത് നിലവിലുണ്ട് — പുതിയത് ഉണ്ടാക്കാതെ Edit ചെയ്യുക)`, duplicateRow: dup });
+        return;
+      }
+      payloadForm = cleanUnloading(createForm);
+    }
+
     setLoading(true);
     setError(null);
     setMessage(null);
+    setFormWarning(null);
 
     try {
       const isProd = import.meta.env.PROD;
       const baseUrl = isProd ? '' : 'http://localhost:3001';
-      await axios.post(`${baseUrl}/api/explorer/create/${activeTable}`, createForm);
+      await axios.post(`${baseUrl}/api/explorer/create/${activeTable}`, payloadForm);
       setMessage("Record created successfully!");
       setCreatingNew(false);
       setCreateForm({});
       fetchData();
     } catch (err) {
       console.error(err);
-      setError("Failed to create database record: " + (err.response?.data?.error || err.message));
+      if (activeTable === 'unloading_master') {
+        const dupId = err.response?.data?.duplicate_id;
+        const dupRow = dupId ? rows.find(r => r.id === dupId) : null;
+        setFormWarning({ text: err.response?.data?.error || err.message, duplicateRow: dupRow || undefined });
+      } else {
+        setError("Failed to create database record: " + (err.response?.data?.error || err.message));
+      }
       setLoading(false);
     }
   };
@@ -164,6 +242,7 @@ export default function DatabaseExplorer() {
   };
 
   const startEdit = (row) => {
+    setFormWarning(null);
     setEditingRow(row);
     // clone all properties except metadata
     const clone = { ...row };
@@ -223,6 +302,11 @@ export default function DatabaseExplorer() {
   // Filter rows
   const filteredRows = rows.filter(r => {
     const term = searchTerm.toLowerCase();
+    if (activeTable === 'unloading_master') {
+      // every word typed must appear in Consignor / Consignee / Rate Logic / Box Type / Rate
+      const hay = [r.consignor, r.consignee, r.rate_logic, r.box_type, r.rate].map(v => String(v ?? '').toLowerCase()).join(' | ');
+      return term.trim().split(/\s+/).filter(Boolean).every(w => hay.includes(w));
+    }
     return (
       String(r.invoice_no || '').toLowerCase().includes(term) ||
       String(r.consignee_code || '').toLowerCase().includes(term) ||
@@ -282,12 +366,13 @@ export default function DatabaseExplorer() {
                   } else if (activeTable === 'customer_branch_mapping') {
                     setCreateForm({ customer_name: '', branch: '' });
                   } else if (activeTable === 'unloading_master') {
-                    setCreateForm({ consignor: '', consignee: '', rate_logic: 'Item/ Box Type', box_type: '', rate: '' });
+                    setCreateForm({ consignor: '', consignee: '', rate_logic: '', box_type: '', rate: '' });
                   } else if (activeTable === 'vehicles') {
                     setCreateForm({ vehicle_no: '', branch: '', vehicle_type: '' });
                   } else {
                     setCreateForm({ date: '', description: '' });
                   }
+                  setFormWarning(null);
                   setCreatingNew(true);
                 }}
                 className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-emerald-950/20 cursor-pointer"
@@ -372,11 +457,21 @@ export default function DatabaseExplorer() {
           <Search className="absolute left-3.5 top-3.5 text-slate-500" size={18} />
           <input
             type="text"
-            placeholder="Search by invoice no, consignee, code, or place..."
+            placeholder={activeTable === 'unloading_master' ? "Search consignor, consignee, rate logic or box type (e.g. asian kochi)..." : "Search by invoice no, consignee, code, or place..."}
             value={searchTerm}
             onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            className="w-full bg-slate-950 text-white pl-10 pr-4 py-3.5 rounded-xl border border-slate-800 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition text-sm"
+            className="w-full bg-slate-950 text-white pl-10 pr-10 py-3.5 rounded-xl border border-slate-800 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition text-sm"
           />
+          {searchTerm && (
+            <button type="button" onClick={() => { setSearchTerm(''); setCurrentPage(1); }} className="absolute right-3 top-3.5 text-slate-500 hover:text-white cursor-pointer" title="Clear search">
+              <X size={16} />
+            </button>
+          )}
+          {activeTable === 'unloading_master' && (
+            <div className="mt-2 text-[11px] text-slate-500 font-semibold">
+              {filteredRows.length} of {rows.length} rates{searchTerm ? ' match your search' : ''} — click the pencil icon on a row to edit it.
+            </div>
+          )}
         </div>
 
         {/* Database Grid */}
@@ -559,6 +654,25 @@ export default function DatabaseExplorer() {
             </div>
 
             <form onSubmit={handleUpdate} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              {activeTable === 'unloading_master' && (() => {
+                const liveDup = (!formWarning && normKey(editForm.consignor) && normKey(editForm.consignee) && normKey(editForm.rate_logic) && normKey(editForm.box_type)) ? findUnloadingDuplicate(editForm, editingRow.id) : null;
+                const w = formWarning || (liveDup ? { text: `Already exists: this Consignor → Consignee → Rate Logic → Box Type has Rate ₹${liveDup.rate}. Save is blocked — edit the existing entry instead.`, duplicateRow: liveDup } : null);
+                if (!w) return null;
+                return (
+                  <div className="p-3 bg-amber-950/50 border border-amber-700 text-amber-300 rounded-xl text-xs font-semibold space-y-2">
+                    <div className="flex items-start space-x-2">
+                      <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                      <span>{w.text}</span>
+                    </div>
+                    {w.duplicateRow && (
+                      <div className="flex items-center justify-between bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2">
+                        <span className="text-slate-300">{w.duplicateRow.consignor} → {w.duplicateRow.consignee} → {w.duplicateRow.rate_logic} → {w.duplicateRow.box_type} : <b className="text-emerald-400">₹{w.duplicateRow.rate}</b></span>
+                        <button type="button" onClick={() => openEditFromDuplicate(w.duplicateRow)} className="ml-3 px-3 py-1 bg-primary text-slate-950 font-black rounded-lg cursor-pointer whitespace-nowrap">Edit Existing</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
                 <>
                   <div>
@@ -631,28 +745,29 @@ export default function DatabaseExplorer() {
                 <>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Consignor</label>
-                    <input type="text" value={editForm.consignor || ''} onChange={e => setEditForm({...editForm, consignor: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    <input type="text" value={editForm.consignor || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, consignor: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Consignee</label>
-                    <input type="text" value={editForm.consignee || ''} onChange={e => setEditForm({...editForm, consignee: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    <input type="text" value={editForm.consignee || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, consignee: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate Logic</label>
-                      <select value={editForm.rate_logic || ''} onChange={e => setEditForm({...editForm, rate_logic: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required>
+                      <select value={editForm.rate_logic || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, rate_logic: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                        <option value="">-- Select --</option>
                         <option value="Item/ Box Type">Item/ Box Type</option>
                         <option value="Weight">Weight</option>
                       </select>
                     </div>
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Box Type</label>
-                      <input type="text" value={editForm.box_type || ''} onChange={e => setEditForm({...editForm, box_type: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                      <input type="text" value={editForm.box_type || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, box_type: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate (₹)</label>
-                    <input type="number" step="0.01" value={editForm.rate || ''} onChange={e => setEditForm({...editForm, rate: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    <input type="number" step="0.01" value={editForm.rate || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, rate: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                 </>
               ) : (
@@ -817,6 +932,25 @@ export default function DatabaseExplorer() {
             </div>
 
             <form onSubmit={handleCreate} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              {activeTable === 'unloading_master' && (() => {
+                const liveDup = (!formWarning && normKey(createForm.consignor) && normKey(createForm.consignee) && normKey(createForm.rate_logic) && normKey(createForm.box_type)) ? findUnloadingDuplicate(createForm, null) : null;
+                const w = formWarning || (liveDup ? { text: `Already exists: this Consignor → Consignee → Rate Logic → Box Type has Rate ₹${liveDup.rate}. Save is blocked — edit the existing entry instead.`, duplicateRow: liveDup } : null);
+                if (!w) return null;
+                return (
+                  <div className="p-3 bg-amber-950/50 border border-amber-700 text-amber-300 rounded-xl text-xs font-semibold space-y-2">
+                    <div className="flex items-start space-x-2">
+                      <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                      <span>{w.text}</span>
+                    </div>
+                    {w.duplicateRow && (
+                      <div className="flex items-center justify-between bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2">
+                        <span className="text-slate-300">{w.duplicateRow.consignor} → {w.duplicateRow.consignee} → {w.duplicateRow.rate_logic} → {w.duplicateRow.box_type} : <b className="text-emerald-400">₹{w.duplicateRow.rate}</b></span>
+                        <button type="button" onClick={() => openEditFromDuplicate(w.duplicateRow)} className="ml-3 px-3 py-1 bg-primary text-slate-950 font-black rounded-lg cursor-pointer whitespace-nowrap">Edit Existing</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
                 <>
                   <div>
@@ -892,28 +1026,29 @@ export default function DatabaseExplorer() {
                 <>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Consignor</label>
-                    <input type="text" value={createForm.consignor || ''} onChange={e => setCreateForm({...createForm, consignor: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    <input type="text" value={createForm.consignor || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, consignor: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Consignee</label>
-                    <input type="text" value={createForm.consignee || ''} onChange={e => setCreateForm({...createForm, consignee: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    <input type="text" value={createForm.consignee || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, consignee: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate Logic</label>
-                      <select value={createForm.rate_logic || ''} onChange={e => setCreateForm({...createForm, rate_logic: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required>
+                      <select value={createForm.rate_logic || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, rate_logic: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                        <option value="">-- Select --</option>
                         <option value="Item/ Box Type">Item/ Box Type</option>
                         <option value="Weight">Weight</option>
                       </select>
                     </div>
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Box Type</label>
-                      <input type="text" value={createForm.box_type || ''} onChange={e => setCreateForm({...createForm, box_type: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                      <input type="text" value={createForm.box_type || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, box_type: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate (₹)</label>
-                    <input type="number" step="0.01" value={createForm.rate || ''} onChange={e => setCreateForm({...createForm, rate: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    <input type="number" step="0.01" value={createForm.rate || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, rate: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                 </>
               ) : (
