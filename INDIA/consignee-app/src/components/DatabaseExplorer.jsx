@@ -303,6 +303,10 @@ export default function DatabaseExplorer() {
   // Filter rows
   const filteredRows = rows.filter(r => {
     const term = searchTerm.toLowerCase();
+    if (activeTable === 'asian_unloading_master') {
+      const hay = [r.branch, r.customer, r.town, r.box_type, r.rate].map(v => String(v ?? '').toLowerCase()).join(' | ');
+      return term.trim().split(/\s+/).filter(Boolean).every(w => hay.includes(w));
+    }
     if (activeTable === 'unloading_master') {
       // every word typed must appear in Consignor / Consignee / Rate Logic / Box Type / Rate
       const hay = [r.consignor, r.consignee, r.rate_logic, r.box_type, r.rate].map(v => String(v ?? '').toLowerCase()).join(' | ');
@@ -419,6 +423,7 @@ export default function DatabaseExplorer() {
           { id: 'vehicles', name: 'Vehicle Master' },
           { id: 'holidays', name: 'Holidays List' },
           { id: 'unloading_master', name: 'Unloading Master' },
+          { id: 'asian_unloading_master', name: 'Asian Unloading Master' },
           { id: 'all_invoices', name: 'All Invoices (Backup)' }
         ].map(tab => {
           const isActive = activeTable === tab.id;
@@ -480,6 +485,29 @@ export default function DatabaseExplorer() {
         {loading && rows.length === 0 ? (
           <div className="py-20 flex justify-center items-center">
             <RefreshCw className="animate-spin text-primary" size={32} />
+          </div>
+        ) : activeTable === 'asian_unloading_master' ? (
+          <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/40">
+            <div className="px-4 py-3 text-xs text-slate-400">ASIAN KOLLAM / ASIAN THRISSUR — Asian Paints unloading rates (read only here · changes come through the ERP "Unloading Rate Request" approval, or FM/MD in ERP → Asian Masters)</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
+                <thead><tr className="bg-slate-900 border-b border-slate-800 text-slate-400 font-bold">
+                  <th className="p-3.5">Branch</th><th className="p-3.5">Customer</th><th className="p-3.5">Town</th><th className="p-3.5">Box Type</th><th className="p-3.5 text-right">Rate</th><th className="p-3.5">Updated</th>
+                </tr></thead>
+                <tbody>
+                  {filteredRows.map(row => (
+                    <tr key={row.id} className="border-b border-slate-800/60 hover:bg-slate-900/40">
+                      <td className="p-3.5 text-primary font-semibold">{row.branch}</td>
+                      <td className="p-3.5 font-semibold text-white">{row.customer}</td>
+                      <td className="p-3.5 text-slate-300">{row.town}</td>
+                      <td className="p-3.5 text-slate-300">{row.box_type}</td>
+                      <td className="p-3.5 text-right font-bold text-emerald-300">₹{row.rate}</td>
+                      <td className="p-3.5 font-mono text-slate-500">{row.updated_at ? new Date(row.updated_at).toLocaleDateString() : '-'}</td>
+                    </tr>))}
+                  {filteredRows.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-slate-500">No Asian unloading rates yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : filteredRows.length === 0 ? (
           <div className="py-20 text-center text-slate-500 font-bold border border-slate-800 rounded-2xl">
