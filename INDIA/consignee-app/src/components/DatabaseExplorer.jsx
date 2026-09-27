@@ -264,6 +264,7 @@ export default function DatabaseExplorer() {
       const sheetName = activeTable === 'live_scanned_invoices' ? 'Scanned Invoices' :
                         activeTable === 'pod_register' ? 'POD Register' :
                         activeTable === 'supervisor_branch_mapping' ? 'Supervisor Mapping' :
+                        activeTable === 'staff_branch_mapping' ? 'Staff Mapping (Paid LR Created By)' :
                         activeTable === 'customer_branch_mapping' ? 'Customer Mapping' :
                         activeTable === 'vehicles' ? 'Vehicle Master' :
                         activeTable === 'holidays' ? 'Holidays' : 'All Invoices';
@@ -321,6 +322,7 @@ export default function DatabaseExplorer() {
       String(r.phone_number || '').toLowerCase().includes(term) ||
       String(r.remarks || '').toLowerCase().includes(term) ||
       String(r.supervisor_name || '').toLowerCase().includes(term) ||
+      String(r.staff_name || '').toLowerCase().includes(term) ||
       String(r.customer_name || '').toLowerCase().includes(term) ||
       String(r.branch || '').toLowerCase().includes(term) ||
       String(r.date || '').toLowerCase().includes(term) ||
@@ -363,12 +365,14 @@ export default function DatabaseExplorer() {
             <span>Reload Data</span>
           </button>
 
-          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'holidays' || activeTable === 'unloading_master' || activeTable === 'vehicles') && (
+          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'holidays' || activeTable === 'unloading_master' || activeTable === 'vehicles') && (
             <div className="flex space-x-2">
               <button
                 onClick={() => {
                   if (activeTable === 'supervisor_branch_mapping') {
                     setCreateForm({ supervisor_name: '', branch: '' });
+                  } else if (activeTable === 'staff_branch_mapping') {
+                    setCreateForm({ staff_name: '', branch: '' });
                   } else if (activeTable === 'customer_branch_mapping') {
                     setCreateForm({ customer_name: '', branch: '' });
                   } else if (activeTable === 'unloading_master') {
@@ -383,7 +387,7 @@ export default function DatabaseExplorer() {
                 }}
                 className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-emerald-950/20 cursor-pointer"
               >
-                <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : activeTable === 'customer_branch_mapping' ? '+ Add Customer' : activeTable === 'unloading_master' ? '+ Add Rate' : activeTable === 'vehicles' ? '+ Add Vehicle' : '+ Add Holiday'}</span>
+                <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : activeTable === 'staff_branch_mapping' ? '+ Add Staff' : activeTable === 'customer_branch_mapping' ? '+ Add Customer' : activeTable === 'unloading_master' ? '+ Add Rate' : activeTable === 'vehicles' ? '+ Add Vehicle' : '+ Add Holiday'}</span>
               </button>
               
               {activeTable === 'vehicles' && (
@@ -419,6 +423,7 @@ export default function DatabaseExplorer() {
           { id: 'live_scanned_invoices', name: 'Scanned Invoices' },
           { id: 'pod_register', name: 'POD Register (Signature/Seals)' },
           { id: 'supervisor_branch_mapping', name: 'Supervisor Mapping' },
+          { id: 'staff_branch_mapping', name: 'Staff Mapping' },
           { id: 'customer_branch_mapping', name: 'Customer Mapping' },
           { id: 'vehicles', name: 'Vehicle Master' },
           { id: 'holidays', name: 'Holidays List' },
@@ -520,10 +525,10 @@ export default function DatabaseExplorer() {
                 <thead>
                   <tr className="bg-slate-900 border-b border-slate-800 text-slate-400 font-bold">
                     <th className="p-3.5">ID</th>
-                    {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
+                    {activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
                       <>
-                        {activeTable === 'supervisor_branch_mapping' && <th className="p-3.5">Created At</th>}
-                        <th className="p-3.5">{activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicles' ? 'Vehicle No' : 'Customer Name'}</th>
+                        {(activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping') && <th className="p-3.5">Created At</th>}
+                        <th className="p-3.5">{activeTable === 'staff_branch_mapping' ? 'Created By (Staff Name — aadhocc-ലെ പോലെ)' : activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicles' ? 'Vehicle No' : 'Customer Name'}</th>
                         <th className="p-3.5">Branch Name</th>
                         {activeTable === 'vehicles' && <th className="p-3.5">Vehicle Type</th>}
                         {activeTable === 'vehicles' && <th className="p-3.5">Driver Name</th>}
@@ -574,10 +579,10 @@ export default function DatabaseExplorer() {
                     <tr key={row.id} className="hover:bg-slate-900/50 transition">
                       <td className="p-3.5 font-mono text-slate-500">#{row.id}</td>
                       
-                      {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
+                      {activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
                         <>
-                          {activeTable === 'supervisor_branch_mapping' && <td className="p-3.5 font-mono">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>}
-                          <td className="p-3.5 font-semibold text-white">{activeTable === 'supervisor_branch_mapping' ? row.supervisor_name : activeTable === 'vehicles' ? row.vehicle_no : row.customer_name}</td>
+                          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping') && <td className="p-3.5 font-mono">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>}
+                          <td className="p-3.5 font-semibold text-white">{activeTable === 'staff_branch_mapping' ? row.staff_name : activeTable === 'supervisor_branch_mapping' ? row.supervisor_name : activeTable === 'vehicles' ? row.vehicle_no : row.customer_name}</td>
                           <td className="p-3.5 font-semibold text-primary">{row.branch}</td>
                           {activeTable === 'vehicles' && <td className="p-3.5 font-semibold text-slate-300">{row.vehicle_type}</td>}
                           {activeTable === 'vehicles' && <td className="p-3.5 font-semibold text-emerald-300">{row.driver_name || '-'}</td>}
@@ -705,17 +710,19 @@ export default function DatabaseExplorer() {
                   </div>
                 );
               })()}
-              {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
+              {activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
                 <>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">
-                      {activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicles' ? 'Vehicle No' : 'Customer Name'}
+                      {activeTable === 'staff_branch_mapping' ? 'Created By (Staff Name — aadhocc-ലെ പോലെ)' : activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicles' ? 'Vehicle No' : 'Customer Name'}
                     </label>
                     <input
                       type="text"
-                      value={activeTable === 'supervisor_branch_mapping' ? (editForm.supervisor_name || '') : activeTable === 'vehicles' ? (editForm.vehicle_no || '') : (editForm.customer_name || '')}
+                      value={activeTable === 'staff_branch_mapping' ? (editForm.staff_name || '') : activeTable === 'supervisor_branch_mapping' ? (editForm.supervisor_name || '') : activeTable === 'vehicles' ? (editForm.vehicle_no || '') : (editForm.customer_name || '')}
                       onChange={e => {
-                        if (activeTable === 'supervisor_branch_mapping') {
+                        if (activeTable === 'staff_branch_mapping') {
+                          setEditForm({ ...editForm, staff_name: e.target.value })
+                        } else if (activeTable === 'supervisor_branch_mapping') {
                           setEditForm({ ...editForm, supervisor_name: e.target.value })
                         } else if (activeTable === 'vehicles') {
                           setEditForm({ ...editForm, vehicle_no: e.target.value })
@@ -994,17 +1001,19 @@ export default function DatabaseExplorer() {
                   </div>
                 );
               })()}
-              {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
+              {activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
                 <>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">
-                      {activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicles' ? 'Vehicle No' : 'Customer Name'}
+                      {activeTable === 'staff_branch_mapping' ? 'Created By (Staff Name — aadhocc-ലെ പോലെ)' : activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicles' ? 'Vehicle No' : 'Customer Name'}
                     </label>
                     <input
                       type="text"
-                      value={activeTable === 'supervisor_branch_mapping' ? (createForm.supervisor_name || '') : activeTable === 'vehicles' ? (createForm.vehicle_no || '') : (createForm.customer_name || '')}
+                      value={activeTable === 'staff_branch_mapping' ? (createForm.staff_name || '') : activeTable === 'supervisor_branch_mapping' ? (createForm.supervisor_name || '') : activeTable === 'vehicles' ? (createForm.vehicle_no || '') : (createForm.customer_name || '')}
                       onChange={e => {
-                        if (activeTable === 'supervisor_branch_mapping') {
+                        if (activeTable === 'staff_branch_mapping') {
+                          setCreateForm({ ...createForm, staff_name: e.target.value })
+                        } else if (activeTable === 'supervisor_branch_mapping') {
                           setCreateForm({ ...createForm, supervisor_name: e.target.value })
                         } else if (activeTable === 'vehicles') {
                           setCreateForm({ ...createForm, vehicle_no: e.target.value })
@@ -1012,7 +1021,7 @@ export default function DatabaseExplorer() {
                           setCreateForm({ ...createForm, customer_name: e.target.value })
                         }
                       }}
-                      placeholder={activeTable === 'supervisor_branch_mapping' ? "e.g. BIPIN" : activeTable === 'vehicles' ? "e.g. KL41T0343" : "e.g. GEM PAINTS"}
+                      placeholder={activeTable === 'staff_branch_mapping' ? "e.g. DILIP SARKAR" : activeTable === 'supervisor_branch_mapping' ? "e.g. BIPIN" : activeTable === 'vehicles' ? "e.g. KL41T0343" : "e.g. GEM PAINTS"}
                       className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
                       required
                     />

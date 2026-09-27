@@ -1768,7 +1768,7 @@ app.post('/api/payroll/draft/save', express.json({ limit: '20mb' }), async (req,
 app.get('/api/explorer/data/:table', async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
-  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles', 'asian_unloading_master'].includes(table)) {
+  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'staff_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles', 'asian_unloading_master'].includes(table)) {
     return res.status(400).json({ error: "Invalid table name" });
   }
   try {
@@ -1830,7 +1830,7 @@ async function checkUnloadingRow(row, excludeId = null) {
 app.post('/api/explorer/create/:table', express.json({ limit: '5mb' }), async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
-  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles'].includes(table)) {
+  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'staff_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles'].includes(table)) {
     return res.status(400).json({ error: "Invalid table name" });
   }
   const newRow = req.body;
@@ -1888,7 +1888,7 @@ app.post('/api/explorer/create/:table', express.json({ limit: '5mb' }), async (r
 app.post('/api/explorer/update/:table', express.json({ limit: '5mb' }), async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
-  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles'].includes(table)) {
+  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'staff_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles'].includes(table)) {
     return res.status(400).json({ error: "Invalid table name" });
   }
   const { id, original_customer_name, ...updatedFields } = req.body;
@@ -1917,7 +1917,7 @@ app.post('/api/explorer/update/:table', express.json({ limit: '5mb' }), async (r
 app.post('/api/explorer/delete/:table', express.json(), async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
-  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles'].includes(table)) {
+  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'staff_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles'].includes(table)) {
     return res.status(400).json({ error: "Invalid table name" });
   }
   const { id, original_customer_name } = req.body;
