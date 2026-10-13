@@ -552,6 +552,7 @@ export default function DatabaseExplorer() {
                         <th className="p-3.5">Rate Logic</th>
                         <th className="p-3.5">Box Type</th>
                         <th className="p-3.5 text-right">Rate</th>
+                        <th className="p-3.5">Updated</th>
                       </>
                     ) : (
                       <>
@@ -606,6 +607,7 @@ export default function DatabaseExplorer() {
                           <td className="p-3.5 text-slate-400 font-semibold">{row.rate_logic || '-'}</td>
                           <td className="p-3.5 text-primary font-bold">{row.box_type || '-'}</td>
                           <td className="p-3.5 font-mono font-bold text-right text-emerald-400">₹{row.rate || '0'}</td>
+                          <td className="p-3.5 font-mono text-slate-500 text-sm">{row.updated_at ? new Date(row.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : row.created_at ? new Date(row.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</td>
                         </>
                       ) : (
                         <>
