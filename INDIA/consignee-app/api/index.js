@@ -1765,10 +1765,14 @@ app.post('/api/payroll/draft/save', express.json({ limit: '20mb' }), async (req,
 // DATABASE EXPLORER SYSTEM — View, Edit, and Delete Scanned Docs in Supabase
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Helper: tables in erp schema need supabase.schema('erp')
+const ERP_SCHEMA_TABLES = ['vendor_master'];
+const sbFrom = (table) => ERP_SCHEMA_TABLES.includes(table) ? supabase.schema('erp').from(table) : supabase.from(table);
+
 app.get('/api/explorer/data/:table', async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
-  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'staff_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles', 'asian_unloading_master'].includes(table)) {
+  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'staff_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles', 'asian_unloading_master', 'vendor_master'].includes(table)) {
     return res.status(400).json({ error: "Invalid table name" });
   }
   try {
@@ -1778,7 +1782,7 @@ app.get('/api/explorer/data/:table', async (req, res) => {
     let hasMore = true;
 
     while (hasMore) {
-      let query = supabase.from(table).select('*').range(from, from + pageSize - 1);
+      let query = sbFrom(table).select('*').range(from, from + pageSize - 1);
       if (table !== 'customer_branch_mapping') {
         query = query.order('id', { ascending: false });
       }
@@ -1830,14 +1834,15 @@ async function checkUnloadingRow(row, excludeId = null) {
 app.post('/api/explorer/create/:table', express.json({ limit: '5mb' }), async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
-  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'staff_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles'].includes(table)) {
+  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'staff_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles', 'vendor_master'].includes(table)) {
     return res.status(400).json({ error: "Invalid table name" });
   }
   const newRow = req.body;
-  
+
   // Clean up any user-submitted id or timestamps
   delete newRow.id;
   delete newRow.created_at;
+  delete newRow.synced_at;
 
   try {
     if (table === 'unloading_master') {
@@ -1859,7 +1864,7 @@ app.post('/api/explorer/create/:table', express.json({ limit: '5mb' }), async (r
         delete cleanRow.created_at;
         return cleanRow;
       });
-      const { data, error } = await supabase.from(table).insert(rowsToInsert).select();
+      const { data, error } = await sbFrom(table).insert(rowsToInsert).select();
       if (error) return res.status(500).json({ error: error.message });
       return res.json({ status: "success", data });
     } else if (table === 'supervisor_branch_mapping' && newRow.supervisor_name) {
@@ -1872,11 +1877,11 @@ app.post('/api/explorer/create/:table', express.json({ limit: '5mb' }), async (r
         supervisor_name: name,
         branch: newRow.branch ? newRow.branch.trim() : ''
       }));
-      const { data, error } = await supabase.from(table).insert(rowsToInsert).select();
+      const { data, error } = await sbFrom(table).insert(rowsToInsert).select();
       if (error) return res.status(500).json({ error: error.message });
       return res.json({ status: "success", data: data?.[0] });
     } else {
-      const { data, error } = await supabase.from(table).insert(newRow).select();
+      const { data, error } = await sbFrom(table).insert(newRow).select();
       if (error) return res.status(500).json({ error: error.message });
       return res.json({ status: "success", data: data?.[0] });
     }
@@ -1888,25 +1893,26 @@ app.post('/api/explorer/create/:table', express.json({ limit: '5mb' }), async (r
 app.post('/api/explorer/update/:table', express.json({ limit: '5mb' }), async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
-  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'staff_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles'].includes(table)) {
+  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'staff_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles', 'vendor_master'].includes(table)) {
     return res.status(400).json({ error: "Invalid table name" });
   }
   const { id, original_customer_name, ...updatedFields } = req.body;
-  
+
   const pkField = table === 'customer_branch_mapping' ? 'customer_name' : 'id';
   const pkValue = table === 'customer_branch_mapping' ? original_customer_name : id;
 
   if (!pkValue) return res.status(400).json({ error: "Primary Key identifier is required" });
-  
+
   // Clean up any metadata columns that shouldn't be edited/updated manually if any
   delete updatedFields.created_at;
+  delete updatedFields.synced_at;
 
   try {
     if (table === 'unloading_master') {
       const bad = await checkUnloadingRow(updatedFields, pkValue);
       if (bad) return res.status(bad.status).json(bad.body);
     }
-    const { data, error } = await supabase.from(table).update(updatedFields).eq(pkField, pkValue);
+    const { data, error } = await sbFrom(table).update(updatedFields).eq(pkField, pkValue);
     if (error) return res.status(500).json({ error: error.message });
     return res.json({ status: "success" });
   } catch (err) {
@@ -1917,18 +1923,18 @@ app.post('/api/explorer/update/:table', express.json({ limit: '5mb' }), async (r
 app.post('/api/explorer/delete/:table', express.json(), async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
-  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'staff_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles'].includes(table)) {
+  if (!['live_scanned_invoices', 'all_invoices', 'pod_register', 'supervisor_branch_mapping', 'staff_branch_mapping', 'holidays', 'customer_branch_mapping', 'unloading_master', 'vehicles', 'vendor_master'].includes(table)) {
     return res.status(400).json({ error: "Invalid table name" });
   }
   const { id, original_customer_name } = req.body;
-  
+
   const pkField = table === 'customer_branch_mapping' ? 'customer_name' : 'id';
   const pkValue = table === 'customer_branch_mapping' ? original_customer_name : id;
 
   if (!pkValue) return res.status(400).json({ error: "Primary Key identifier is required" });
-  
+
   try {
-    const { data, error } = await supabase.from(table).delete().eq(pkField, pkValue);
+    const { data, error } = await sbFrom(table).delete().eq(pkField, pkValue);
     if (error) return res.status(500).json({ error: error.message });
     return res.json({ status: "success" });
   } catch (err) {

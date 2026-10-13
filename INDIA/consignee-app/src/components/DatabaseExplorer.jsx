@@ -267,7 +267,8 @@ export default function DatabaseExplorer() {
                         activeTable === 'staff_branch_mapping' ? 'Staff Mapping (Paid LR Created By)' :
                         activeTable === 'customer_branch_mapping' ? 'Customer Mapping' :
                         activeTable === 'vehicles' ? 'Vehicle Master' :
-                        activeTable === 'holidays' ? 'Holidays' : 'All Invoices';
+                        activeTable === 'holidays' ? 'Holidays' :
+                        activeTable === 'vendor_master' ? 'Account Master' : 'All Invoices';
       
       // Filter rows based on search term
       const dataToExport = filteredRows.map(r => {
@@ -311,6 +312,10 @@ export default function DatabaseExplorer() {
     if (activeTable === 'unloading_master') {
       // every word typed must appear in Consignor / Consignee / Rate Logic / Box Type / Rate
       const hay = [r.consignor, r.consignee, r.rate_logic, r.box_type, r.rate].map(v => String(v ?? '').toLowerCase()).join(' | ');
+      return term.trim().split(/\s+/).filter(Boolean).every(w => hay.includes(w));
+    }
+    if (activeTable === 'vendor_master') {
+      const hay = [r.vendor_name, r.account_number, r.ifsc_code, r.bank_name, r.type, r.status, r.account_head, r.applicable_branches].map(v => String(v ?? '').toLowerCase()).join(' | ');
       return term.trim().split(/\s+/).filter(Boolean).every(w => hay.includes(w));
     }
     return (
@@ -365,7 +370,7 @@ export default function DatabaseExplorer() {
             <span>Reload Data</span>
           </button>
 
-          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'holidays' || activeTable === 'unloading_master' || activeTable === 'vehicles') && (
+          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'holidays' || activeTable === 'unloading_master' || activeTable === 'vehicles' || activeTable === 'vendor_master') && (
             <div className="flex space-x-2">
               <button
                 onClick={() => {
@@ -379,6 +384,8 @@ export default function DatabaseExplorer() {
                     setCreateForm({ consignor: '', consignee: '', rate_logic: '', box_type: '', rate: '' });
                   } else if (activeTable === 'vehicles') {
                     setCreateForm({ vehicle_no: '', branch: '', vehicle_type: '', driver_name: '' });
+                  } else if (activeTable === 'vendor_master') {
+                    setCreateForm({ vendor_name: '', account_number: '', ifsc_code: '', bank_name: '', type: 'Vendor', status: '', account_head: '', applicable_branches: '' });
                   } else {
                     setCreateForm({ date: '', description: '' });
                   }
@@ -387,7 +394,7 @@ export default function DatabaseExplorer() {
                 }}
                 className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-emerald-950/20 cursor-pointer"
               >
-                <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : activeTable === 'staff_branch_mapping' ? '+ Add Staff' : activeTable === 'customer_branch_mapping' ? '+ Add Customer' : activeTable === 'unloading_master' ? '+ Add Rate' : activeTable === 'vehicles' ? '+ Add Vehicle' : '+ Add Holiday'}</span>
+                <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : activeTable === 'staff_branch_mapping' ? '+ Add Staff' : activeTable === 'customer_branch_mapping' ? '+ Add Customer' : activeTable === 'unloading_master' ? '+ Add Rate' : activeTable === 'vehicles' ? '+ Add Vehicle' : activeTable === 'vendor_master' ? '+ Add Account' : '+ Add Holiday'}</span>
               </button>
               
               {activeTable === 'vehicles' && (
@@ -429,6 +436,7 @@ export default function DatabaseExplorer() {
           { id: 'holidays', name: 'Holidays List' },
           { id: 'unloading_master', name: 'Unloading Master' },
           { id: 'asian_unloading_master', name: 'Asian Unloading Master' },
+          { id: 'vendor_master', name: 'Account Master' },
           { id: 'all_invoices', name: 'All Invoices (Backup)' }
         ].map(tab => {
           const isActive = activeTable === tab.id;
@@ -469,7 +477,7 @@ export default function DatabaseExplorer() {
           <Search className="absolute left-3.5 top-3.5 text-slate-500" size={18} />
           <input
             type="text"
-            placeholder={activeTable === 'unloading_master' ? "Search consignor, consignee, rate logic or box type (e.g. asian kochi)..." : "Search by invoice no, consignee, code, or place..."}
+            placeholder={activeTable === 'unloading_master' ? "Search consignor, consignee, rate logic or box type (e.g. asian kochi)..." : activeTable === 'vendor_master' ? "Search vendor name, account no, IFSC, bank..." : "Search by invoice no, consignee, code, or place..."}
             value={searchTerm}
             onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
             className="w-full bg-slate-950 text-white pl-10 pr-10 py-3.5 rounded-xl border border-slate-800 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition text-sm"
@@ -554,6 +562,17 @@ export default function DatabaseExplorer() {
                         <th className="p-3.5 text-right">Rate</th>
                         <th className="p-3.5">Updated</th>
                       </>
+                    ) : activeTable === 'vendor_master' ? (
+                      <>
+                        <th className="p-3.5">Vendor Name</th>
+                        <th className="p-3.5">Account Number</th>
+                        <th className="p-3.5">IFSC Code</th>
+                        <th className="p-3.5">Bank Name</th>
+                        <th className="p-3.5">Type</th>
+                        <th className="p-3.5">Status</th>
+                        <th className="p-3.5">Account Head</th>
+                        <th className="p-3.5">Branches</th>
+                      </>
                     ) : (
                       <>
                         <th className="p-3.5">Uploaded Date</th>
@@ -608,6 +627,17 @@ export default function DatabaseExplorer() {
                           <td className="p-3.5 text-primary font-bold">{row.box_type || '-'}</td>
                           <td className="p-3.5 font-mono font-bold text-right text-emerald-400">₹{row.rate || '0'}</td>
                           <td className="p-3.5 font-mono text-slate-500 text-sm">{row.updated_at ? new Date(row.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : row.created_at ? new Date(row.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</td>
+                        </>
+                      ) : activeTable === 'vendor_master' ? (
+                        <>
+                          <td className="p-3.5 font-semibold text-white">{row.vendor_name || '-'}</td>
+                          <td className="p-3.5 font-mono text-emerald-300">{row.account_number || '-'}</td>
+                          <td className="p-3.5 font-mono text-slate-300">{row.ifsc_code || '-'}</td>
+                          <td className="p-3.5 text-primary font-semibold">{row.bank_name || '-'}</td>
+                          <td className="p-3.5 text-slate-300">{row.type || '-'}</td>
+                          <td className="p-3.5"><span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${row.status === 'Active' ? 'bg-emerald-950 text-emerald-400' : 'bg-amber-950 text-amber-400'}`}>{row.status || '-'}</span></td>
+                          <td className="p-3.5 text-slate-400">{row.account_head || '-'}</td>
+                          <td className="p-3.5 text-slate-400">{row.applicable_branches || '-'}</td>
                         </>
                       ) : (
                         <>
@@ -826,6 +856,55 @@ export default function DatabaseExplorer() {
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate (₹)</label>
                     <input type="number" step="0.01" value={editForm.rate || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, rate: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+                  </div>
+                </>
+              ) : activeTable === 'vendor_master' ? (
+                <>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Vendor Name</label>
+                    <input type="text" value={editForm.vendor_name || ''} onChange={e => setEditForm({...editForm, vendor_name: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Account Number</label>
+                      <input type="text" value={editForm.account_number || ''} onChange={e => setEditForm({...editForm, account_number: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">IFSC Code</label>
+                      <input type="text" value={editForm.ifsc_code || ''} onChange={e => setEditForm({...editForm, ifsc_code: e.target.value.toUpperCase()})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Bank Name</label>
+                    <input type="text" value={editForm.bank_name || ''} onChange={e => setEditForm({...editForm, bank_name: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Type</label>
+                      <select value={editForm.type || ''} onChange={e => setEditForm({...editForm, type: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                        <option value="">-- Select --</option>
+                        <option value="Vendor">Vendor</option>
+                        <option value="Staff">Staff</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Status</label>
+                      <select value={editForm.status || ''} onChange={e => setEditForm({...editForm, status: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                        <option value="">-- Select --</option>
+                        <option value="Active">Active</option>
+                        <option value="New - Verify">New - Verify</option>
+                        <option value="Inactive">Inactive</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Account Head</label>
+                    <input type="text" value={editForm.account_head || ''} onChange={e => setEditForm({...editForm, account_head: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Applicable Branches</label>
+                    <input type="text" value={editForm.applicable_branches || ''} onChange={e => setEditForm({...editForm, applicable_branches: e.target.value})} placeholder="e.g. HO, TRIVANDRUM, KOCHI" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                 </>
               ) : (
@@ -1121,6 +1200,55 @@ export default function DatabaseExplorer() {
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate (₹)</label>
                     <input type="number" step="0.01" value={createForm.rate || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, rate: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+                  </div>
+                </>
+              ) : activeTable === 'vendor_master' ? (
+                <>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Vendor Name</label>
+                    <input type="text" value={createForm.vendor_name || ''} onChange={e => setCreateForm({...createForm, vendor_name: e.target.value})} placeholder="e.g. SERENA CHACKO" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Account Number</label>
+                      <input type="text" value={createForm.account_number || ''} onChange={e => setCreateForm({...createForm, account_number: e.target.value})} placeholder="e.g. 20310100109775" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">IFSC Code</label>
+                      <input type="text" value={createForm.ifsc_code || ''} onChange={e => setCreateForm({...createForm, ifsc_code: e.target.value.toUpperCase()})} placeholder="e.g. FDRL000203" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Bank Name</label>
+                    <input type="text" value={createForm.bank_name || ''} onChange={e => setCreateForm({...createForm, bank_name: e.target.value})} placeholder="e.g. FEDERAL BANK" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Type</label>
+                      <select value={createForm.type || ''} onChange={e => setCreateForm({...createForm, type: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                        <option value="">-- Select --</option>
+                        <option value="Vendor">Vendor</option>
+                        <option value="Staff">Staff</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Status</label>
+                      <select value={createForm.status || ''} onChange={e => setCreateForm({...createForm, status: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                        <option value="">-- Select --</option>
+                        <option value="Active">Active</option>
+                        <option value="New - Verify">New - Verify</option>
+                        <option value="Inactive">Inactive</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Account Head</label>
+                    <input type="text" value={createForm.account_head || ''} onChange={e => setCreateForm({...createForm, account_head: e.target.value})} placeholder="e.g. Staff Welfare/Business Promotion" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Applicable Branches</label>
+                    <input type="text" value={createForm.applicable_branches || ''} onChange={e => setCreateForm({...createForm, applicable_branches: e.target.value})} placeholder="e.g. HO, TRIVANDRUM, KOCHI" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                 </>
               ) : (
