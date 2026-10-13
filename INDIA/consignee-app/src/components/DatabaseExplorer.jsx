@@ -482,6 +482,12 @@ export default function DatabaseExplorer() {
           {activeTable === 'unloading_master' && (
             <div className="mt-2 text-[11px] text-slate-500 font-semibold">
               {filteredRows.length} of {rows.length} rates{searchTerm ? ' match your search' : ''} — click the pencil icon on a row to edit it.
+              {rows.length > 0 && (() => {
+                const dates = rows.map(r => r.updated_at || r.created_at).filter(Boolean);
+                if (!dates.length) return null;
+                const latest = new Date(Math.max(...dates.map(d => new Date(d).getTime())));
+                return <span className="ml-2 text-emerald-400"> · Last updated: {latest.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} {latest.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>;
+              })()}
             </div>
           )}
         </div>
