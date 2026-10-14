@@ -23,6 +23,7 @@ export default function DatabaseExplorer() {
   const [creatingNew, setCreatingNew] = useState(false);
   const [createForm, setCreateForm] = useState({});
 
+<<<<<<< HEAD
   // Bulk Upload State
   const [bulkUploading, setBulkUploading] = useState(false);
   const [bulkData, setBulkData] = useState('');
@@ -30,11 +31,28 @@ export default function DatabaseExplorer() {
   // Unloading Master validation warning shown inside the Add/Edit popup
   // { text, duplicateRow? }
   const [formWarning, setFormWarning] = useState(null);
+=======
+  // Multi-select state
+  const [selectedRows, setSelectedRows] = useState({});
+
+  // Bulk Upload state
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [bulkData, setBulkData] = useState([]);
+  const [bulkUploading, setBulkUploading] = useState(false);
+
+  // Unique box types from loaded data (for Unloading Master picklist)
+  const boxTypeOptions = React.useMemo(() => {
+    if (activeTable !== 'unloading_master') return [];
+    const types = [...new Set(rows.map(r => r.box_type).filter(Boolean))].sort();
+    return types;
+  }, [rows, activeTable]);
+>>>>>>> aacd364 (Explorer: fix Excel export, Box Type picklist, multi-select delete, bulk upload (Unloading Master))
 
   useEffect(() => {
     setSearchTerm('');
     setFormWarning(null);
     fetchData();
+    setSelectedRows({});
   }, [activeTable]);
 
   // ── Unloading Master helpers ───────────────────────────────────────────────
@@ -242,6 +260,74 @@ export default function DatabaseExplorer() {
     }
   };
 
+  // Multi-select helpers
+  const selectedIds = Object.keys(selectedRows).filter(k => selectedRows[k]).map(Number);
+
+  // Delete selected rows
+  const handleDeleteSelected = async () => {
+    if (!selectedIds.length) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedIds.length} selected records?`)) return;
+    setLoading(true); setError(null); setMessage(null);
+    let ok = 0; const bad = [];
+    for (const id of selectedIds) {
+      try {
+        const isProd = import.meta.env.PROD;
+        const baseUrl = isProd ? '' : 'http://localhost:3001';
+        const payload = activeTable === 'customer_branch_mapping'
+          ? { original_customer_name: rows.find(r => r.id === id)?.customer_name }
+          : { id };
+        await axios.post(`${baseUrl}/api/explorer/delete/${activeTable}`, payload);
+        ok++;
+      } catch (e) { bad.push(`#${id}: ${e.response?.data?.error || e.message}`); }
+    }
+    setSelectedRows({});
+    setMessage(`${ok} record(s) deleted.` + (bad.length ? ` ${bad.length} failed.` : ''));
+    if (bad.length) setError(bad.join(' | '));
+    fetchData();
+  };
+
+  // Bulk Upload handler
+  const handleBulkFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        setBulkData(jsonData);
+        setShowBulkUpload(true);
+        setMessage(`${jsonData.length} rows parsed from file. Review and click Upload.`);
+      } catch (err) {
+        setError("Failed to parse file: " + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  const handleBulkUploadSubmit = async () => {
+    if (!bulkData.length) return;
+    if (!window.confirm(`Upload ${bulkData.length} rows to ${activeTable}?`)) return;
+    setBulkUploading(true); setError(null); setMessage(null);
+    let ok = 0; const bad = [];
+    const isProd = import.meta.env.PROD;
+    const baseUrl = isProd ? '' : 'http://localhost:3001';
+    for (const row of bulkData) {
+      try {
+        await axios.post(`${baseUrl}/api/explorer/create/${activeTable}`, row);
+        ok++;
+      } catch (e) { bad.push(e.response?.data?.error || e.message); }
+    }
+    setBulkUploading(false);
+    setMessage(`${ok} rows uploaded successfully.` + (bad.length ? ` ${bad.length} failed.` : ''));
+    if (bad.length) setError(bad.slice(0, 5).join(' | ') + (bad.length > 5 ? ` ...and ${bad.length - 5} more` : ''));
+    setShowBulkUpload(false);
+    setBulkData([]);
+    fetchData();
+  };
+
   const startEdit = (row) => {
     setFormWarning(null);
     setEditingRow(row);
@@ -293,7 +379,7 @@ export default function DatabaseExplorer() {
         if (cell) cell.s = headerStyle;
       }
 
-      XLSX.book_append_sheet(wb, ws, sheetName);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
       XLSX.writeFile(wb, `${sheetName.replace(/\s+/g, '_')}_Export.xlsx`);
       setMessage("Excel downloaded successfully.");
     } catch (err) {
@@ -331,12 +417,24 @@ export default function DatabaseExplorer() {
       String(r.customer_name || '').toLowerCase().includes(term) ||
       String(r.branch || '').toLowerCase().includes(term) ||
       String(r.date || '').toLowerCase().includes(term) ||
+<<<<<<< HEAD
       String(r.vehicle_no || '').toLowerCase().includes(term) ||
       String(r.vehicle_type || '').toLowerCase().includes(term) ||
       String(r.driver_name || '').toLowerCase().includes(term) ||
       String(r.description || '').toLowerCase().includes(term)
+=======
+      String(r.description || '').toLowerCase().includes(term) ||
+      String(r.box_type || '').toLowerCase().includes(term)
+>>>>>>> aacd364 (Explorer: fix Excel export, Box Type picklist, multi-select delete, bulk upload (Unloading Master))
     );
   });
+
+  // Multi-select: select-all applies to the filtered set
+  const allSelected = filteredRows.length > 0 && filteredRows.every(r => selectedRows[r.id]);
+  const toggleAll = () => {
+    if (allSelected) { setSelectedRows({}); }
+    else { setSelectedRows(Object.fromEntries(filteredRows.map(r => [r.id, true]))); }
+  };
 
   // Pagination
   const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
@@ -421,6 +519,14 @@ export default function DatabaseExplorer() {
               <span>Export CSV/Excel</span>
             </button>
           )}
+
+          {(activeTable === 'unloading_master' || activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'holidays') && (
+            <label className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-amber-950/20 cursor-pointer">
+              <Download size={14} />
+              <span>Bulk Upload</span>
+              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleBulkFileUpload} className="hidden" />
+            </label>
+          )}
         </div>
       </div>
 
@@ -471,7 +577,55 @@ export default function DatabaseExplorer() {
         )}
       </div>
 
+      {/* Bulk Upload Preview Modal */}
+      {showBulkUpload && bulkData.length > 0 && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
+              <h3 className="text-base font-bold text-white">Bulk Upload Preview — {bulkData.length} rows</h3>
+              <button onClick={() => { setShowBulkUpload(false); setBulkData([]); }} className="text-slate-400 hover:text-white p-1 rounded-lg"><X size={18} /></button>
+            </div>
+            <div className="p-6 max-h-[60vh] overflow-auto">
+              <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
+                <thead>
+                  <tr className="bg-slate-800 text-slate-400 font-bold">
+                    {Object.keys(bulkData[0]).map(k => <th key={k} className="p-2">{k}</th>)}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 text-slate-300">
+                  {bulkData.slice(0, 50).map((r, i) => (
+                    <tr key={i}>
+                      {Object.values(r).map((v, j) => <td key={j} className="p-2">{String(v)}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {bulkData.length > 50 && <div className="text-slate-500 text-xs mt-2">...and {bulkData.length - 50} more rows</div>}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-800 flex justify-end space-x-3">
+              <button onClick={() => { setShowBulkUpload(false); setBulkData([]); }} className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-slate-350 font-bold text-xs rounded-xl">Cancel</button>
+              <button onClick={handleBulkUploadSubmit} disabled={bulkUploading} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl flex items-center space-x-1.5">
+                {bulkUploading ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                <span>{bulkUploading ? 'Uploading...' : `Upload ${bulkData.length} Rows`}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="p-8 space-y-6">
+        {/* Multi-select toolbar */}
+        {selectedIds.length > 0 && (
+          <div className="flex items-center space-x-4 p-3 bg-primary/10 border border-primary/30 rounded-xl">
+            <span className="text-sm font-bold text-white">{selectedIds.length} selected</span>
+            <button onClick={handleDeleteSelected} disabled={loading} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-lg flex items-center space-x-1.5 transition">
+              <Trash2 size={13} />
+              <span>Delete Selected</span>
+            </button>
+            <button onClick={() => setSelectedRows({})} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs rounded-lg transition">Clear</button>
+          </div>
+        )}
+
         {/* Search */}
         <div className="relative max-w-md">
           <Search className="absolute left-3.5 top-3.5 text-slate-500" size={18} />
@@ -538,6 +692,9 @@ export default function DatabaseExplorer() {
               <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
                 <thead>
                   <tr className="bg-slate-900 border-b border-slate-800 text-slate-400 font-bold">
+                    <th className="p-3.5 text-center">
+                      <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 cursor-pointer accent-indigo-500" />
+                    </th>
                     <th className="p-3.5">ID</th>
                     {activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
                       <>
@@ -602,7 +759,10 @@ export default function DatabaseExplorer() {
                 </thead>
                 <tbody className="divide-y divide-slate-800 text-slate-300">
                   {currentRows.map(row => (
-                    <tr key={row.id} className="hover:bg-slate-900/50 transition">
+                    <tr key={row.id} className={`hover:bg-slate-900/50 transition ${selectedRows[row.id] ? 'bg-indigo-950/40' : ''}`}>
+                      <td className="p-3.5 text-center">
+                        <input type="checkbox" checked={!!selectedRows[row.id]} onChange={e => setSelectedRows(s => ({ ...s, [row.id]: e.target.checked }))} className="w-4 h-4 cursor-pointer accent-indigo-500" />
+                      </td>
                       <td className="p-3.5 font-mono text-slate-500">#{row.id}</td>
                       
                       {activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
@@ -850,7 +1010,14 @@ export default function DatabaseExplorer() {
                     </div>
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Box Type</label>
+<<<<<<< HEAD
                       <input type="text" value={editForm.box_type || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, box_type: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+=======
+                      <select value={editForm.box_type || ''} onChange={e => setEditForm({...editForm, box_type: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required>
+                        <option value="">-- Select --</option>
+                        {boxTypeOptions.map(bt => <option key={bt} value={bt}>{bt}</option>)}
+                      </select>
+>>>>>>> aacd364 (Explorer: fix Excel export, Box Type picklist, multi-select delete, bulk upload (Unloading Master))
                     </div>
                   </div>
                   <div>
@@ -1194,7 +1361,14 @@ export default function DatabaseExplorer() {
                     </div>
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Box Type</label>
+<<<<<<< HEAD
                       <input type="text" value={createForm.box_type || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, box_type: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+=======
+                      <select value={createForm.box_type || ''} onChange={e => setCreateForm({...createForm, box_type: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required>
+                        <option value="">-- Select --</option>
+                        {boxTypeOptions.map(bt => <option key={bt} value={bt}>{bt}</option>)}
+                      </select>
+>>>>>>> aacd364 (Explorer: fix Excel export, Box Type picklist, multi-select delete, bulk upload (Unloading Master))
                     </div>
                   </div>
                   <div>
