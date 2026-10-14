@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Search, Edit2, Trash2, Download, RefreshCw, X, Check, Save, Table, AlertTriangle, FileSpreadsheet } from 'lucide-react';
+import { Database, Search, Edit2, Trash2, Download, RefreshCw, X, Check, Save, Table, AlertTriangle, FileSpreadsheet, Upload } from 'lucide-react';
 import axios from 'axios';
 import * as XLSX from 'xlsx-js-style';
 
@@ -23,13 +23,21 @@ export default function DatabaseExplorer() {
   const [creatingNew, setCreatingNew] = useState(false);
   const [createForm, setCreateForm] = useState({});
 
+  // Bulk Upload State (paste-based — Vehicle Master)
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkData, setBulkData] = useState('');
+
+  // Unloading Master validation warning shown inside the Add/Edit popup
+  // { text, duplicateRow? }
+  const [formWarning, setFormWarning] = useState(null);
+
   // Multi-select state
   const [selectedRows, setSelectedRows] = useState({});
 
-  // Bulk Upload state
+  // Bulk Upload state (Excel/CSV file based — Unloading Master & mapping tables)
   const [showBulkUpload, setShowBulkUpload] = useState(false);
-  const [bulkData, setBulkData] = useState([]);
-  const [bulkUploading, setBulkUploading] = useState(false);
+  const [fileBulkRows, setFileBulkRows] = useState([]);
+  const [fileBulkBusy, setFileBulkBusy] = useState(false);
 
   // Unique box types from loaded data (for Unloading Master picklist)
   const boxTypeOptions = React.useMemo(() => {
@@ -39,9 +47,48 @@ export default function DatabaseExplorer() {
   }, [rows, activeTable]);
 
   useEffect(() => {
+    setSearchTerm('');
+    setFormWarning(null);
     fetchData();
     setSelectedRows({});
   }, [activeTable]);
+
+  // ── Unloading Master helpers ───────────────────────────────────────────────
+  const normKey = (v) => String(v ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const unloadingKey = (r) => [r.consignor, r.consignee, r.rate_logic, r.box_type].map(normKey).join('|');
+
+  // Returns the existing row that has the same Consignor→Consignee→Rate Logic→Box Type (ignores the row being edited)
+  const findUnloadingDuplicate = (form, excludeId = null) => {
+    const key = unloadingKey(form);
+    return rows.find(r => r.id !== excludeId && unloadingKey(r) === key) || null;
+  };
+
+  // Returns a warning text if a mandatory field is missing, else null
+  const unloadingMissingFields = (form) => {
+    const missing = [];
+    if (!normKey(form.consignor)) missing.push('Consignor');
+    if (!normKey(form.consignee)) missing.push('Consignee');
+    if (!normKey(form.rate_logic)) missing.push('Rate Logic');
+    if (!normKey(form.box_type)) missing.push('Box Type');
+    if (form.rate === '' || form.rate === null || form.rate === undefined || isNaN(Number(form.rate)) || Number(form.rate) < 0) missing.push('Rate');
+    return missing.length ? `Cannot save — please enter ${missing.join(', ')}. (${missing.join(', ')} നൽകാതെ save ചെയ്യാൻ പറ്റില്ല)` : null;
+  };
+
+  const cleanUnloading = (form) => ({
+    ...form,
+    consignor: String(form.consignor ?? '').trim().replace(/\s+/g, ' '),
+    consignee: String(form.consignee ?? '').trim().replace(/\s+/g, ' '),
+    rate_logic: String(form.rate_logic ?? '').trim(),
+    box_type: String(form.box_type ?? '').trim().replace(/\s+/g, ' '),
+    rate: Number(form.rate)
+  });
+
+  const openEditFromDuplicate = (row) => {
+    setCreatingNew(false);
+    setCreateForm({});
+    setFormWarning(null);
+    startEdit(row);
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -64,44 +111,124 @@ export default function DatabaseExplorer() {
     e.preventDefault();
     if (!editingRow) return;
 
+    let payloadForm = editForm;
+    if (activeTable === 'unloading_master') {
+      const missing = unloadingMissingFields(editForm);
+      if (missing) { setFormWarning({ text: missing }); return; }
+      const dup = findUnloadingDuplicate(editForm, editingRow.id);
+      if (dup) {
+        setFormWarning({ text: `Another entry already exists for this Consignor → Consignee → Rate Logic → Box Type (Rate ₹${dup.rate}). Edit that entry instead of creating a second one.`, duplicateRow: dup });
+        return;
+      }
+      payloadForm = cleanUnloading(editForm);
+    }
+
     setLoading(true);
     setError(null);
     setMessage(null);
+    setFormWarning(null);
 
     try {
       const isProd = import.meta.env.PROD;
       const baseUrl = isProd ? '' : 'http://localhost:3001';
       await axios.post(`${baseUrl}/api/explorer/update/${activeTable}`, {
         id: editingRow.id,
-        ...editForm
+        ...payloadForm
       });
       setMessage("Record updated successfully!");
       setEditingRow(null);
       fetchData();
     } catch (err) {
       console.error(err);
-      setError("Failed to update database record: " + (err.response?.data?.error || err.message));
+      const dupId = err.response?.data?.duplicate_id;
+      const dupRow = dupId ? rows.find(r => r.id === dupId) : null;
+      setFormWarning({ text: err.response?.data?.error || err.message, duplicateRow: dupRow || undefined });
       setLoading(false);
     }
   };
 
   const handleCreate = async (e) => {
     e.preventDefault();
+
+    let payloadForm = createForm;
+    if (activeTable === 'unloading_master') {
+      const missing = unloadingMissingFields(createForm);
+      if (missing) { setFormWarning({ text: missing }); return; }
+      const dup = findUnloadingDuplicate(createForm);
+      if (dup) {
+        setFormWarning({ text: `This Consignor → Consignee → Rate Logic → Box Type already exists (Rate ₹${dup.rate}). A new entry is not allowed — please edit the existing one. (ഇത് നിലവിലുണ്ട് — പുതിയത് ഉണ്ടാക്കാതെ Edit ചെയ്യുക)`, duplicateRow: dup });
+        return;
+      }
+      payloadForm = cleanUnloading(createForm);
+    }
+
     setLoading(true);
     setError(null);
     setMessage(null);
+    setFormWarning(null);
 
     try {
       const isProd = import.meta.env.PROD;
       const baseUrl = isProd ? '' : 'http://localhost:3001';
-      await axios.post(`${baseUrl}/api/explorer/create/${activeTable}`, createForm);
+      await axios.post(`${baseUrl}/api/explorer/create/${activeTable}`, payloadForm);
       setMessage("Record created successfully!");
       setCreatingNew(false);
       setCreateForm({});
       fetchData();
     } catch (err) {
       console.error(err);
-      setError("Failed to create database record: " + (err.response?.data?.error || err.message));
+      if (activeTable === 'unloading_master') {
+        const dupId = err.response?.data?.duplicate_id;
+        const dupRow = dupId ? rows.find(r => r.id === dupId) : null;
+        setFormWarning({ text: err.response?.data?.error || err.message, duplicateRow: dupRow || undefined });
+      } else {
+        setError("Failed to create database record: " + (err.response?.data?.error || err.message));
+      }
+      setLoading(false);
+    }
+  };
+
+  const handleBulkUpload = async (e) => {
+    e.preventDefault();
+    if (!bulkData.trim()) return;
+    
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      // Parse TSV (Tab Separated Values) or CSV
+      const rows = bulkData.trim().split('\n').map(line => line.split(/\t|,/));
+      const payload = [];
+
+      for (const row of rows) {
+        if (activeTable === 'vehicles') {
+          if (row.length >= 2) {
+            payload.push({
+              vehicle_no: row[0]?.trim(),
+              branch: row[1]?.trim(),
+              vehicle_type: row[2]?.trim() || '',
+              driver_name: row[3]?.trim() || null
+            });
+          }
+        }
+      }
+
+      if (payload.length === 0) {
+        throw new Error("No valid data found to upload. Ensure format is Correct.");
+      }
+
+      const isProd = import.meta.env.PROD;
+      const baseUrl = isProd ? '' : 'http://localhost:3001';
+      await axios.post(`${baseUrl}/api/explorer/create/${activeTable}`, payload);
+      
+      setMessage(`${payload.length} records bulk uploaded successfully!`);
+      setBulkUploading(false);
+      setBulkData('');
+      fetchData();
+    } catch (err) {
+      console.error(err);
+      setError("Failed to bulk upload records: " + (err.response?.data?.error || err.message));
       setLoading(false);
     }
   };
@@ -167,7 +294,7 @@ export default function DatabaseExplorer() {
         const wb = XLSX.read(evt.target.result, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const jsonData = XLSX.utils.sheet_to_json(ws, { defval: '' });
-        setBulkData(jsonData);
+        setFileBulkRows(jsonData);
         setShowBulkUpload(true);
         setMessage(`${jsonData.length} rows parsed from file. Review and click Upload.`);
       } catch (err) {
@@ -179,13 +306,13 @@ export default function DatabaseExplorer() {
   };
 
   const handleBulkUploadSubmit = async () => {
-    if (!bulkData.length) return;
-    if (!window.confirm(`Upload ${bulkData.length} rows to ${activeTable}?`)) return;
-    setBulkUploading(true); setError(null); setMessage(null);
+    if (!fileBulkRows.length) return;
+    if (!window.confirm(`Upload ${fileBulkRows.length} rows to ${activeTable}?`)) return;
+    setFileBulkBusy(true); setError(null); setMessage(null);
     let ok = 0; const bad = [];
     const isProd = import.meta.env.PROD;
     const baseUrl = isProd ? '' : 'http://localhost:3001';
-    for (const row of bulkData) {
+    for (const row of fileBulkRows) {
       try {
         const clean = { ...row };
         delete clean.id; delete clean.created_at; // never carry over ids from exported files
@@ -193,15 +320,16 @@ export default function DatabaseExplorer() {
         ok++;
       } catch (e) { bad.push(e.response?.data?.error || e.message); }
     }
-    setBulkUploading(false);
+    setFileBulkBusy(false);
     setMessage(`${ok} rows uploaded successfully.` + (bad.length ? ` ${bad.length} failed.` : ''));
     if (bad.length) setError(bad.slice(0, 5).join(' | ') + (bad.length > 5 ? ` ...and ${bad.length - 5} more` : ''));
     setShowBulkUpload(false);
-    setBulkData([]);
+    setFileBulkRows([]);
     fetchData();
   };
 
   const startEdit = (row) => {
+    setFormWarning(null);
     setEditingRow(row);
     // clone all properties except metadata
     const clone = { ...row };
@@ -222,8 +350,11 @@ export default function DatabaseExplorer() {
       const sheetName = activeTable === 'live_scanned_invoices' ? 'Scanned Invoices' :
                         activeTable === 'pod_register' ? 'POD Register' :
                         activeTable === 'supervisor_branch_mapping' ? 'Supervisor Mapping' :
+                        activeTable === 'staff_branch_mapping' ? 'Staff Mapping (Paid LR Created By)' :
                         activeTable === 'customer_branch_mapping' ? 'Customer Mapping' :
-                        activeTable === 'holidays' ? 'Holidays' : 'All Invoices';
+                        activeTable === 'vehicles' ? 'Vehicle Master' :
+                        activeTable === 'holidays' ? 'Holidays' :
+                        activeTable === 'vendor_master' ? 'Account Master' : 'All Invoices';
       
       // Filter rows based on search term
       const dataToExport = filteredRows.map(r => {
@@ -260,6 +391,19 @@ export default function DatabaseExplorer() {
   // Filter rows
   const filteredRows = rows.filter(r => {
     const term = searchTerm.toLowerCase();
+    if (activeTable === 'asian_unloading_master') {
+      const hay = [r.branch, r.customer, r.town, r.box_type, r.rate].map(v => String(v ?? '').toLowerCase()).join(' | ');
+      return term.trim().split(/\s+/).filter(Boolean).every(w => hay.includes(w));
+    }
+    if (activeTable === 'unloading_master') {
+      // every word typed must appear in Consignor / Consignee / Rate Logic / Box Type / Rate
+      const hay = [r.consignor, r.consignee, r.rate_logic, r.box_type, r.rate].map(v => String(v ?? '').toLowerCase()).join(' | ');
+      return term.trim().split(/\s+/).filter(Boolean).every(w => hay.includes(w));
+    }
+    if (activeTable === 'vendor_master') {
+      const hay = [r.vendor_name, r.account_number, r.ifsc_code, r.bank_name, r.type, r.status, r.account_head, r.applicable_branches].map(v => String(v ?? '').toLowerCase()).join(' | ');
+      return term.trim().split(/\s+/).filter(Boolean).every(w => hay.includes(w));
+    }
     return (
       String(r.invoice_no || '').toLowerCase().includes(term) ||
       String(r.consignee_code || '').toLowerCase().includes(term) ||
@@ -269,9 +413,13 @@ export default function DatabaseExplorer() {
       String(r.phone_number || '').toLowerCase().includes(term) ||
       String(r.remarks || '').toLowerCase().includes(term) ||
       String(r.supervisor_name || '').toLowerCase().includes(term) ||
+      String(r.staff_name || '').toLowerCase().includes(term) ||
       String(r.customer_name || '').toLowerCase().includes(term) ||
       String(r.branch || '').toLowerCase().includes(term) ||
       String(r.date || '').toLowerCase().includes(term) ||
+      String(r.vehicle_no || '').toLowerCase().includes(term) ||
+      String(r.vehicle_type || '').toLowerCase().includes(term) ||
+      String(r.driver_name || '').toLowerCase().includes(term) ||
       String(r.description || '').toLowerCase().includes(term) ||
       String(r.box_type || '').toLowerCase().includes(term)
     );
@@ -316,24 +464,46 @@ export default function DatabaseExplorer() {
             <span>Reload Data</span>
           </button>
 
-          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'holidays' || activeTable === 'unloading_master') && (
-            <button
-              onClick={() => {
-                if (activeTable === 'supervisor_branch_mapping') {
-                  setCreateForm({ supervisor_name: '', branch: '' });
-                } else if (activeTable === 'customer_branch_mapping') {
-                  setCreateForm({ customer_name: '', branch: '' });
-                } else if (activeTable === 'unloading_master') {
-                  setCreateForm({ consignor: '', consignee: '', rate_logic: 'Item/ Box Type', box_type: '', rate: '' });
-                } else {
-                  setCreateForm({ date: '', description: '' });
-                }
-                setCreatingNew(true);
-              }}
-              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-emerald-950/20 cursor-pointer"
-            >
-              <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : activeTable === 'customer_branch_mapping' ? '+ Add Customer' : activeTable === 'unloading_master' ? '+ Add Rate' : '+ Add Holiday'}</span>
-            </button>
+          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'holidays' || activeTable === 'unloading_master' || activeTable === 'vehicles' || activeTable === 'vendor_master') && (
+            <div className="flex space-x-2">
+              <button
+                onClick={() => {
+                  if (activeTable === 'supervisor_branch_mapping') {
+                    setCreateForm({ supervisor_name: '', branch: '' });
+                  } else if (activeTable === 'staff_branch_mapping') {
+                    setCreateForm({ staff_name: '', branch: '' });
+                  } else if (activeTable === 'customer_branch_mapping') {
+                    setCreateForm({ customer_name: '', branch: '' });
+                  } else if (activeTable === 'unloading_master') {
+                    setCreateForm({ consignor: '', consignee: '', rate_logic: '', box_type: '', rate: '' });
+                  } else if (activeTable === 'vehicles') {
+                    setCreateForm({ vehicle_no: '', branch: '', vehicle_type: '', driver_name: '' });
+                  } else if (activeTable === 'vendor_master') {
+                    setCreateForm({ vendor_name: '', account_number: '', ifsc_code: '', bank_name: '', type: 'Vendor', status: '', account_head: '', applicable_branches: '' });
+                  } else {
+                    setCreateForm({ date: '', description: '' });
+                  }
+                  setFormWarning(null);
+                  setCreatingNew(true);
+                }}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-emerald-950/20 cursor-pointer"
+              >
+                <span>{activeTable === 'supervisor_branch_mapping' ? '+ Add Supervisor' : activeTable === 'staff_branch_mapping' ? '+ Add Staff' : activeTable === 'customer_branch_mapping' ? '+ Add Customer' : activeTable === 'unloading_master' ? '+ Add Rate' : activeTable === 'vehicles' ? '+ Add Vehicle' : activeTable === 'vendor_master' ? '+ Add Account' : '+ Add Holiday'}</span>
+              </button>
+              
+              {activeTable === 'vehicles' && (
+                <button
+                  onClick={() => {
+                    setBulkData('');
+                    setBulkUploading(true);
+                  }}
+                  className="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl flex items-center space-x-2 transition shadow-lg shadow-sky-950/20 cursor-pointer"
+                >
+                  <Upload size={14} />
+                  <span>Bulk Upload</span>
+                </button>
+              )}
+            </div>
           )}
 
           {rows.length > 0 && (
@@ -362,9 +532,13 @@ export default function DatabaseExplorer() {
           { id: 'live_scanned_invoices', name: 'Scanned Invoices' },
           { id: 'pod_register', name: 'POD Register (Signature/Seals)' },
           { id: 'supervisor_branch_mapping', name: 'Supervisor Mapping' },
+          { id: 'staff_branch_mapping', name: 'Staff Mapping' },
           { id: 'customer_branch_mapping', name: 'Customer Mapping' },
+          { id: 'vehicles', name: 'Vehicle Master' },
           { id: 'holidays', name: 'Holidays List' },
           { id: 'unloading_master', name: 'Unloading Master' },
+          { id: 'asian_unloading_master', name: 'Asian Unloading Master' },
+          { id: 'vendor_master', name: 'Account Master' },
           { id: 'all_invoices', name: 'All Invoices (Backup)' }
         ].map(tab => {
           const isActive = activeTable === tab.id;
@@ -400,35 +574,35 @@ export default function DatabaseExplorer() {
       </div>
 
       {/* Bulk Upload Preview Modal */}
-      {showBulkUpload && bulkData.length > 0 && (
+      {showBulkUpload && fileBulkRows.length > 0 && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-3xl shadow-2xl overflow-hidden">
             <div className="px-6 py-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
-              <h3 className="text-base font-bold text-white">Bulk Upload Preview — {bulkData.length} rows</h3>
-              <button onClick={() => { setShowBulkUpload(false); setBulkData([]); }} className="text-slate-400 hover:text-white p-1 rounded-lg"><X size={18} /></button>
+              <h3 className="text-base font-bold text-white">Bulk Upload Preview — {fileBulkRows.length} rows</h3>
+              <button onClick={() => { setShowBulkUpload(false); setFileBulkRows([]); }} className="text-slate-400 hover:text-white p-1 rounded-lg"><X size={18} /></button>
             </div>
             <div className="p-6 max-h-[60vh] overflow-auto">
               <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
                 <thead>
                   <tr className="bg-slate-800 text-slate-400 font-bold">
-                    {Object.keys(bulkData[0]).map(k => <th key={k} className="p-2">{k}</th>)}
+                    {Object.keys(fileBulkRows[0]).map(k => <th key={k} className="p-2">{k}</th>)}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 text-slate-300">
-                  {bulkData.slice(0, 50).map((r, i) => (
+                  {fileBulkRows.slice(0, 50).map((r, i) => (
                     <tr key={i}>
                       {Object.values(r).map((v, j) => <td key={j} className="p-2">{String(v)}</td>)}
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {bulkData.length > 50 && <div className="text-slate-500 text-xs mt-2">...and {bulkData.length - 50} more rows</div>}
+              {fileBulkRows.length > 50 && <div className="text-slate-500 text-xs mt-2">...and {fileBulkRows.length - 50} more rows</div>}
             </div>
             <div className="px-6 py-4 border-t border-slate-800 flex justify-end space-x-3">
-              <button onClick={() => { setShowBulkUpload(false); setBulkData([]); }} className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-slate-350 font-bold text-xs rounded-xl">Cancel</button>
-              <button onClick={handleBulkUploadSubmit} disabled={bulkUploading} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl flex items-center space-x-1.5">
-                {bulkUploading ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-                <span>{bulkUploading ? 'Uploading...' : `Upload ${bulkData.length} Rows`}</span>
+              <button onClick={() => { setShowBulkUpload(false); setFileBulkRows([]); }} className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-slate-350 font-bold text-xs rounded-xl">Cancel</button>
+              <button onClick={handleBulkUploadSubmit} disabled={fileBulkBusy} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl flex items-center space-x-1.5">
+                {fileBulkBusy ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                <span>{fileBulkBusy ? 'Uploading...' : `Upload ${fileBulkRows.length} Rows`}</span>
               </button>
             </div>
           </div>
@@ -453,17 +627,56 @@ export default function DatabaseExplorer() {
           <Search className="absolute left-3.5 top-3.5 text-slate-500" size={18} />
           <input
             type="text"
-            placeholder="Search by invoice no, consignee, code, or place..."
+            placeholder={activeTable === 'unloading_master' ? "Search consignor, consignee, rate logic or box type (e.g. asian kochi)..." : activeTable === 'vendor_master' ? "Search vendor name, account no, IFSC, bank..." : "Search by invoice no, consignee, code, or place..."}
             value={searchTerm}
             onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            className="w-full bg-slate-950 text-white pl-10 pr-4 py-3.5 rounded-xl border border-slate-800 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition text-sm"
+            className="w-full bg-slate-950 text-white pl-10 pr-10 py-3.5 rounded-xl border border-slate-800 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition text-sm"
           />
+          {searchTerm && (
+            <button type="button" onClick={() => { setSearchTerm(''); setCurrentPage(1); }} className="absolute right-3 top-3.5 text-slate-500 hover:text-white cursor-pointer" title="Clear search">
+              <X size={16} />
+            </button>
+          )}
+          {activeTable === 'unloading_master' && (
+            <div className="mt-2 text-[11px] text-slate-500 font-semibold">
+              {filteredRows.length} of {rows.length} rates{searchTerm ? ' match your search' : ''} — click the pencil icon on a row to edit it.
+              {rows.length > 0 && (() => {
+                const dates = rows.map(r => r.updated_at || r.created_at).filter(Boolean);
+                if (!dates.length) return null;
+                const latest = new Date(Math.max(...dates.map(d => new Date(d).getTime())));
+                return <span className="ml-2 text-emerald-400"> · Last updated: {latest.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} {latest.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>;
+              })()}
+            </div>
+          )}
         </div>
 
         {/* Database Grid */}
         {loading && rows.length === 0 ? (
           <div className="py-20 flex justify-center items-center">
             <RefreshCw className="animate-spin text-primary" size={32} />
+          </div>
+        ) : activeTable === 'asian_unloading_master' ? (
+          <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/40">
+            <div className="px-4 py-3 text-xs text-slate-400">ASIAN KOLLAM / ASIAN THRISSUR — Asian Paints unloading rates (read only here · changes come through the ERP "Unloading Rate Request" approval, or FM/MD in ERP → Asian Masters)</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
+                <thead><tr className="bg-slate-900 border-b border-slate-800 text-slate-400 font-bold">
+                  <th className="p-3.5">Branch</th><th className="p-3.5">Customer</th><th className="p-3.5">Town</th><th className="p-3.5">Box Type</th><th className="p-3.5 text-right">Rate</th><th className="p-3.5">Updated</th>
+                </tr></thead>
+                <tbody>
+                  {filteredRows.map(row => (
+                    <tr key={row.id} className="border-b border-slate-800/60 hover:bg-slate-900/40">
+                      <td className="p-3.5 text-primary font-semibold">{row.branch}</td>
+                      <td className="p-3.5 font-semibold text-white">{row.customer}</td>
+                      <td className="p-3.5 text-slate-300">{row.town}</td>
+                      <td className="p-3.5 text-slate-300">{row.box_type}</td>
+                      <td className="p-3.5 text-right font-bold text-emerald-300">₹{row.rate}</td>
+                      <td className="p-3.5 font-mono text-slate-500">{row.updated_at ? new Date(row.updated_at).toLocaleDateString() : '-'}</td>
+                    </tr>))}
+                  {filteredRows.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-slate-500">No Asian unloading rates yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : filteredRows.length === 0 ? (
           <div className="py-20 text-center text-slate-500 font-bold border border-slate-800 rounded-2xl">
@@ -479,11 +692,13 @@ export default function DatabaseExplorer() {
                       <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 cursor-pointer accent-indigo-500" />
                     </th>
                     <th className="p-3.5">ID</th>
-                    {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' ? (
+                    {activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
                       <>
-                        {activeTable === 'supervisor_branch_mapping' && <th className="p-3.5">Created At</th>}
-                        <th className="p-3.5">{activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : 'Customer Name'}</th>
+                        {(activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping') && <th className="p-3.5">Created At</th>}
+                        <th className="p-3.5">{activeTable === 'staff_branch_mapping' ? 'Created By (Staff Name — aadhocc-ലെ പോലെ)' : activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicles' ? 'Vehicle No' : 'Customer Name'}</th>
                         <th className="p-3.5">Branch Name</th>
+                        {activeTable === 'vehicles' && <th className="p-3.5">Vehicle Type</th>}
+                        {activeTable === 'vehicles' && <th className="p-3.5">Driver Name</th>}
                       </>
                     ) : activeTable === 'holidays' ? (
                       <>
@@ -498,6 +713,18 @@ export default function DatabaseExplorer() {
                         <th className="p-3.5">Rate Logic</th>
                         <th className="p-3.5">Box Type</th>
                         <th className="p-3.5 text-right">Rate</th>
+                        <th className="p-3.5">Updated</th>
+                      </>
+                    ) : activeTable === 'vendor_master' ? (
+                      <>
+                        <th className="p-3.5">Vendor Name</th>
+                        <th className="p-3.5">Account Number</th>
+                        <th className="p-3.5">IFSC Code</th>
+                        <th className="p-3.5">Bank Name</th>
+                        <th className="p-3.5">Type</th>
+                        <th className="p-3.5">Status</th>
+                        <th className="p-3.5">Account Head</th>
+                        <th className="p-3.5">Branches</th>
                       </>
                     ) : (
                       <>
@@ -534,11 +761,13 @@ export default function DatabaseExplorer() {
                       </td>
                       <td className="p-3.5 font-mono text-slate-500">#{row.id}</td>
                       
-                      {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' ? (
+                      {activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
                         <>
-                          {activeTable === 'supervisor_branch_mapping' && <td className="p-3.5 font-mono">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>}
-                          <td className="p-3.5 font-semibold text-white">{activeTable === 'supervisor_branch_mapping' ? row.supervisor_name : row.customer_name}</td>
+                          {(activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping') && <td className="p-3.5 font-mono">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>}
+                          <td className="p-3.5 font-semibold text-white">{activeTable === 'staff_branch_mapping' ? row.staff_name : activeTable === 'supervisor_branch_mapping' ? row.supervisor_name : activeTable === 'vehicles' ? row.vehicle_no : row.customer_name}</td>
                           <td className="p-3.5 font-semibold text-primary">{row.branch}</td>
+                          {activeTable === 'vehicles' && <td className="p-3.5 font-semibold text-slate-300">{row.vehicle_type}</td>}
+                          {activeTable === 'vehicles' && <td className="p-3.5 font-semibold text-emerald-300">{row.driver_name || '-'}</td>}
                         </>
                       ) : activeTable === 'holidays' ? (
                         <>
@@ -553,6 +782,18 @@ export default function DatabaseExplorer() {
                           <td className="p-3.5 text-slate-400 font-semibold">{row.rate_logic || '-'}</td>
                           <td className="p-3.5 text-primary font-bold">{row.box_type || '-'}</td>
                           <td className="p-3.5 font-mono font-bold text-right text-emerald-400">₹{row.rate || '0'}</td>
+                          <td className="p-3.5 font-mono text-slate-500 text-sm">{row.updated_at ? new Date(row.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : row.created_at ? new Date(row.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</td>
+                        </>
+                      ) : activeTable === 'vendor_master' ? (
+                        <>
+                          <td className="p-3.5 font-semibold text-white">{row.vendor_name || '-'}</td>
+                          <td className="p-3.5 font-mono text-emerald-300">{row.account_number || '-'}</td>
+                          <td className="p-3.5 font-mono text-slate-300">{row.ifsc_code || '-'}</td>
+                          <td className="p-3.5 text-primary font-semibold">{row.bank_name || '-'}</td>
+                          <td className="p-3.5 text-slate-300">{row.type || '-'}</td>
+                          <td className="p-3.5"><span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${row.status === 'Active' ? 'bg-emerald-950 text-emerald-400' : 'bg-amber-950 text-amber-400'}`}>{row.status || '-'}</span></td>
+                          <td className="p-3.5 text-slate-400">{row.account_head || '-'}</td>
+                          <td className="p-3.5 text-slate-400">{row.applicable_branches || '-'}</td>
                         </>
                       ) : (
                         <>
@@ -644,18 +885,41 @@ export default function DatabaseExplorer() {
             </div>
 
             <form onSubmit={handleUpdate} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' ? (
+              {activeTable === 'unloading_master' && (() => {
+                const liveDup = (!formWarning && normKey(editForm.consignor) && normKey(editForm.consignee) && normKey(editForm.rate_logic) && normKey(editForm.box_type)) ? findUnloadingDuplicate(editForm, editingRow.id) : null;
+                const w = formWarning || (liveDup ? { text: `Already exists: this Consignor → Consignee → Rate Logic → Box Type has Rate ₹${liveDup.rate}. Save is blocked — edit the existing entry instead.`, duplicateRow: liveDup } : null);
+                if (!w) return null;
+                return (
+                  <div className="p-3 bg-amber-950/50 border border-amber-700 text-amber-300 rounded-xl text-xs font-semibold space-y-2">
+                    <div className="flex items-start space-x-2">
+                      <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                      <span>{w.text}</span>
+                    </div>
+                    {w.duplicateRow && (
+                      <div className="flex items-center justify-between bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2">
+                        <span className="text-slate-300">{w.duplicateRow.consignor} → {w.duplicateRow.consignee} → {w.duplicateRow.rate_logic} → {w.duplicateRow.box_type} : <b className="text-emerald-400">₹{w.duplicateRow.rate}</b></span>
+                        <button type="button" onClick={() => openEditFromDuplicate(w.duplicateRow)} className="ml-3 px-3 py-1 bg-primary text-slate-950 font-black rounded-lg cursor-pointer whitespace-nowrap">Edit Existing</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              {activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
                 <>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">
-                      {activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : 'Customer Name'}
+                      {activeTable === 'staff_branch_mapping' ? 'Created By (Staff Name — aadhocc-ലെ പോലെ)' : activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicles' ? 'Vehicle No' : 'Customer Name'}
                     </label>
                     <input
                       type="text"
-                      value={activeTable === 'supervisor_branch_mapping' ? (editForm.supervisor_name || '') : (editForm.customer_name || '')}
+                      value={activeTable === 'staff_branch_mapping' ? (editForm.staff_name || '') : activeTable === 'supervisor_branch_mapping' ? (editForm.supervisor_name || '') : activeTable === 'vehicles' ? (editForm.vehicle_no || '') : (editForm.customer_name || '')}
                       onChange={e => {
-                        if (activeTable === 'supervisor_branch_mapping') {
+                        if (activeTable === 'staff_branch_mapping') {
+                          setEditForm({ ...editForm, staff_name: e.target.value })
+                        } else if (activeTable === 'supervisor_branch_mapping') {
                           setEditForm({ ...editForm, supervisor_name: e.target.value })
+                        } else if (activeTable === 'vehicles') {
+                          setEditForm({ ...editForm, vehicle_no: e.target.value })
                         } else {
                           setEditForm({ ...editForm, customer_name: e.target.value })
                         }
@@ -675,6 +939,29 @@ export default function DatabaseExplorer() {
                       required
                     />
                   </div>
+                  {activeTable === 'vehicles' && (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Vehicle Type</label>
+                    <input
+                      type="text"
+                      value={editForm.vehicle_type || ''}
+                      onChange={e => setEditForm({ ...editForm, vehicle_type: e.target.value })}
+                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
+                      required
+                    />
+                  </div>
+                  )}
+                  {activeTable === 'vehicles' && (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Driver Name (own vehicle regular driver)</label>
+                    <input
+                      type="text"
+                      value={editForm.driver_name || ''}
+                      onChange={e => setEditForm({ ...editForm, driver_name: e.target.value })}
+                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
+                    />
+                  </div>
+                  )}
                 </>
               ) : activeTable === 'holidays' ? (
                 <>
@@ -702,23 +989,24 @@ export default function DatabaseExplorer() {
                 <>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Consignor</label>
-                    <input type="text" value={editForm.consignor || ''} onChange={e => setEditForm({...editForm, consignor: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    <input type="text" value={editForm.consignor || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, consignor: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Consignee</label>
-                    <input type="text" value={editForm.consignee || ''} onChange={e => setEditForm({...editForm, consignee: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    <input type="text" value={editForm.consignee || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, consignee: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate Logic</label>
-                      <select value={editForm.rate_logic || ''} onChange={e => setEditForm({...editForm, rate_logic: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required>
+                      <select value={editForm.rate_logic || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, rate_logic: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                        <option value="">-- Select --</option>
                         <option value="Item/ Box Type">Item/ Box Type</option>
                         <option value="Weight">Weight</option>
                       </select>
                     </div>
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Box Type</label>
-                      <select value={editForm.box_type || ''} onChange={e => setEditForm({...editForm, box_type: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required>
+                      <select value={editForm.box_type || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, box_type: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
                         <option value="">-- Select --</option>
                         {boxTypeOptions.map(bt => <option key={bt} value={bt}>{bt}</option>)}
                       </select>
@@ -726,7 +1014,56 @@ export default function DatabaseExplorer() {
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate (₹)</label>
-                    <input type="number" step="0.01" value={editForm.rate || ''} onChange={e => setEditForm({...editForm, rate: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    <input type="number" step="0.01" value={editForm.rate || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, rate: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+                  </div>
+                </>
+              ) : activeTable === 'vendor_master' ? (
+                <>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Vendor Name</label>
+                    <input type="text" value={editForm.vendor_name || ''} onChange={e => setEditForm({...editForm, vendor_name: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Account Number</label>
+                      <input type="text" value={editForm.account_number || ''} onChange={e => setEditForm({...editForm, account_number: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">IFSC Code</label>
+                      <input type="text" value={editForm.ifsc_code || ''} onChange={e => setEditForm({...editForm, ifsc_code: e.target.value.toUpperCase()})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Bank Name</label>
+                    <input type="text" value={editForm.bank_name || ''} onChange={e => setEditForm({...editForm, bank_name: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Type</label>
+                      <select value={editForm.type || ''} onChange={e => setEditForm({...editForm, type: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                        <option value="">-- Select --</option>
+                        <option value="Vendor">Vendor</option>
+                        <option value="Staff">Staff</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Status</label>
+                      <select value={editForm.status || ''} onChange={e => setEditForm({...editForm, status: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                        <option value="">-- Select --</option>
+                        <option value="Active">Active</option>
+                        <option value="New - Verify">New - Verify</option>
+                        <option value="Inactive">Inactive</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Account Head</label>
+                    <input type="text" value={editForm.account_head || ''} onChange={e => setEditForm({...editForm, account_head: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Applicable Branches</label>
+                    <input type="text" value={editForm.applicable_branches || ''} onChange={e => setEditForm({...editForm, applicable_branches: e.target.value})} placeholder="e.g. HO, TRIVANDRUM, KOCHI" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                 </>
               ) : (
@@ -891,23 +1228,46 @@ export default function DatabaseExplorer() {
             </div>
 
             <form onSubmit={handleCreate} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              {activeTable === 'supervisor_branch_mapping' || activeTable === 'customer_branch_mapping' ? (
+              {activeTable === 'unloading_master' && (() => {
+                const liveDup = (!formWarning && normKey(createForm.consignor) && normKey(createForm.consignee) && normKey(createForm.rate_logic) && normKey(createForm.box_type)) ? findUnloadingDuplicate(createForm, null) : null;
+                const w = formWarning || (liveDup ? { text: `Already exists: this Consignor → Consignee → Rate Logic → Box Type has Rate ₹${liveDup.rate}. Save is blocked — edit the existing entry instead.`, duplicateRow: liveDup } : null);
+                if (!w) return null;
+                return (
+                  <div className="p-3 bg-amber-950/50 border border-amber-700 text-amber-300 rounded-xl text-xs font-semibold space-y-2">
+                    <div className="flex items-start space-x-2">
+                      <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                      <span>{w.text}</span>
+                    </div>
+                    {w.duplicateRow && (
+                      <div className="flex items-center justify-between bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2">
+                        <span className="text-slate-300">{w.duplicateRow.consignor} → {w.duplicateRow.consignee} → {w.duplicateRow.rate_logic} → {w.duplicateRow.box_type} : <b className="text-emerald-400">₹{w.duplicateRow.rate}</b></span>
+                        <button type="button" onClick={() => openEditFromDuplicate(w.duplicateRow)} className="ml-3 px-3 py-1 bg-primary text-slate-950 font-black rounded-lg cursor-pointer whitespace-nowrap">Edit Existing</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              {activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping' || activeTable === 'customer_branch_mapping' || activeTable === 'vehicles' ? (
                 <>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">
-                      {activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : 'Customer Name'}
+                      {activeTable === 'staff_branch_mapping' ? 'Created By (Staff Name — aadhocc-ലെ പോലെ)' : activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicles' ? 'Vehicle No' : 'Customer Name'}
                     </label>
                     <input
                       type="text"
-                      value={activeTable === 'supervisor_branch_mapping' ? (createForm.supervisor_name || '') : (createForm.customer_name || '')}
+                      value={activeTable === 'staff_branch_mapping' ? (createForm.staff_name || '') : activeTable === 'supervisor_branch_mapping' ? (createForm.supervisor_name || '') : activeTable === 'vehicles' ? (createForm.vehicle_no || '') : (createForm.customer_name || '')}
                       onChange={e => {
-                        if (activeTable === 'supervisor_branch_mapping') {
+                        if (activeTable === 'staff_branch_mapping') {
+                          setCreateForm({ ...createForm, staff_name: e.target.value })
+                        } else if (activeTable === 'supervisor_branch_mapping') {
                           setCreateForm({ ...createForm, supervisor_name: e.target.value })
+                        } else if (activeTable === 'vehicles') {
+                          setCreateForm({ ...createForm, vehicle_no: e.target.value })
                         } else {
                           setCreateForm({ ...createForm, customer_name: e.target.value })
                         }
                       }}
-                      placeholder={activeTable === 'supervisor_branch_mapping' ? "e.g. BIPIN" : "e.g. GEM PAINTS"}
+                      placeholder={activeTable === 'staff_branch_mapping' ? "e.g. DILIP SARKAR" : activeTable === 'supervisor_branch_mapping' ? "e.g. BIPIN" : activeTable === 'vehicles' ? "e.g. KL41T0343" : "e.g. GEM PAINTS"}
                       className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
                       required
                     />
@@ -923,6 +1283,31 @@ export default function DatabaseExplorer() {
                       required
                     />
                   </div>
+                  {activeTable === 'vehicles' && (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Vehicle Type</label>
+                    <input
+                      type="text"
+                      value={createForm.vehicle_type || ''}
+                      onChange={e => setCreateForm({ ...createForm, vehicle_type: e.target.value })}
+                      placeholder="e.g. BOLERO 1.7 TON - 4 WHEEL"
+                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
+                      required
+                    />
+                  </div>
+                  )}
+                  {activeTable === 'vehicles' && (
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Driver Name (optional)</label>
+                    <input
+                      type="text"
+                      value={createForm.driver_name || ''}
+                      onChange={e => setCreateForm({ ...createForm, driver_name: e.target.value })}
+                      placeholder="e.g. RAJESH"
+                      className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none"
+                    />
+                  </div>
+                  )}
                 </>
               ) : activeTable === 'holidays' ? (
                 <>
@@ -951,23 +1336,24 @@ export default function DatabaseExplorer() {
                 <>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Consignor</label>
-                    <input type="text" value={createForm.consignor || ''} onChange={e => setCreateForm({...createForm, consignor: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    <input type="text" value={createForm.consignor || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, consignor: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Consignee</label>
-                    <input type="text" value={createForm.consignee || ''} onChange={e => setCreateForm({...createForm, consignee: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    <input type="text" value={createForm.consignee || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, consignee: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate Logic</label>
-                      <select value={createForm.rate_logic || ''} onChange={e => setCreateForm({...createForm, rate_logic: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required>
+                      <select value={createForm.rate_logic || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, rate_logic: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                        <option value="">-- Select --</option>
                         <option value="Item/ Box Type">Item/ Box Type</option>
                         <option value="Weight">Weight</option>
                       </select>
                     </div>
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Box Type</label>
-                      <select value={createForm.box_type || ''} onChange={e => setCreateForm({...createForm, box_type: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required>
+                      <select value={createForm.box_type || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, box_type: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
                         <option value="">-- Select --</option>
                         {boxTypeOptions.map(bt => <option key={bt} value={bt}>{bt}</option>)}
                       </select>
@@ -975,7 +1361,56 @@ export default function DatabaseExplorer() {
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate (₹)</label>
-                    <input type="number" step="0.01" value={createForm.rate || ''} onChange={e => setCreateForm({...createForm, rate: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    <input type="number" step="0.01" value={createForm.rate || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, rate: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+                  </div>
+                </>
+              ) : activeTable === 'vendor_master' ? (
+                <>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Vendor Name</label>
+                    <input type="text" value={createForm.vendor_name || ''} onChange={e => setCreateForm({...createForm, vendor_name: e.target.value})} placeholder="e.g. SERENA CHACKO" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Account Number</label>
+                      <input type="text" value={createForm.account_number || ''} onChange={e => setCreateForm({...createForm, account_number: e.target.value})} placeholder="e.g. 20310100109775" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">IFSC Code</label>
+                      <input type="text" value={createForm.ifsc_code || ''} onChange={e => setCreateForm({...createForm, ifsc_code: e.target.value.toUpperCase()})} placeholder="e.g. FDRL000203" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Bank Name</label>
+                    <input type="text" value={createForm.bank_name || ''} onChange={e => setCreateForm({...createForm, bank_name: e.target.value})} placeholder="e.g. FEDERAL BANK" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Type</label>
+                      <select value={createForm.type || ''} onChange={e => setCreateForm({...createForm, type: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                        <option value="">-- Select --</option>
+                        <option value="Vendor">Vendor</option>
+                        <option value="Staff">Staff</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Status</label>
+                      <select value={createForm.status || ''} onChange={e => setCreateForm({...createForm, status: e.target.value})} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                        <option value="">-- Select --</option>
+                        <option value="Active">Active</option>
+                        <option value="New - Verify">New - Verify</option>
+                        <option value="Inactive">Inactive</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Account Head</label>
+                    <input type="text" value={createForm.account_head || ''} onChange={e => setCreateForm({...createForm, account_head: e.target.value})} placeholder="e.g. Staff Welfare/Business Promotion" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Applicable Branches</label>
+                    <input type="text" value={createForm.applicable_branches || ''} onChange={e => setCreateForm({...createForm, applicable_branches: e.target.value})} placeholder="e.g. HO, TRIVANDRUM, KOCHI" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
                 </>
               ) : (
@@ -1005,6 +1440,56 @@ export default function DatabaseExplorer() {
           </div>
         </div>
       )}
+      {/* Bulk Upload Modal */}
+      {bulkUploading && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-fadeIn">
+            <div className="px-6 py-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
+              <h3 className="text-base font-bold text-white flex items-center space-x-2"><Upload size={18} className="text-sky-400" /><span>Bulk Upload / Paste Data</span></h3>
+              <button onClick={() => setBulkUploading(false)} className="text-slate-400 hover:text-white p-1 rounded-lg">
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleBulkUpload} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-2">
+                  Paste data from Excel (Copy from Excel and Paste here). 
+                  <br/><span className="text-sky-400">Format: Vehicle No | Branch | Vehicle Type | Driver Name (optional)</span>
+                </label>
+                <textarea
+                  rows="10"
+                  value={bulkData}
+                  onChange={e => setBulkData(e.target.value)}
+                  placeholder={"KL41T0343\tTRIVANDRUM\tBOLERO 1.7 TON - 4 WHEEL\nKL41T0344\tERNAKULAM\tTATA ACE"}
+                  className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-4 py-3 text-sm focus:border-sky-500 outline-none font-mono whitespace-pre"
+                  required
+                />
+              </div>
+
+              <div className="pt-4 flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setBulkUploading(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-slate-350 font-bold text-xs rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-black text-xs rounded-xl flex items-center space-x-1.5"
+                >
+                  <Save size={14} />
+                  <span>Upload Data</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
+// Trigger Vercel Build 2
