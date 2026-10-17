@@ -1942,6 +1942,56 @@ app.post('/api/explorer/delete/:table', express.json(), async (req, res) => {
   }
 });
 
+// ── Unloading consignor groups (Asian Paints / Birla Opus …): rate changes sync across a group ──
+app.get('/api/explorer/ul-groups', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
+  try {
+    const { data: groups, error } = await supabase.from('ul_consignor_groups')
+      .select('consignor, group_name, created_at').order('group_name').order('consignor');
+    if (error) return res.status(500).json({ error: error.message });
+    const counts = {};
+    let from = 0;
+    while (true) {
+      const { data, error: e2 } = await supabase.from('unloading_master').select('consignor').order('id').range(from, from + 999);
+      if (e2) return res.status(500).json({ error: e2.message });
+      (data || []).forEach(r => { const c = String(r.consignor || '').trim(); if (c) counts[c] = (counts[c] || 0) + 1; });
+      if (!data || data.length < 1000) break;
+      from += 1000;
+    }
+    const consignors = Object.keys(counts).sort().map(c => ({ consignor: c, rows: counts[c] }));
+    return res.json({ groups: groups || [], consignors });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/explorer/ul-groups/add', express.json(), async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
+  const consignor = String(req.body?.consignor || '').trim().replace(/\s+/g, ' ');
+  const group_name = String(req.body?.group_name || '').trim().replace(/\s+/g, ' ').toUpperCase();
+  if (!consignor || !group_name) return res.status(400).json({ error: "Consignor and group are required" });
+  try {
+    const { error } = await supabase.from('ul_consignor_groups').insert({ consignor, group_name });
+    if (error) return res.status(400).json({ error: /already in a group|duplicate key/i.test(error.message) ? 'This consignor is already in a group.' : error.message });
+    return res.json({ status: "success" });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/explorer/ul-groups/remove', express.json(), async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
+  const consignor = String(req.body?.consignor || '').trim();
+  if (!consignor) return res.status(400).json({ error: "Consignor is required" });
+  try {
+    const { error } = await supabase.from('ul_consignor_groups').delete().eq('consignor', consignor);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ status: "success" });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // GET endpoint to load the EFF Salary Payroll Excel file directly from the workspace (local testing)
 app.get('/api/payroll/load-eff-workspace', async (req, res) => {
   try {
