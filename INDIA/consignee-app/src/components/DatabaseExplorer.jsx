@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Database, Search, Edit2, Trash2, Download, RefreshCw, X, Check, Save, Table, AlertTriangle, FileSpreadsheet, Upload } from 'lucide-react';
 import axios from 'axios';
 import * as XLSX from 'xlsx-js-style';
+import ConsignorGroups from './ConsignorGroups';
 
 export default function DatabaseExplorer() {
   const [activeTable, setActiveTable] = useState('live_scanned_invoices'); // 'live_scanned_invoices', 'pod_register', 'all_invoices'
@@ -91,6 +92,7 @@ export default function DatabaseExplorer() {
   };
 
   const fetchData = async () => {
+    if (activeTable === 'ul_consignor_groups') { setRows([]); setLoading(false); return; }
     setLoading(true);
     setError(null);
     try {
@@ -537,6 +539,7 @@ export default function DatabaseExplorer() {
           { id: 'vehicles', name: 'Vehicle Master' },
           { id: 'holidays', name: 'Holidays List' },
           { id: 'unloading_master', name: 'Unloading Master' },
+          { id: 'ul_consignor_groups', name: 'Consignor Groups' },
           { id: 'asian_unloading_master', name: 'Asian Unloading Master' },
           { id: 'vendor_master', name: 'Account Master' },
           { id: 'all_invoices', name: 'All Invoices (Backup)' }
@@ -655,6 +658,8 @@ export default function DatabaseExplorer() {
           <div className="py-20 flex justify-center items-center">
             <RefreshCw className="animate-spin text-primary" size={32} />
           </div>
+        ) : activeTable === 'ul_consignor_groups' ? (
+          <ConsignorGroups />
         ) : activeTable === 'asian_unloading_master' ? (
           <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/40">
             <div className="px-4 py-3 text-xs text-slate-400">ASIAN KOLLAM / ASIAN THRISSUR — Asian Paints unloading rates (read only here · changes come through the ERP "Unloading Rate Request" approval, or FM/MD in ERP → Asian Masters)</div>
