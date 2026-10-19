@@ -35,6 +35,12 @@ export default function DatabaseExplorer() {
   // Multi-select state
   const [selectedRows, setSelectedRows] = useState({});
 
+  // Unloading Master: apply one Add/Edit to several consignors of the same consignee
+  const [ulGroupOf, setUlGroupOf] = useState({});        // normalised consignor -> group name (Asian Paints / Birla Opus …)
+  const [ulMultiSel, setUlMultiSel] = useState({});      // normalised consignor -> false when unticked (default ticked)
+  const [ulExtra, setUlExtra] = useState([]);            // Add: consignors picked by hand (not yet having this consignee)
+  const [ulExtraInput, setUlExtraInput] = useState('');
+
   // Bulk Upload state (Excel/CSV file based — Unloading Master & mapping tables)
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [fileBulkRows, setFileBulkRows] = useState([]);
@@ -52,7 +58,27 @@ export default function DatabaseExplorer() {
     setFormWarning(null);
     fetchData();
     setSelectedRows({});
+    if (activeTable === 'unloading_master') loadUlGroups();
   }, [activeTable]);
+
+  const loadUlGroups = async () => {
+    try {
+      const baseUrl = import.meta.env.PROD ? '' : 'http://localhost:3001';
+      const r = await axios.get(`${baseUrl}/api/explorer/ul-groups`);
+      const m = {};
+      (r.data.groups || []).forEach(g => { m[String(g.consignor ?? '').trim().replace(/\s+/g, ' ').toLowerCase()] = g.group_name; });
+      setUlGroupOf(m);
+    } catch (e) { console.error('ul-groups', e); }
+  };
+
+  const resetUlMulti = () => { setUlMultiSel({}); setUlExtra([]); setUlExtraInput(''); };
+
+  const allUlConsignors = React.useMemo(() => {
+    if (activeTable !== 'unloading_master') return [];
+    const m = new Map();
+    rows.forEach(r => { const c = String(r.consignor ?? '').trim().replace(/\s+/g, ' '); if (c && !m.has(c.toLowerCase())) m.set(c.toLowerCase(), c); });
+    return [...m.values()].sort();
+  }, [rows, activeTable]);
 
   // ── Unloading Master helpers ───────────────────────────────────────────────
   const normKey = (v) => String(v ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -83,6 +109,148 @@ export default function DatabaseExplorer() {
     box_type: String(form.box_type ?? '').trim().replace(/\s+/g, ' '),
     rate: Number(form.rate)
   });
+
+  // Other consignors that the same Add/Edit can be applied to (shown as a tick list in the popup)
+  const ulOtherItems = (form, mode) => {
+    const primary = normKey(form.consignor);
+    const primaryGroup = ulGroupOf[primary];
+    const items = new Map();
+    const push = (consignor, data) => {
+      const k = normKey(consignor);
+      if (!k || k === primary || items.has(k)) return;
+      const group = ulGroupOf[k] || null;
+      items.set(k, { key: k, consignor: String(consignor).trim().replace(/\s+/g, ' '), group, locked: !!(group && group === primaryGroup), ...data });
+    };
+    if (mode === 'edit') {
+      if (!editingRow) return [];
+      const ok = [editingRow.consignee, editingRow.rate_logic, editingRow.box_type].map(normKey).join('|');
+      rows.forEach(r => {
+        if (r.id === editingRow.id) return;
+        if ([r.consignee, r.rate_logic, r.box_type].map(normKey).join('|') !== ok) return;
+        push(r.consignor, { rate: r.rate, exists: false });
+      });
+    } else {
+      const ce = normKey(form.consignee);
+      if (!ce) return [];
+      const rl = normKey(form.rate_logic), bt = normKey(form.box_type);
+      const byC = new Map();
+      rows.forEach(r => {
+        if (normKey(r.consignee) !== ce) return;
+        const k = normKey(r.consignor);
+        if (!byC.has(k)) byC.set(k, { consignor: r.consignor, list: [] });
+        byC.get(k).list.push(r);
+      });
+      byC.forEach(({ consignor, list }) => {
+        const ex = (rl && bt) ? list.find(r => normKey(r.rate_logic) === rl && normKey(r.box_type) === bt) : null;
+        const types = list.map(r => `${r.box_type} ₹${r.rate}`).join(', ');
+        push(consignor, { exists: !!ex, rate: ex ? ex.rate : null, types });
+      });
+      ulExtra.forEach(c => push(c, { exists: false, rate: null, types: '', manual: true }));
+    }
+    return [...items.values()].sort((a, b) => (a.group || '~').localeCompare(b.group || '~') || a.consignor.localeCompare(b.consignor));
+  };
+
+  const ulIsTicked = (it) => it.locked || (!it.exists && ulMultiSel[it.key] !== false);
+
+  const ulToggle = (it, items) => {
+    if (it.locked || it.exists) return;
+    const val = !ulIsTicked(it);
+    const next = { ...ulMultiSel };
+    items.filter(x => x.key === it.key || (it.group && x.group === it.group)).forEach(x => { next[x.key] = val; });
+    setUlMultiSel(next);
+  };
+
+  // Consignors to send for a multi save (primary first); null when only the single row needs saving
+  const ulMultiTargets = (form, mode) => {
+    const items = ulOtherItems(form, mode);
+    const picked = items.filter(it => ulIsTicked(it) && !it.locked);
+    if (!picked.length) return null;
+    return [form.consignor, ...items.filter(ulIsTicked).map(it => it.consignor)];
+  };
+
+  const ulResultText = (results = []) => {
+    const n = (a) => results.filter(r => r.action === a).length;
+    const parts = [];
+    if (n('added')) parts.push(`${n('added')} added`);
+    if (n('updated')) parts.push(`${n('updated')} updated`);
+    if (n('unchanged')) parts.push(`${n('unchanged')} already same`);
+    if (n('exists')) parts.push(`${n('exists')} skipped (rate already exists — edit separately)`);
+    return `Saved for ${results.length} consignor(s): ${parts.join(', ')}.`;
+  };
+
+  const saveUlMulti = async (mode, form, consignors) => {
+    const baseUrl = import.meta.env.PROD ? '' : 'http://localhost:3001';
+    const c = cleanUnloading(form);
+    const body = { mode, consignors, consignee: c.consignee, rate_logic: c.rate_logic, box_type: c.box_type, rate: c.rate };
+    if (mode === 'edit') { body.primary_id = editingRow.id; body.original = { consignee: editingRow.consignee, rate_logic: editingRow.rate_logic, box_type: editingRow.box_type }; }
+    const r = await axios.post(`${baseUrl}/api/explorer/unloading-multi`, body);
+    return r.data.results || [];
+  };
+
+  const renderUlMultiPanel = (form, mode) => {
+    const items = ulOtherItems(form, mode);
+    const pickable = items.filter(it => !it.exists && !it.locked);
+    const tickedCount = items.filter(ulIsTicked).length;
+    const setAll = (val) => { const next = { ...ulMultiSel }; pickable.forEach(it => { next[it.key] = val; }); setUlMultiSel(next); };
+    const addExtra = () => {
+      const v = String(ulExtraInput).trim().replace(/\s+/g, ' ');
+      if (!v) return;
+      const real = allUlConsignors.find(c => c.toLowerCase() === v.toLowerCase());
+      if (!real) { setFormWarning({ text: `"${v}" is not an existing consignor — pick from the list (copy-paste only, no typing new names).` }); return; }
+      if (normKey(real) !== normKey(form.consignor) && !ulExtra.some(x => normKey(x) === normKey(real))) setUlExtra([...ulExtra, real]);
+      setUlExtraInput('');
+    };
+    const primaryGroup = ulGroupOf[normKey(form.consignor)];
+    return (
+      <div className="border border-slate-800 rounded-xl bg-slate-950/50">
+        <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
+          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+            {mode === 'edit' ? 'ഇതേ മാറ്റം ഈ Consignors-നും' : 'ഈ Consignee ഉള്ള മറ്റ് Consignors-നും add ചെയ്യുക'}
+            <span className="ml-2 text-primary">({tickedCount} selected)</span>
+          </span>
+          {pickable.length > 1 && (
+            <span className="space-x-2 text-[10px] font-bold">
+              <button type="button" onClick={() => setAll(true)} className="text-emerald-400 hover:underline cursor-pointer">All</button>
+              <button type="button" onClick={() => setAll(false)} className="text-slate-400 hover:underline cursor-pointer">None</button>
+            </span>
+          )}
+        </div>
+        {primaryGroup && (
+          <div className="px-3 py-1.5 text-[10px] text-amber-300 border-b border-slate-800">{primaryGroup} group-ലെ എല്ലാ consignors-നും ഈ rate തനിയെ apply ആകും (group rule).</div>
+        )}
+        <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/70">
+          {items.length === 0 && (
+            <div className="px-3 py-3 text-[11px] text-slate-500">{mode === 'edit' ? 'ഈ Consignee + Rate Logic + Box Type മറ്റൊരു consignor-നും ഇല്ല.' : (normKey(form.consignee) ? 'ഈ Consignee മറ്റൊരു consignor-നും ഇല്ല.' : 'Consignee നൽകിയാൽ list വരും.')}</div>
+          )}
+          {items.map(it => {
+            const ticked = ulIsTicked(it);
+            const diff = mode === 'edit' && it.rate != null && form.rate !== '' && form.rate != null && Number(it.rate) !== Number(editingRow?.rate);
+            return (
+              <label key={it.key} className={`flex items-start gap-2 px-3 py-2 text-xs ${it.locked || it.exists ? 'opacity-70' : 'cursor-pointer hover:bg-slate-900'}`}>
+                <input type="checkbox" checked={ticked} disabled={it.locked || it.exists} onChange={() => ulToggle(it, items)} className="mt-0.5 accent-emerald-500" />
+                <span className="flex-1 min-w-0">
+                  <span className="text-white font-semibold">{it.consignor}</span>
+                  {it.group && <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-800 text-[9px] text-amber-300 font-bold">{it.group}</span>}
+                  {mode === 'edit' && <span className={`ml-2 font-bold ${diff ? 'text-red-400' : 'text-emerald-400'}`}>₹{it.rate}{diff ? ' (rate വ്യത്യാസം)' : ''}</span>}
+                  {mode === 'add' && it.exists && <span className="ml-2 text-amber-400 font-bold">നിലവിലുണ്ട് ₹{it.rate} — Edit വഴി മാറ്റുക</span>}
+                  {mode === 'add' && it.manual && <span className="ml-2 text-sky-400 font-bold">പുതിയ consignee</span>}
+                  {mode === 'add' && it.types && !it.exists && <span className="block text-[10px] text-slate-500 truncate">നിലവിൽ: {it.types}</span>}
+                  {it.locked && <span className="block text-[10px] text-slate-500">Group rule — ഒരുമിച്ച് മാറും</span>}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        {mode === 'add' && (
+          <div className="px-3 py-2 border-t border-slate-800 flex gap-2">
+            <input list="ul-all-consignors" value={ulExtraInput} onChange={e => setUlExtraInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addExtra(); } }} placeholder="മറ്റൊരു consignor ചേർക്കാൻ — list-ൽ നിന്ന് തിരഞ്ഞെടുക്കുക" className="flex-1 bg-slate-950 text-white border border-slate-800 rounded-lg px-2 py-1.5 text-[11px] focus:border-primary outline-none" />
+            <datalist id="ul-all-consignors">{allUlConsignors.map(c => <option key={c} value={c} />)}</datalist>
+            <button type="button" onClick={addExtra} className="px-3 py-1 bg-slate-800 text-white text-[11px] font-bold rounded-lg cursor-pointer hover:bg-slate-700">+ Add</button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const openEditFromDuplicate = (row) => {
     setCreatingNew(false);
@@ -123,6 +291,23 @@ export default function DatabaseExplorer() {
         return;
       }
       payloadForm = cleanUnloading(editForm);
+      const multi = ulMultiTargets(editForm, 'edit');
+      if (multi) {
+        setLoading(true); setError(null); setMessage(null); setFormWarning(null);
+        try {
+          const results = await saveUlMulti('edit', editForm, multi);
+          setMessage(ulResultText(results));
+          setEditingRow(null);
+          resetUlMulti();
+          fetchData();
+        } catch (err) {
+          console.error(err);
+          setFormWarning({ text: (err.response?.data?.error || err.message) + (err.response?.data?.results?.length ? ` — ${ulResultText(err.response.data.results)}` : '') });
+          setLoading(false);
+          fetchData();
+        }
+        return;
+      }
     }
 
     setLoading(true);
@@ -162,6 +347,24 @@ export default function DatabaseExplorer() {
         return;
       }
       payloadForm = cleanUnloading(createForm);
+      const multi = ulMultiTargets(createForm, 'add');
+      if (multi) {
+        setLoading(true); setError(null); setMessage(null); setFormWarning(null);
+        try {
+          const results = await saveUlMulti('add', createForm, multi);
+          setMessage(ulResultText(results));
+          setCreatingNew(false);
+          setCreateForm({});
+          resetUlMulti();
+          fetchData();
+        } catch (err) {
+          console.error(err);
+          setFormWarning({ text: (err.response?.data?.error || err.message) + (err.response?.data?.results?.length ? ` — ${ulResultText(err.response.data.results)}` : '') });
+          setLoading(false);
+          fetchData();
+        }
+        return;
+      }
     }
 
     setLoading(true);
@@ -332,6 +535,7 @@ export default function DatabaseExplorer() {
 
   const startEdit = (row) => {
     setFormWarning(null);
+    resetUlMulti();
     setEditingRow(row);
     // clone all properties except metadata
     const clone = { ...row };
@@ -478,6 +682,7 @@ export default function DatabaseExplorer() {
                     setCreateForm({ customer_name: '', branch: '' });
                   } else if (activeTable === 'unloading_master') {
                     setCreateForm({ consignor: '', consignee: '', rate_logic: '', box_type: '', rate: '' });
+                    resetUlMulti();
                   } else if (activeTable === 'vehicles') {
                     setCreateForm({ vehicle_no: '', branch: '', vehicle_type: '', driver_name: '' });
                   } else if (activeTable === 'vendor_master') {
@@ -1021,6 +1226,7 @@ export default function DatabaseExplorer() {
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate (₹)</label>
                     <input type="number" step="0.01" value={editForm.rate || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, rate: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
+                  {renderUlMultiPanel(editForm, 'edit')}
                 </>
               ) : activeTable === 'vendor_master' ? (
                 <>
@@ -1368,6 +1574,7 @@ export default function DatabaseExplorer() {
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Rate (₹)</label>
                     <input type="number" step="0.01" value={createForm.rate || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, rate: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
                   </div>
+                  {renderUlMultiPanel(createForm, 'add')}
                 </>
               ) : activeTable === 'vendor_master' ? (
                 <>

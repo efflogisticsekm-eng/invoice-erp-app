@@ -1920,6 +1920,97 @@ app.post('/api/explorer/update/:table', express.json({ limit: '5mb' }), async (r
   }
 });
 
+// ── Unloading Master: save one rate for several consignors at once (same Consignee) ──
+// mode 'edit': each target's row with the ORIGINAL Consignee/Rate Logic/Box Type is changed to the new values
+// mode 'add' : a new row is created for each target that does not already have this Consignee/Rate Logic/Box Type
+// Targets are processed one by one with a fresh lookup each time, because the consignor-group triggers
+// (Asian Paints / Birla Opus) may already have changed the other group members.
+const _umLikePattern = (v) => String(v ?? '').trim().replace(/[%_\\]/g, (m) => '\\' + m).replace(/\s+/g, '%');
+app.post('/api/explorer/unloading-multi', express.json({ limit: '1mb' }), async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
+  const b = req.body || {};
+  const mode = b.mode === 'edit' ? 'edit' : b.mode === 'add' ? 'add' : null;
+  const clean = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
+  const nv = { consignee: clean(b.consignee), rate_logic: clean(b.rate_logic), box_type: clean(b.box_type), rate: Number(b.rate) };
+  const orig = mode === 'edit' ? { consignee: clean(b.original?.consignee), rate_logic: clean(b.original?.rate_logic), box_type: clean(b.original?.box_type) } : nv;
+  const targets = [];
+  const seenT = new Set();
+  (Array.isArray(b.consignors) ? b.consignors : []).forEach(c => { const cc = clean(c); if (cc && !seenT.has(_umNorm(cc))) { seenT.add(_umNorm(cc)); targets.push(cc); } });
+  const missing = [];
+  if (!mode) missing.push('mode');
+  if (!targets.length) missing.push('Consignor');
+  if (!nv.consignee) missing.push('Consignee');
+  if (!nv.rate_logic) missing.push('Rate Logic');
+  if (!nv.box_type) missing.push('Box Type');
+  if (b.rate === '' || b.rate == null || isNaN(nv.rate) || nv.rate < 0) missing.push('Rate');
+  if (mode === 'edit' && (!orig.consignee || !orig.rate_logic || !orig.box_type)) missing.push('original entry');
+  if (missing.length) return res.status(400).json({ error: `Cannot save — please enter ${missing.join(', ')}.` });
+  if (targets.length > 200) return res.status(400).json({ error: 'Too many consignors in one save (max 200).' });
+
+  const keyOf = (r) => [r.consignee, r.rate_logic, r.box_type].map(_umNorm).join('|');
+  const origKey = keyOf(orig), newKey = keyOf(nv);
+  const fetchCandidates = async () => {
+    const pats = [...new Set([_umLikePattern(orig.consignee), _umLikePattern(nv.consignee)])];
+    let out = [];
+    for (const p of pats) {
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase.from('unloading_master').select('id, consignor, consignee, rate_logic, box_type, rate').ilike('consignee', p).order('id').range(from, from + 999);
+        if (error) throw new Error(error.message);
+        out = out.concat(data || []);
+        if (!data || data.length < 1000) break;
+        from += 1000;
+      }
+    }
+    return out;
+  };
+
+  const results = [];
+  try {
+    for (const consignor of targets) {
+      const ck = _umNorm(consignor);
+      const mine = (await fetchCandidates()).filter(r => _umNorm(r.consignor) === ck);
+      const vOld = mode === 'edit' ? (b.primary_id && ck === _umNorm(targets[0]) ? mine.find(r => r.id === b.primary_id) : null) || mine.find(r => keyOf(r) === origKey) : null;
+      const vNew = mine.find(r => keyOf(r) === newKey);
+      if (mode === 'add') {
+        if (vNew) {
+          results.push({ consignor, action: Number(vNew.rate) === nv.rate ? 'unchanged' : 'exists', rate: vNew.rate });
+          continue;
+        }
+        const { error } = await supabase.from('unloading_master').insert({ consignor, ...nv });
+        if (error) throw new Error(`${consignor}: ${error.message}`);
+        results.push({ consignor, action: 'added' });
+        continue;
+      }
+      // edit
+      if (vNew && (!vOld || vNew.id !== vOld.id)) {
+        if (Number(vNew.rate) !== nv.rate) {
+          const { error } = await supabase.from('unloading_master').update({ rate: nv.rate }).eq('id', vNew.id);
+          if (error) throw new Error(`${consignor}: ${error.message}`);
+        }
+        if (vOld) {
+          const { error } = await supabase.from('unloading_master').delete().eq('id', vOld.id);
+          if (error) throw new Error(`${consignor}: ${error.message}`);
+        }
+        results.push({ consignor, action: 'updated' });
+      } else if (vOld) {
+        const same = keyOf(vOld) === newKey && Number(vOld.rate) === nv.rate && clean(vOld.consignee) === nv.consignee && clean(vOld.box_type) === nv.box_type && clean(vOld.rate_logic) === nv.rate_logic;
+        if (same) { results.push({ consignor, action: 'unchanged' }); continue; }
+        const { error } = await supabase.from('unloading_master').update({ ...nv }).eq('id', vOld.id);
+        if (error) throw new Error(`${consignor}: ${error.message}`);
+        results.push({ consignor, action: 'updated' });
+      } else {
+        const { error } = await supabase.from('unloading_master').insert({ consignor, ...nv });
+        if (error) throw new Error(`${consignor}: ${error.message}`);
+        results.push({ consignor, action: 'added' });
+      }
+    }
+    return res.json({ status: 'success', results });
+  } catch (err) {
+    return res.status(500).json({ error: err.message, results });
+  }
+});
+
 app.post('/api/explorer/delete/:table', express.json(), async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
