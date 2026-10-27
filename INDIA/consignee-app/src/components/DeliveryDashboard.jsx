@@ -1195,8 +1195,27 @@ export default function DeliveryDashboard() {
           
           const sheetNames = wb.SheetNames;
 
-          // 1. Parse Sheet 2 (Despatch Details) FIRST so it is available to Sheet 1 parser
-          const despatchSheetName = sheetNames.find(n => n.toLowerCase() === 'despatch') || (sheetNames.length > 1 ? sheetNames[1] : null);
+          // Sheet detection is tolerant of names like "Despatch Data", "Dispatch", "LR Data ", any order.
+          const normName = (n) => String(n || '').trim().toLowerCase().replace(/\s+/g, ' ');
+          const headerKeys = (name) => {
+            try {
+              const rows = XLSXReader.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' }).slice(0, 10);
+              return rows.flat().map(c => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, ''));
+            } catch (e) { return []; }
+          };
+          const looksLikeDespatch = (name) => {
+            const h = headerKeys(name);
+            const hasSup = h.some(k => k === 'LDSUPERVISOR' || k === 'SUPERVISOR');
+            const hasDesp = h.some(k => k.startsWith('DESPATCHNO') || k.startsWith('DISPATCHNO'));
+            return hasSup && hasDesp;
+          };
+          const despatchSheetName =
+            sheetNames.find(n => normName(n) === 'despatch') ||
+            sheetNames.find(n => /^(despatch|dispatch)/.test(normName(n))) ||
+            sheetNames.find(n => looksLikeDespatch(n)) ||
+            (sheetNames.length > 1 ? sheetNames[1] : null);
+
+          // 1. Parse Despatch Details FIRST so it is available to the LR parser
           let rawDespatchRows = [];
           if (despatchSheetName) {
             const ws2 = wb.Sheets[despatchSheetName];
@@ -1318,7 +1337,7 @@ export default function DeliveryDashboard() {
           }
           
           // 2. Parse Sheet 3 (Supervisor table) SECOND to map supervisor names to branches
-          const supervisorSheetName = sheetNames.find(n => n.toLowerCase() === 'superwisor' || n.toLowerCase() === 'supervisor') || (sheetNames.length > 2 ? sheetNames[2] : null);
+          const supervisorSheetName = sheetNames.find(n => normName(n) === 'superwisor' || normName(n) === 'supervisor') || (sheetNames.length > 2 ? sheetNames[2] : null);
           if (supervisorSheetName) {
             const ws3 = wb.Sheets[supervisorSheetName];
             const ws3Data = parseSheetToJSON(ws3, ['SUPERVISOR', 'BRANCH']);
@@ -1338,7 +1357,7 @@ export default function DeliveryDashboard() {
           }
 
           // 2.5 Parse Sheet 4 (POD)
-          const podSheetName = sheetNames.find(n => n.toLowerCase() === 'pod');
+          const podSheetName = sheetNames.find(n => normName(n) === 'pod');
           let podMap = {};
           let branchPodSummaryMap = {};
           
@@ -1402,7 +1421,11 @@ export default function DeliveryDashboard() {
           }
 
           // 3. Parse Sheet 1 (Main LR records) LAST so it can use the maps
-          const mainSheetName = sheetNames.find(n => n.toLowerCase() === 'lr data' || n.toLowerCase() === 'whole lr nos') || (sheetNames.length > 0 ? sheetNames[0] : null);
+          const mainSheetName =
+            sheetNames.find(n => normName(n) === 'lr data' || normName(n) === 'whole lr nos') ||
+            sheetNames.find(n => /^lr\b/.test(normName(n)) && n !== despatchSheetName) ||
+            sheetNames.find(n => n !== despatchSheetName) ||
+            (sheetNames.length > 0 ? sheetNames[0] : null);
           if (mainSheetName) {
             const ws1 = wb.Sheets[mainSheetName];
             const rawLrData = parseSheetToJSON(ws1, ['CONSIGNOR', 'LR', 'DATE', 'STATUS']);
