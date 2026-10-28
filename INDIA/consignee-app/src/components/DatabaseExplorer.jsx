@@ -3,6 +3,7 @@ import { Database, Search, Edit2, Trash2, Download, RefreshCw, X, Check, Save, T
 import axios from 'axios';
 import * as XLSX from 'xlsx-js-style';
 import ConsignorGroups from './ConsignorGroups';
+import AsianUnloadingTab from './AsianUnloadingTab';
 
 export default function DatabaseExplorer() {
   const [activeTable, setActiveTable] = useState('live_scanned_invoices'); // 'live_scanned_invoices', 'pod_register', 'all_invoices'
@@ -835,7 +836,7 @@ export default function DatabaseExplorer() {
           <Search className="absolute left-3.5 top-3.5 text-slate-500" size={18} />
           <input
             type="text"
-            placeholder={activeTable === 'unloading_master' ? "Search consignor, consignee, rate logic or box type (e.g. asian kochi)..." : activeTable === 'vendor_master' ? "Search vendor name, account no, IFSC, bank..." : "Search by invoice no, consignee, code, or place..."}
+            placeholder={activeTable === 'asian_unloading_master' ? "Search branch, customer, town or box type..." : activeTable === 'unloading_master' ? "Search consignor, consignee, rate logic or box type (e.g. asian kochi)..." : activeTable === 'vendor_master' ? "Search vendor name, account no, IFSC, bank..." : "Search by invoice no, consignee, code, or place..."}
             value={searchTerm}
             onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
             className="w-full bg-slate-950 text-white pl-10 pr-10 py-3.5 rounded-xl border border-slate-800 focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition text-sm"
@@ -866,28 +867,7 @@ export default function DatabaseExplorer() {
         ) : activeTable === 'ul_consignor_groups' ? (
           <ConsignorGroups />
         ) : activeTable === 'asian_unloading_master' ? (
-          <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/40">
-            <div className="px-4 py-3 text-xs text-slate-400">ASIAN KOLLAM / ASIAN THRISSUR — Asian Paints unloading rates (read only here · changes come through the ERP "Unloading Rate Request" approval, or FM/MD in ERP → Asian Masters)</div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
-                <thead><tr className="bg-slate-900 border-b border-slate-800 text-slate-400 font-bold">
-                  <th className="p-3.5">Branch</th><th className="p-3.5">Customer</th><th className="p-3.5">Town</th><th className="p-3.5">Box Type</th><th className="p-3.5 text-right">Rate</th><th className="p-3.5">Updated</th>
-                </tr></thead>
-                <tbody>
-                  {filteredRows.map(row => (
-                    <tr key={row.id} className="border-b border-slate-800/60 hover:bg-slate-900/40">
-                      <td className="p-3.5 text-primary font-semibold">{row.branch}</td>
-                      <td className="p-3.5 font-semibold text-white">{row.customer}</td>
-                      <td className="p-3.5 text-slate-300">{row.town}</td>
-                      <td className="p-3.5 text-slate-300">{row.box_type}</td>
-                      <td className="p-3.5 text-right font-bold text-emerald-300">₹{row.rate}</td>
-                      <td className="p-3.5 font-mono text-slate-500">{row.updated_at ? new Date(row.updated_at).toLocaleDateString() : '-'}</td>
-                    </tr>))}
-                  {filteredRows.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-slate-500">No Asian unloading rates yet.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <AsianUnloadingTab rows={filteredRows} allRows={rows} reload={fetchData} setMessage={setMessage} setError={setError} />
         ) : filteredRows.length === 0 ? (
           <div className="py-20 text-center text-slate-500 font-bold border border-slate-800 rounded-2xl">
             No database records found matching criteria.

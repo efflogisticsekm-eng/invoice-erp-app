@@ -1769,6 +1769,92 @@ app.post('/api/payroll/draft/save', express.json({ limit: '20mb' }), async (req,
 const ERP_SCHEMA_TABLES = ['vendor_master'];
 const sbFrom = (table) => ERP_SCHEMA_TABLES.includes(table) ? supabase.schema('erp').from(table) : supabase.from(table);
 
+// ── EFF 28-10-2026: Asian Unloading Master (erp.ls_unloading_master) — edit from the Explorer ──
+// Every add / change / delete is logged by the database trigger erp.ls_unloading_audit (source = Database Explorer).
+const _aNorm = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
+async function _asianBranchId(name) {
+  const { data, error } = await supabase.schema('erp').from('branches').select('id,name');
+  if (error) throw new Error(error.message);
+  const b = (data || []).find(x => _aNorm(x.name).toUpperCase() === _aNorm(name).toUpperCase());
+  if (!b) throw new Error(`Branch "${name}" not found`);
+  return b.id;
+}
+async function _asianRow(r) {
+  const missing = [];
+  if (!_aNorm(r.branch)) missing.push('Branch');
+  if (!_aNorm(r.customer)) missing.push('Customer');
+  if (!_aNorm(r.town)) missing.push('Town');
+  if (!_aNorm(r.box_type)) missing.push('Box Type');
+  if (r.rate === '' || r.rate == null || isNaN(Number(r.rate)) || Number(r.rate) < 0) missing.push('Rate');
+  if (missing.length) throw Object.assign(new Error(`Cannot save — please enter ${missing.join(', ')}.`), { status: 400 });
+  return { branch_id: await _asianBranchId(r.branch), customer: _aNorm(r.customer).toUpperCase(), town: _aNorm(r.town).toUpperCase(),
+    box_type: _aNorm(r.box_type), rate: Number(r.rate), updated_at: new Date().toISOString() };
+}
+const _asianErr = (res, err) => {
+  const m = String(err.message || err);
+  if (/duplicate key|unique/i.test(m)) return res.status(409).json({ error: 'This Branch → Customer → Town → Box Type already exists. Edit the existing row instead.' });
+  if (/check constraint/i.test(m)) return res.status(400).json({ error: 'Box Type not allowed — use Car, Lpks, Pails, Drums, Bags, All Types or Bonus.' });
+  return res.status(err.status || 500).json({ error: m });
+};
+const _asianTbl = () => supabase.schema('erp').from('ls_unloading_master');
+app.post('/api/explorer/asian-ul/save', express.json({ limit: '5mb' }), async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
+  try {
+    const b = req.body || {};
+    if (Array.isArray(b.rows)) {               // Excel / CSV upload: add new, update existing rates
+      const seen = new Set(); const out = [];
+      for (const r of b.rows) {
+        const row = await _asianRow(r);
+        const k = [row.branch_id, row.customer, row.town, row.box_type.toUpperCase()].join('|');
+        if (seen.has(k)) throw Object.assign(new Error(`Duplicate line in upload: ${r.branch} → ${r.customer} → ${r.town} → ${r.box_type}`), { status: 409 });
+        seen.add(k); out.push(row);
+      }
+      let added = 0, updated = 0, same = 0;
+      for (const row of out) {
+        const { data: ex, error: e1 } = await _asianTbl().select('id,rate,customer,town')
+          .eq('branch_id', row.branch_id).eq('box_type', row.box_type).ilike('customer', row.customer).ilike('town', row.town).limit(1);
+        if (e1) throw e1;
+        if (ex && ex.length) {
+          if (Number(ex[0].rate) === row.rate) { same++; continue; }
+          const { error } = await _asianTbl().update({ rate: row.rate, updated_at: row.updated_at }).eq('id', ex[0].id);
+          if (error) throw error; updated++;
+        } else {
+          const { error } = await _asianTbl().insert(row);
+          if (error) throw error; added++;
+        }
+      }
+      return res.json({ status: 'success', added, updated, unchanged: same });
+    }
+    const row = await _asianRow(b);
+    if (b.id) {
+      const { error } = await _asianTbl().update(row).eq('id', b.id);
+      if (error) throw error;
+    } else {
+      const { error } = await _asianTbl().insert(row);
+      if (error) throw error;
+    }
+    return res.json({ status: 'success' });
+  } catch (err) { return _asianErr(res, err); }
+});
+app.post('/api/explorer/asian-ul/delete', express.json(), async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : [req.body?.id]).map(Number).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'id required' });
+  try {
+    const { error } = await _asianTbl().delete().in('id', ids);
+    if (error) throw error;
+    return res.json({ status: 'success', deleted: ids.length });
+  } catch (err) { return _asianErr(res, err); }
+});
+app.get('/api/explorer/asian-ul/history', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
+  try {
+    const { data, error } = await supabase.schema('erp').from('ls_unloading_audit').select('*').order('id', { ascending: false }).limit(1000);
+    if (error) throw error;
+    return res.json({ data: data || [] });
+  } catch (err) { return _asianErr(res, err); }
+});
+
 app.get('/api/explorer/data/:table', async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   const { table } = req.params;
