@@ -586,7 +586,8 @@ export default function DatabaseExplorer() {
         if (cell) cell.s = headerStyle;
       }
 
-      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      // EFF 31-10-2026: Excel sheet പേര് 31 അക്ഷരത്തിൽ കൂടരുത്, : \\ / ? * [ ] പാടില്ല — file പേര് മുഴുവൻ പേരിൽ തന്നെ
+      XLSX.utils.book_append_sheet(wb, ws, sheetName.replace(/[:\\/?*\[\]]/g, ' ').slice(0, 31));
       XLSX.writeFile(wb, `${sheetName.replace(/\s+/g, '_')}_Export.xlsx`);
       setMessage("Excel downloaded successfully.");
     } catch (err) {
