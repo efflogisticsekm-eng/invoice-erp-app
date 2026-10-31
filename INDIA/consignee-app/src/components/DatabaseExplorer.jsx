@@ -557,7 +557,7 @@ export default function DatabaseExplorer() {
       const sheetName = activeTable === 'live_scanned_invoices' ? 'Scanned Invoices' :
                         activeTable === 'pod_register' ? 'POD Register' :
                         activeTable === 'supervisor_branch_mapping' ? 'Supervisor Mapping' :
-                        activeTable === 'staff_branch_mapping' ? 'Staff Mapping (Paid LR Created By)' :
+                        activeTable === 'staff_branch_mapping' ? 'Staff Mapping' :
                         activeTable === 'customer_branch_mapping' ? 'Customer Mapping' :
                         activeTable === 'vehicles' ? 'Vehicle Master' :
                         activeTable === 'holidays' ? 'Holidays' :
@@ -622,6 +622,8 @@ export default function DatabaseExplorer() {
       String(r.remarks || '').toLowerCase().includes(term) ||
       String(r.supervisor_name || '').toLowerCase().includes(term) ||
       String(r.staff_name || '').toLowerCase().includes(term) ||
+      String(r.erp_name || '').toLowerCase().includes(term) ||
+      String(r.tally_ledger || '').toLowerCase().includes(term) ||
       String(r.customer_name || '').toLowerCase().includes(term) ||
       String(r.branch || '').toLowerCase().includes(term) ||
       String(r.date || '').toLowerCase().includes(term) ||
@@ -679,7 +681,7 @@ export default function DatabaseExplorer() {
                   if (activeTable === 'supervisor_branch_mapping') {
                     setCreateForm({ supervisor_name: '', branch: '' });
                   } else if (activeTable === 'staff_branch_mapping') {
-                    setCreateForm({ staff_name: '', branch: '' });
+                    setCreateForm({ staff_name: '', branch: '', staff_type: 'Staff', erp_name: '', tally_ledger: '' });
                   } else if (activeTable === 'customer_branch_mapping') {
                     setCreateForm({ customer_name: '', branch: '' });
                   } else if (activeTable === 'unloading_master') {
@@ -888,6 +890,7 @@ export default function DatabaseExplorer() {
                         {(activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping') && <th className="p-3.5">Created At</th>}
                         <th className="p-3.5">{activeTable === 'staff_branch_mapping' ? 'Created By (Staff Name — aadhocc-ലെ പോലെ)' : activeTable === 'supervisor_branch_mapping' ? 'Supervisor Name' : activeTable === 'vehicles' ? 'Vehicle No' : 'Customer Name'}</th>
                         <th className="p-3.5">Branch Name</th>
+                        {activeTable === 'staff_branch_mapping' && <><th className="p-3.5">Type</th><th className="p-3.5">ERP Name</th><th className="p-3.5">Tally Ledger</th></>}
                         {activeTable === 'vehicles' && <th className="p-3.5">Vehicle Type</th>}
                         {activeTable === 'vehicles' && <th className="p-3.5">Driver Name</th>}
                       </>
@@ -957,6 +960,15 @@ export default function DatabaseExplorer() {
                           {(activeTable === 'supervisor_branch_mapping' || activeTable === 'staff_branch_mapping') && <td className="p-3.5 font-mono">{row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>}
                           <td className="p-3.5 font-semibold text-white">{activeTable === 'staff_branch_mapping' ? row.staff_name : activeTable === 'supervisor_branch_mapping' ? row.supervisor_name : activeTable === 'vehicles' ? row.vehicle_no : row.customer_name}</td>
                           <td className="p-3.5 font-semibold text-primary">{row.branch}</td>
+                          {activeTable === 'staff_branch_mapping' && (() => {
+                            const nn = s => String(s || '').trim().toUpperCase().replace(/\s+/g, ' ')
+                            const clash = row.erp_name && rows.some(o => o.id !== row.id && nn(o.erp_name) === nn(row.erp_name) && nn(o.tally_ledger) !== nn(row.tally_ledger))
+                            return <>
+                              <td className="p-3.5 text-slate-300">{row.staff_type || 'Staff'}</td>
+                              <td className="p-3.5 font-semibold text-emerald-300">{row.erp_name || '-'}</td>
+                              <td className="p-3.5 text-amber-200" title={clash ? 'ഇതേ ERP Name-ന് മറ്റൊരു Tally Ledger ഉണ്ട് — ഒന്നാക്കുക' : ''}>{row.tally_ledger || '-'}{clash ? ' ⚠' : ''}</td>
+                            </>
+                          })()}
                           {activeTable === 'vehicles' && <td className="p-3.5 font-semibold text-slate-300">{row.vehicle_type}</td>}
                           {activeTable === 'vehicles' && <td className="p-3.5 font-semibold text-emerald-300">{row.driver_name || '-'}</td>}
                         </>
@@ -1130,6 +1142,25 @@ export default function DatabaseExplorer() {
                       required
                     />
                   </div>
+                  {activeTable === 'staff_branch_mapping' && (
+                  <>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Type</label>
+                    <select value={editForm.staff_type || 'Staff'} onChange={e => setEditForm({ ...editForm, staff_type: e.target.value })} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                      <option value="Staff">Staff</option>
+                      <option value="Driver">Driver</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">ERP Name (ഒരാൾക്ക് ഒരേ പേര് — aadhocc-ൽ പല spelling ഉണ്ടെങ്കിലും)</label>
+                    <input type="text" value={editForm.erp_name || ''} onChange={e => setEditForm({ ...editForm, erp_name: e.target.value })} placeholder="e.g. VISHNU U" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Tally Ledger Name (Tally-യിലെ പോലെ കൃത്യമായി)</label>
+                    <input type="text" value={editForm.tally_ledger || ''} onChange={e => setEditForm({ ...editForm, tally_ledger: e.target.value })} placeholder="e.g. Vishnu U (Driver)" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+                  </div>
+                  </>
+                  )}
                   {activeTable === 'vehicles' && (
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Vehicle Type</label>
@@ -1475,6 +1506,25 @@ export default function DatabaseExplorer() {
                       required
                     />
                   </div>
+                  {activeTable === 'staff_branch_mapping' && (
+                  <>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Type</label>
+                    <select value={createForm.staff_type || 'Staff'} onChange={e => setCreateForm({ ...createForm, staff_type: e.target.value })} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
+                      <option value="Staff">Staff</option>
+                      <option value="Driver">Driver</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">ERP Name (ഒരാൾക്ക് ഒരേ പേര് — aadhocc-ൽ പല spelling ഉണ്ടെങ്കിലും)</label>
+                    <input type="text" value={createForm.erp_name || ''} onChange={e => setCreateForm({ ...createForm, erp_name: e.target.value })} placeholder="e.g. VISHNU U" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Tally Ledger Name (Tally-യിലെ പോലെ കൃത്യമായി)</label>
+                    <input type="text" value={createForm.tally_ledger || ''} onChange={e => setCreateForm({ ...createForm, tally_ledger: e.target.value })} placeholder="e.g. Vishnu U (Driver)" className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none" />
+                  </div>
+                  </>
+                  )}
                   {activeTable === 'vehicles' && (
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Vehicle Type</label>
