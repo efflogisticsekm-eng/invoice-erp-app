@@ -2122,7 +2122,7 @@ app.post('/api/explorer/delete/:table', express.json(), async (req, res) => {
 // ── Unloading consignor groups (Asian Paints / Birla Opus …): rate changes sync across a group ──
 // EFF 06-11-2026 (MD): EFF Freight Audit Dashboard → "Box Types" tab (File → Share → Publish to web → CSV)
 // Unloading Master-ൽ consignor തിരഞ്ഞെടുക്കുമ്പോൾ ആ consignor-ന്റെ box types കാണിക്കാൻ. Rate ഇല്ല — Consignor | Box Type മാത്രം.
-const BOX_TYPES_CSV_URL = process.env.BOX_TYPES_CSV_URL || '';
+const BOX_TYPES_CSV_URL = process.env.BOX_TYPES_CSV_URL || 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRbuAh1rJ_ybEVej1oSruSGcwElgkXa1xpSaK16uX61xznTNvqTp1BxRmu0E3D6Jlj69rpcgh067mLZ/pub?gid=1112832848&single=true&output=csv';
 let _boxTypesCache = { at: 0, map: null };
 const _parseCsv = (text) => {
   const rows = []; let row = [], cur = '', q = false;
