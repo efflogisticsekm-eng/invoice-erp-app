@@ -47,6 +47,16 @@ export default function DatabaseExplorer() {
   const [fileBulkRows, setFileBulkRows] = useState([]);
   const [fileBulkBusy, setFileBulkBusy] = useState(false);
 
+  // EFF 06-11-2026 (MD): EFF Freight Audit Dashboard-ലെ ഓരോ consignor-ന്റെ box types ("Box Types" tab, publish CSV)
+  const [dashBox, setDashBox] = useState({});            // normalised consignor -> [box types]
+  const loadDashBox = async () => {
+    try {
+      const baseUrl = import.meta.env.PROD ? '' : 'http://localhost:3001';
+      const r = await axios.get(`${baseUrl}/api/explorer/box-types`);
+      setDashBox(r.data.map || {});
+    } catch { setDashBox({}); }
+  };
+
   // Unique box types from loaded data (for Unloading Master picklist)
   const boxTypeOptions = React.useMemo(() => {
     if (activeTable !== 'unloading_master') return [];
@@ -59,7 +69,7 @@ export default function DatabaseExplorer() {
     setFormWarning(null);
     fetchData();
     setSelectedRows({});
-    if (activeTable === 'unloading_master') loadUlGroups();
+    if (activeTable === 'unloading_master') { loadUlGroups(); loadDashBox(); }
   }, [activeTable]);
 
   const loadUlGroups = async () => {
@@ -186,6 +196,27 @@ export default function DatabaseExplorer() {
     if (mode === 'edit') { body.primary_id = editingRow.id; body.original = { consignee: editingRow.consignee, rate_logic: editingRow.rate_logic, box_type: editingRow.box_type }; }
     const r = await axios.post(`${baseUrl}/api/explorer/unloading-multi`, body);
     return r.data.results || [];
+  };
+
+  // Box Type dropdown: Dashboard-ലെ ആ consignor(s)-ന്റെ box types ആദ്യം, പിന്നെ Unloading Master-ലെ മറ്റുള്ളവ
+  const renderBoxTypeOptions = (form, mode) => {
+    let cons = [form.consignor];
+    try { cons = cons.concat(ulOtherItems(form, mode).filter(ulIsTicked).map(it => it.consignor)); } catch { /* ignore */ }
+    const dash = [...new Set(cons.flatMap(c => dashBox[normKey(c)] || []))].sort((a, b) => a.localeCompare(b));
+    const dashN = new Set(dash.map(normKey));
+    const rest = boxTypeOptions.filter(bt => !dashN.has(normKey(bt)));
+    const cur = String(form.box_type || '').trim();
+    const extra = cur && !dashN.has(normKey(cur)) && !rest.some(bt => normKey(bt) === normKey(cur)) ? [cur] : [];
+    const label = cons.filter(Boolean).length > 1 ? `Dashboard (${cons.filter(Boolean).length} consignors)` : `Dashboard (${form.consignor || '—'})`;
+    return (
+      <>
+        <option value="">-- Select --</option>
+        {dash.length > 0 && <optgroup label={label}>{dash.map(bt => <option key={'d' + bt} value={bt}>{bt}</option>)}</optgroup>}
+        <optgroup label={dash.length > 0 ? 'മറ്റുള്ളവ' : (normKey(form.consignor) ? 'Dashboard-ൽ ഈ consignor-ന് box type ഇല്ല' : 'Box Types')}>
+          {[...extra, ...rest].map(bt => <option key={'o' + bt} value={bt}>{bt}</option>)}
+        </optgroup>
+      </>
+    );
   };
 
   const renderUlMultiPanel = (form, mode) => {
@@ -1229,8 +1260,7 @@ export default function DatabaseExplorer() {
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Box Type</label>
                       <select value={editForm.box_type || ''} onChange={e => { setFormWarning(null); setEditForm({...editForm, box_type: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
-                        <option value="">-- Select --</option>
-                        {boxTypeOptions.map(bt => <option key={bt} value={bt}>{bt}</option>)}
+                        {renderBoxTypeOptions(editForm, 'edit')}
                       </select>
                     </div>
                   </div>
@@ -1596,8 +1626,7 @@ export default function DatabaseExplorer() {
                     <div>
                       <label className="block text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">Box Type</label>
                       <select value={createForm.box_type || ''} onChange={e => { setFormWarning(null); setCreateForm({...createForm, box_type: e.target.value}); }} className="w-full bg-slate-950 text-white border border-slate-800 rounded-xl px-3 py-2 text-xs focus:border-primary outline-none">
-                        <option value="">-- Select --</option>
-                        {boxTypeOptions.map(bt => <option key={bt} value={bt}>{bt}</option>)}
+                        {renderBoxTypeOptions(createForm, 'add')}
                       </select>
                     </div>
                   </div>

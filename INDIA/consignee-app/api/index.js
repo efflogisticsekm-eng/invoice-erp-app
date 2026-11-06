@@ -2120,6 +2120,48 @@ app.post('/api/explorer/delete/:table', express.json(), async (req, res) => {
 });
 
 // ── Unloading consignor groups (Asian Paints / Birla Opus …): rate changes sync across a group ──
+// EFF 06-11-2026 (MD): EFF Freight Audit Dashboard → "Box Types" tab (File → Share → Publish to web → CSV)
+// Unloading Master-ൽ consignor തിരഞ്ഞെടുക്കുമ്പോൾ ആ consignor-ന്റെ box types കാണിക്കാൻ. Rate ഇല്ല — Consignor | Box Type മാത്രം.
+const BOX_TYPES_CSV_URL = process.env.BOX_TYPES_CSV_URL || 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRbuAh1rJ_ybEVej1oSruSGcwElgkXa1xpSaK16uX61xznTNvqTp1BxRmu0E3D6Jlj69rpcgh067mLZ/pub?gid=1112832848&single=true&output=csv';
+let _boxTypesCache = { at: 0, map: null };
+const _parseCsv = (text) => {
+  const rows = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cur); cur = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cur); rows.push(row); row = []; cur = ''; }
+    else cur += ch;
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+};
+app.get('/api/explorer/box-types', async (req, res) => {
+  if (!BOX_TYPES_CSV_URL) return res.json({ configured: false, map: {} });
+  try {
+    if (!_boxTypesCache.map || Date.now() - _boxTypesCache.at > 10 * 60 * 1000 || req.query.refresh) {
+      const r = await fetch(BOX_TYPES_CSV_URL, { redirect: 'follow' });
+      if (!r.ok) throw new Error('Box Types CSV ' + r.status);
+      const rows = _parseCsv(await r.text());
+      const h = (rows[0] || []).map(x => String(x).trim().toLowerCase());
+      const ci = h.indexOf('consignor'), bi = h.indexOf('box type');
+      if (ci < 0 || bi < 0) throw new Error('Box Types CSV: "Consignor" / "Box Type" headings കണ്ടില്ല');
+      const map = {};
+      rows.slice(1).forEach(rw => {
+        const c = String(rw[ci] || '').trim().replace(/\s+/g, ' ').toLowerCase(), b = String(rw[bi] || '').trim().replace(/\s+/g, ' ');
+        if (!c || !b) return;
+        (map[c] = map[c] || []);
+        if (!map[c].some(x => x.toLowerCase() === b.toLowerCase())) map[c].push(b);
+      });
+      _boxTypesCache = { at: Date.now(), map };
+    }
+    res.json({ configured: true, map: _boxTypesCache.map });
+  } catch (e) {
+    res.json({ configured: true, map: (_boxTypesCache.map || {}), error: e.message });
+  }
+});
+
 app.get('/api/explorer/ul-groups', async (req, res) => {
   if (!supabase) return res.status(500).json({ error: "Supabase not configured" });
   try {
