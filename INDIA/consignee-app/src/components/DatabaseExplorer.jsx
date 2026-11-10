@@ -25,7 +25,7 @@ export default function DatabaseExplorer() {
   const [creatingNew, setCreatingNew] = useState(false);
   const [createForm, setCreateForm] = useState({});
 
-  // Bulk Upload State (paste-based — Vehicle Master)
+  // Bulk Upload State (paste-based — Vehicle Master
   const [bulkUploading, setBulkUploading] = useState(false);
   const [bulkData, setBulkData] = useState('');
 
@@ -67,6 +67,7 @@ export default function DatabaseExplorer() {
   useEffect(() => {
     setSearchTerm('');
     setFormWarning(null);
+    setRows([]);
     fetchData();
     setSelectedRows({});
     if (activeTable === 'unloading_master') { loadUlGroups(); loadDashBox(); }
