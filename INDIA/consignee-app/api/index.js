@@ -1967,6 +1967,7 @@ app.post('/api/explorer/create/:table', express.json({ limit: '5mb' }), async (r
       if (error) return res.status(500).json({ error: error.message });
       return res.json({ status: "success", data: data?.[0] });
     } else {
+      if (table === 'unloading_master' || table === 'asian_unloading_master') newRow.updated_at = new Date().toISOString();
       const { data, error } = await sbFrom(table).insert(newRow).select();
       if (error) return res.status(500).json({ error: error.message });
       return res.json({ status: "success", data: data?.[0] });
@@ -1998,6 +1999,7 @@ app.post('/api/explorer/update/:table', express.json({ limit: '5mb' }), async (r
       const bad = await checkUnloadingRow(updatedFields, pkValue);
       if (bad) return res.status(bad.status).json(bad.body);
     }
+    if (table === 'unloading_master' || table === 'asian_unloading_master') updatedFields.updated_at = new Date().toISOString();
     const { data, error } = await sbFrom(table).update(updatedFields).eq(pkField, pkValue);
     if (error) return res.status(500).json({ error: error.message });
     return res.json({ status: "success" });
