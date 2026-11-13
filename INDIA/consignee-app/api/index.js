@@ -2019,7 +2019,7 @@ app.post('/api/explorer/unloading-multi', express.json({ limit: '1mb' }), async 
   const b = req.body || {};
   const mode = b.mode === 'edit' ? 'edit' : b.mode === 'add' ? 'add' : null;
   const clean = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
-  const nv = { consignee: clean(b.consignee), rate_logic: clean(b.rate_logic), box_type: clean(b.box_type), rate: Number(b.rate) };
+  const nv = { consignee: clean(b.consignee), rate_logic: clean(b.rate_logic), box_type: clean(b.box_type), rate: Number(b.rate), updated_at: new Date().toISOString() };
   const orig = mode === 'edit' ? { consignee: clean(b.original?.consignee), rate_logic: clean(b.original?.rate_logic), box_type: clean(b.original?.box_type) } : nv;
   const targets = [];
   const seenT = new Set();
@@ -2073,7 +2073,7 @@ app.post('/api/explorer/unloading-multi', express.json({ limit: '1mb' }), async 
       // edit
       if (vNew && (!vOld || vNew.id !== vOld.id)) {
         if (Number(vNew.rate) !== nv.rate) {
-          const { error } = await supabase.from('unloading_master').update({ rate: nv.rate }).eq('id', vNew.id);
+          const { error } = await supabase.from('unloading_master').update({ rate: nv.rate, updated_at: nv.updated_at }).eq('id', vNew.id);
           if (error) throw new Error(`${consignor}: ${error.message}`);
         }
         if (vOld) {
